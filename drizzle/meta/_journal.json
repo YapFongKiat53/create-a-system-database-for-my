@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1784079953574,
+      "tag": "0000_flawless_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784099166996,
+      "tag": "0001_workable_black_tom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784105375438,
+      "tag": "0002_cool_centennial",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784166455445,
+      "tag": "0003_mature_marvex",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784606685137,
+      "tag": "0004_reflective_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784716819079,
+      "tag": "0005_living_tattoo",
+      "breakpoints": true
+    }
+  ]
+}
