@@ -12,13 +12,28 @@
   --line: #d8dfdc;
   --muted: #748286;
   --shadow: 0 18px 48px rgba(21, 50, 58, 0.12);
+
+  --text-xs: 12px;   /* 原本的 8px-9px */
+  --text-sm: 14px;   /* 原本的 10px-11px */
+  --text-base: 16px; /* 原本的 12px-13px */
+  --text-lg: 18px;   /* 原本的 15px-16px */
+  --text-xl: 22px;   /* 标题等 */
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+
+  /* Global UI scale — enlarges all text + spacing together. Adjust this one
+     value to make everything bigger/smaller. */
+  --ui-zoom: 1.12;
 }
+
+
 
 * {
   box-sizing: border-box;
 }
 html {
   background: var(--paper);
+  zoom: var(--ui-zoom);
 }
 body {
   margin: 0;
@@ -36,19 +51,55 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  min-height: calc(100vh / var(--ui-zoom));
   display: grid;
-  grid-template-columns: 255px minmax(0, 1fr);
+  grid-template-columns: 1fr;
 }
 .sidebar {
-  position: sticky;
+  position: fixed;
+  left: 0;
   top: 0;
-  height: 100vh;
+  width: 255px;
+  height: calc(100vh / var(--ui-zoom));
+  transform: translateX(-100%);
+  transition:
+    transform 0.28s ease,
+    box-shadow 0.28s ease;
+  z-index: 60;
   display: flex;
   flex-direction: column;
   padding: 24px 18px;
   color: #dce9e4;
   background: var(--deep);
+  overflow-y: auto;
+}
+.sidebar:hover,
+.sidebar-trigger:hover + .sidebar {
+  transform: translateX(0);
+  box-shadow: 8px 0 34px rgba(6, 20, 22, 0.4);
+}
+/* Thin always-visible edge that reveals the sidebar on hover. */
+.sidebar-trigger {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 16px;
+  height: calc(100vh / var(--ui-zoom));
+  z-index: 59;
+}
+.sidebar-trigger::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--deep);
+  opacity: 0.55;
+  transition: opacity 0.2s ease;
+}
+.sidebar-trigger:hover::before {
+  opacity: 0;
 }
 .brand {
   display: flex;
@@ -205,6 +256,9 @@ main {
   min-width: 0;
 }
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
   height: 86px;
   display: flex;
   align-items: center;
@@ -460,7 +514,9 @@ button:disabled {
   background: white;
 }
 .workspace {
-  overflow: hidden;
+  /* clip (not hidden) so position:sticky descendants pin to the viewport;
+     overflow:hidden re-scopes sticky to this box and breaks the sticky header */
+  overflow: clip;
 }
 .workspace-tabs {
   display: flex;
@@ -895,7 +951,7 @@ code {
 
 .loading,
 .placeholder {
-  min-height: calc(100vh - 86px);
+  min-height: calc((100vh / var(--ui-zoom)) - 86px);
   display: grid;
   place-items: center;
   align-content: center;
@@ -1035,7 +1091,7 @@ code {
 }
 .modal {
   width: min(660px, 100%);
-  max-height: 90vh;
+  max-height: calc(90vh / var(--ui-zoom));
   overflow: auto;
   padding: 22px;
   border-radius: 14px;
@@ -1115,7 +1171,7 @@ code {
 }
 .unit-drawer {
   width: min(680px, 100%);
-  height: 100vh;
+  height: calc(100vh / var(--ui-zoom));
   overflow: auto;
   padding: 24px;
   background: #f7f8f5;
@@ -1143,6 +1199,41 @@ code {
 }
 .drawer-section .section-title h3 {
   font-size: 19px;
+}
+.drawer-subsection {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+.drawer-subsection:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.drawer-subsection h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.subsection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.subsection-head h4 {
+  margin: 0;
+}
+.role-manager {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.role-manager .section-title {
+  margin-bottom: 12px;
 }
 .unit-form .form-grid {
   grid-template-columns: 1fr 1fr;
@@ -1242,13 +1333,24 @@ code {
 }
 
 @media (max-width: 900px) {
+  :root {
+    --ui-zoom: 1;
+  }
   .app-shell {
     grid-template-columns: 1fr;
   }
   .sidebar {
     position: relative;
     height: auto;
+    width: auto;
     padding: 14px;
+    transform: none;
+    z-index: auto;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .sidebar-trigger {
+    display: none;
   }
   .brand {
     padding-bottom: 13px;
@@ -1479,17 +1581,27 @@ textarea {
 }
 .sticky-filters {
   position: sticky;
-  top: 132px;
+  top: 149px;
   z-index: 30;
   border-bottom: 1px solid var(--line);
   box-shadow: 0 7px 18px rgba(10, 38, 42, 0.05);
 }
 .availability-table thead th {
   position: sticky;
-  top: 290px;
+  top: 306px;
   z-index: 20;
   background: #fafbf9;
   box-shadow: 0 1px 0 var(--line);
+}
+/* Freeze the table header on scroll. position:sticky only works without a
+   scroll-container ancestor, so at widths where the ~1120px table fits the
+   workspace (>=1440px) we drop the wrapper's overflow and let thead pin under
+   the filters. Below that the table needs horizontal scroll, so the base
+   .table-wrap { overflow: auto } applies (header does not freeze there). */
+@media (min-width: 1440px) {
+  .availability-table.table-wrap {
+    overflow: visible;
+  }
 }
 .availability-filters {
   grid-template-columns: minmax(190px, 1.6fr) repeat(4, minmax(105px, 1fr)) auto !important;
@@ -2968,7 +3080,7 @@ textarea {
   background: #f8e5e2;
 }
 .report-detail-table {
-  max-height: 52vh;
+  max-height: calc(52vh / var(--ui-zoom));
 }
 .report-detail-table table {
   min-width: 1000px;

@@ -18,11 +18,13 @@ import {
   hostelUnits,
   maintenanceTickets,
   meterReadings,
+  ownerParkingPayments,
   parkingLots,
   parkingRentals,
   reservationCharges,
   reservationPayments,
   reservations,
+  schools,
   storedAttachments,
   studentProfiles,
   studentRateChanges,
@@ -173,7 +175,7 @@ function moduleForAction(action: string) {
   if (/^bed-/.test(action)) return "units-general";
   if (/^(unit-|access-card|room-|service-)/.test(action))
     return action === "unit-owner" ? "units-owner" : "units-general";
-  if (/^student-/.test(action)) return "students";
+  if (/^(student-|school-)/.test(action)) return "students";
   if (/^parking-/.test(action)) return "parking";
   if (/^(ticket-|meter-|general-cost)/.test(action)) return "maintenance";
   if (/^billing-/.test(action)) return "finance";
@@ -603,8 +605,8 @@ async function seedInventory() {
     .filter(
       (room) => !existingRoomKeys.has(`${room.unitId}:${room.roomLabel}`),
     );
-  for (const group of chunks(missingRooms, 20))
-    await db.insert(hostelRooms).values(group).onConflictDoNothing();
+    for (const group of chunks(missingRooms, 10))
+          await db.insert(hostelRooms).values(group).onConflictDoNothing();
 
   const allRooms = await db.select().from(hostelRooms);
   const roomIds = new Map(
@@ -858,6 +860,8 @@ export async function GET(request: Request) {
       userRows,
       permissionRows,
       reminderRows,
+      ownerParkingPaymentRows,
+      schoolRows,
     ] = await Promise.all([
       db
         .select({
@@ -1053,8 +1057,37 @@ export async function GET(request: Request) {
         )
         .orderBy(asc(studentProfiles.fullName)),
       db
-        .select()
+        .select({
+          id: studentRateChanges.id,
+          assignmentId: studentRateChanges.assignmentId,
+          effectiveDate: studentRateChanges.effectiveDate,
+          monthlyRental: studentRateChanges.monthlyRental,
+          securityDeposit: studentRateChanges.securityDeposit,
+          reason: studentRateChanges.reason,
+          studentName: studentProfiles.fullName,
+          studentCode: studentProfiles.studentCode,
+          roomCode: bedSpaces.legacyCode,
+          hostelName: hostelProperties.name,
+        })
         .from(studentRateChanges)
+        .leftJoin(
+          accommodationAssignments,
+          eq(studentRateChanges.assignmentId, accommodationAssignments.id),
+        )
+        .leftJoin(
+          studentProfiles,
+          eq(accommodationAssignments.studentId, studentProfiles.id),
+        )
+        .leftJoin(
+          bedSpaces,
+          eq(accommodationAssignments.bedSpaceId, bedSpaces.id),
+        )
+        .leftJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
+        .leftJoin(hostelUnits, eq(hostelRooms.unitId, hostelUnits.id))
+        .leftJoin(
+          hostelProperties,
+          eq(hostelUnits.hostelId, hostelProperties.id),
+        )
         .orderBy(desc(studentRateChanges.effectiveDate)),
       db
         .select({
@@ -1309,6 +1342,37 @@ export async function GET(request: Request) {
         .select()
         .from(reminderTemplates)
         .orderBy(asc(reminderTemplates.dayOfMonth)),
+      db
+        .select({
+          id: ownerParkingPayments.id,
+          unitId: ownerParkingPayments.unitId,
+          parkingLotId: ownerParkingPayments.parkingLotId,
+          period: ownerParkingPayments.period,
+          amount: ownerParkingPayments.amount,
+          paymentDate: ownerParkingPayments.paymentDate,
+          method: ownerParkingPayments.method,
+          reference: ownerParkingPayments.reference,
+          status: ownerParkingPayments.status,
+          remarks: ownerParkingPayments.remarks,
+          createdAt: ownerParkingPayments.createdAt,
+          unitCode: hostelUnits.unitCode,
+          ownerName: hostelUnits.ownerName,
+          hostelId: hostelProperties.id,
+          hostelName: hostelProperties.name,
+          lotNumber: parkingLots.lotNumber,
+        })
+        .from(ownerParkingPayments)
+        .innerJoin(hostelUnits, eq(ownerParkingPayments.unitId, hostelUnits.id))
+        .innerJoin(
+          hostelProperties,
+          eq(hostelUnits.hostelId, hostelProperties.id),
+        )
+        .leftJoin(
+          parkingLots,
+          eq(ownerParkingPayments.parkingLotId, parkingLots.id),
+        )
+        .orderBy(desc(ownerParkingPayments.id)),
+      db.select().from(schools).orderBy(asc(schools.name)),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1425,6 +1489,8 @@ export async function GET(request: Request) {
       salesPeople,
       parkingLots: parkingLotRows,
       parkingRentals: parkingRentalRows,
+      ownerParkingPayments: ownerParkingPaymentRows,
+      schools: schoolRows,
       tickets: ticketRows,
       ticketMessages: messageRows,
       meterReadings: readingRows,
@@ -1642,7 +1708,7 @@ export async function POST(request: Request) {
         ? "canDelete"
         : /verify|approve/.test(action)
           ? "canApprove"
-          : /create|add|^reservation$|parking-lot|parking-rental|announcement$|meter-reading|general-cost|billing-payment/.test(
+          : /create|add|^reservation$|parking-lot|parking-rental|parking-owner-payment|announcement$|meter-reading|general-cost|billing-payment/.test(
                 action,
               )
             ? "canCreate"
@@ -2292,6 +2358,142 @@ export async function POST(request: Request) {
             agreementEndDate: asNullableText(body.leaseEndDate),
           })
           .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)));
+    } else if (action === "student-create") {
+      if (!asText(body.fullName)) throw new Error("Full name is required");
+      const result = await d1
+        .prepare(
+          "INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, religion, nationality, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          `manual:${Date.now()}`,
+          asText(body.studentCode),
+          asText(body.fullName),
+          asText(body.identityNo),
+          asText(body.contactNumber),
+          asText(body.email),
+          asNullableText(body.dateOfBirth),
+          asText(body.gender, "unspecified"),
+          asText(body.race),
+          asText(body.religion),
+          asText(body.nationality),
+          asText(body.hometown),
+          asText(body.course),
+          asText(body.school),
+          asText(body.applicationFormNo),
+          asText(body.receiptNo),
+          asText(body.salesperson),
+          asText(body.agency),
+          asText(body.remarks),
+          asText(body.profileStatus, "active"),
+        )
+        .run();
+      const newStudentId = Number(result.meta.last_row_id);
+      createdId = newStudentId;
+      if (body.bedSpaceId) {
+        const bedId = asNumber(body.bedSpaceId);
+        await d1
+          .prepare(
+            "INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, parking_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
+          )
+          .bind(
+            `manual:${newStudentId}:${Date.now()}`,
+            newStudentId,
+            bedId,
+            asNullableNumber(body.monthlyRental),
+            asNullableNumber(body.securityDeposit),
+            asNullableNumber(body.accessCardDeposit),
+            asNullableNumber(body.parkingDeposit),
+            asText(body.salesperson),
+            asNullableText(body.checkInDate),
+            asNullableText(body.leaseStartDate),
+            asNullableText(body.leaseEndDate),
+          )
+          .run();
+        await d1
+          .prepare(
+            "UPDATE bed_spaces SET status='occupied', updated_at=? WHERE id=?",
+          )
+          .bind(nowIso(), bedId)
+          .run();
+      }
+    } else if (action === "student-move-out") {
+      const studentId = asNumber(body.studentId);
+      if (!studentId) throw new Error("Student is required");
+      const checkOut = asText(
+        body.checkOutDate,
+        new Date().toISOString().slice(0, 10),
+      );
+      if (body.assignmentId) {
+        const assignment = await db
+          .select()
+          .from(accommodationAssignments)
+          .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)))
+          .get();
+        await d1
+          .prepare(
+            "UPDATE accommodation_assignments SET status='ended', check_out_date=COALESCE(check_out_date, ?), check_out_meter=COALESCE(?, check_out_meter) WHERE id=?",
+          )
+          .bind(
+            checkOut,
+            asNullableNumber(body.checkOutMeter),
+            asNumber(body.assignmentId),
+          )
+          .run();
+        if (assignment?.bedSpaceId)
+          await d1
+            .prepare(
+              "UPDATE bed_spaces SET status='vacant', updated_at=? WHERE id=?",
+            )
+            .bind(nowIso(), assignment.bedSpaceId)
+            .run();
+      }
+      await db
+        .update(studentProfiles)
+        .set({ status: asText(body.profileStatus, "moved-out") })
+        .where(eq(studentProfiles.id, studentId));
+      const activeParking = await db
+        .select()
+        .from(parkingRentals)
+        .where(
+          and(
+            eq(parkingRentals.studentId, studentId),
+            eq(parkingRentals.status, "active"),
+          ),
+        );
+      if (activeParking.length) {
+        await runBatches(
+          activeParking.map((rental) =>
+            d1
+              .prepare(
+                "UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ?) WHERE id=?",
+              )
+              .bind(checkOut, rental.id),
+          ),
+        );
+        await runBatches(
+          activeParking.map((rental) =>
+            d1
+              .prepare("UPDATE parking_lots SET status='available' WHERE id=?")
+              .bind(rental.parkingLotId),
+          ),
+        );
+      }
+    } else if (action === "school-create") {
+      if (!asText(body.name)) throw new Error("School name is required");
+      await db
+        .insert(schools)
+        .values({ name: asText(body.name) })
+        .onConflictDoNothing();
+    } else if (action === "school-update") {
+      if (!body.schoolId || !asText(body.name))
+        throw new Error("School and name are required");
+      await db
+        .update(schools)
+        .set({ name: asText(body.name) })
+        .where(eq(schools.id, asNumber(body.schoolId)));
+    } else if (action === "school-delete") {
+      if (!body.schoolId) throw new Error("School is required");
+      await db.delete(schools).where(eq(schools.id, asNumber(body.schoolId)));
     } else if (action === "student-rate-change") {
       if (!body.assignmentId || !body.effectiveDate)
         throw new Error("Assignment and effective date are required");
@@ -2428,6 +2630,70 @@ export async function POST(request: Request) {
         .update(parkingLots)
         .set({ status: "rented" })
         .where(eq(parkingLots.id, asNumber(body.parkingLotId)));
+    } else if (action === "parking-rental-update") {
+      const rentalId = asNumber(body.rentalId);
+      if (!rentalId) throw new Error("Rental is required");
+      const existing = await db
+        .select()
+        .from(parkingRentals)
+        .where(eq(parkingRentals.id, rentalId))
+        .get();
+      if (!existing) throw new Error("Parking rental not found");
+      const status = asText(body.status, existing.status || "active");
+      await db
+        .update(parkingRentals)
+        .set({
+          tenantName: asText(body.tenantName, existing.tenantName),
+          contactNumber: asText(body.contactNumber),
+          unitNumber: asText(body.unitNumber),
+          carPlateNumber: asText(body.carPlateNumber),
+          carModel: asText(body.carModel),
+          monthlyRental: asNumber(body.monthlyRental),
+          depositAmount: asNumber(body.depositAmount),
+          startDate: asText(body.startDate) || existing.startDate,
+          endDate: asNullableText(body.endDate),
+          paidUntil: asNullableText(body.paidUntil),
+          billingFrequency: asText(body.billingFrequency, "monthly"),
+          packageMonths: Math.max(1, asNumber(body.packageMonths, 1)),
+          nextDueDate: asNullableText(body.nextDueDate),
+          paymentStatus: asText(body.paymentStatus, "current"),
+          status,
+          notes: asText(body.notes),
+        })
+        .where(eq(parkingRentals.id, rentalId));
+      if (existing.parkingLotId)
+        await db
+          .update(parkingLots)
+          .set({ status: status === "active" ? "rented" : "available" })
+          .where(eq(parkingLots.id, existing.parkingLotId));
+    } else if (action === "parking-rental-delete") {
+      const rentalId = asNumber(body.rentalId);
+      if (!rentalId) throw new Error("Rental is required");
+      const rental = await db
+        .select()
+        .from(parkingRentals)
+        .where(eq(parkingRentals.id, rentalId))
+        .get();
+      await db.delete(parkingRentals).where(eq(parkingRentals.id, rentalId));
+      if (rental?.parkingLotId && rental.status === "active")
+        await db
+          .update(parkingLots)
+          .set({ status: "available" })
+          .where(eq(parkingLots.id, rental.parkingLotId));
+    } else if (action === "parking-owner-payment") {
+      if (!body.unitId || !asText(body.paymentDate))
+        throw new Error("Owner unit and payment date are required");
+      await db.insert(ownerParkingPayments).values({
+        unitId: asNumber(body.unitId),
+        parkingLotId: asNullableNumber(body.parkingLotId),
+        period: asText(body.period),
+        amount: asNumber(body.amount),
+        paymentDate: asText(body.paymentDate),
+        method: asText(body.method, "bank-transfer"),
+        reference: asText(body.reference),
+        status: asText(body.status, "paid"),
+        remarks: asText(body.remarks),
+      });
     } else if (action === "ticket-create") {
       if (currentUser.roleKey === "tenant") {
         if (!currentUser.studentId)
@@ -2868,7 +3134,11 @@ export async function POST(request: Request) {
         .get();
       if (!item || !asText(body.reason))
         throw new Error("Billing item and adjustment reason are required");
-      const newAmount = asNumber(body.newAmount);
+      // Electricity fees always carry up to the next whole ringgit.
+      const newAmount =
+        item.itemType === "electricity"
+          ? Math.ceil(asNumber(body.newAmount))
+          : asNumber(body.newAmount);
       const inserted = await db
         .insert(billingItemAdjustments)
         .values({
@@ -2911,9 +3181,14 @@ export async function POST(request: Request) {
         .where(eq(billingItems.id, adjustment.billingItemId))
         .get();
       if (!item) throw new Error("Billing item not found");
+      // Electricity fees always carry up to the next whole ringgit.
+      const appliedAmount =
+        item.itemType === "electricity"
+          ? Math.ceil(adjustment.newAmount)
+          : adjustment.newAmount;
       await db
         .update(billingItems)
-        .set({ amount: adjustment.newAmount, rate: adjustment.newAmount })
+        .set({ amount: appliedAmount, rate: appliedAmount })
         .where(eq(billingItems.id, item.id));
       await db
         .update(billingItemAdjustments)
@@ -2949,11 +3224,21 @@ export async function POST(request: Request) {
     } else if (action === "user-save") {
       if (!asText(body.email) || !body.roleId)
         throw new Error("Email and role are required");
+      let roleId = asNumber(body.roleId);
+      const linkedStudentId = asNullableNumber(body.studentId);
+      if (linkedStudentId) {
+        const tenantRole = await db
+          .select({ id: appRoles.id })
+          .from(appRoles)
+          .where(eq(appRoles.roleKey, "tenant"))
+          .get();
+        if (tenantRole) roleId = tenantRole.id;
+      }
       const values = {
         email: asText(body.email).toLowerCase(),
         displayName: asText(body.displayName, asText(body.email)),
-        roleId: asNumber(body.roleId),
-        studentId: asNullableNumber(body.studentId),
+        roleId,
+        studentId: linkedStudentId,
         status: asText(body.status, "active"),
       };
       if (body.userId)
@@ -2981,6 +3266,61 @@ export async function POST(request: Request) {
           target: [rolePermissions.roleId, rolePermissions.moduleKey],
           set: values,
         });
+    } else if (action === "role-create") {
+      const name = asText(body.name);
+      if (!name) throw new Error("Role name is required");
+      const roleKey =
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || `role-${Date.now()}`;
+      const inserted = await db
+        .insert(appRoles)
+        .values({
+          roleKey,
+          name,
+          description: asText(body.description),
+          isSystem: false,
+        })
+        .returning({ id: appRoles.id });
+      const roleId = inserted[0]?.id;
+      createdId = roleId;
+      if (roleId)
+        await db
+          .insert(rolePermissions)
+          .values(permissionModules.map((moduleKey) => ({ roleId, moduleKey })))
+          .onConflictDoNothing();
+    } else if (action === "role-update") {
+      if (!body.roleId || !asText(body.name))
+        throw new Error("Role and name are required");
+      await db
+        .update(appRoles)
+        .set({
+          name: asText(body.name),
+          description: asText(body.description),
+        })
+        .where(eq(appRoles.id, asNumber(body.roleId)));
+    } else if (action === "role-delete") {
+      const roleId = asNumber(body.roleId);
+      if (!roleId) throw new Error("Role is required");
+      const role = await db
+        .select()
+        .from(appRoles)
+        .where(eq(appRoles.id, roleId))
+        .get();
+      if (!role) throw new Error("Role not found");
+      if (role.isSystem) throw new Error("Built-in roles cannot be deleted");
+      const inUse = await db
+        .select({ id: appUsers.id })
+        .from(appUsers)
+        .where(eq(appUsers.roleId, roleId))
+        .get();
+      if (inUse)
+        throw new Error("Reassign users on this role before deleting it");
+      await db
+        .delete(rolePermissions)
+        .where(eq(rolePermissions.roleId, roleId));
+      await db.delete(appRoles).where(eq(appRoles.id, roleId));
     } else if (action === "reminder-template") {
       if (!body.templateId || !asText(body.subject) || !asText(body.message))
         throw new Error("Reminder template is required");

@@ -43,6 +43,20 @@
       "when": 1784716819079,
       "tag": "0005_living_tattoo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784814947796,
+      "tag": "0006_pretty_monster_badoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784818334876,
+      "tag": "0007_overjoyed_gauntlet",
+      "breakpoints": true
     }
   ]
 }

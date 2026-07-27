@@ -350,6 +350,32 @@ export const parkingRentals = sqliteTable("parking_rentals", {
   notes: text("notes").notNull().default(""),
 });
 
+export const ownerParkingPayments = sqliteTable("owner_parking_payments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  unitId: integer("unit_id")
+    .notNull()
+    .references(() => hostelUnits.id),
+  parkingLotId: integer("parking_lot_id").references(() => parkingLots.id),
+  period: text("period").notNull().default(""),
+  amount: real("amount").notNull().default(0),
+  paymentDate: text("payment_date").notNull(),
+  method: text("method").notNull().default("bank-transfer"),
+  reference: text("reference").notNull().default(""),
+  status: text("status").notNull().default("paid"),
+  remarks: text("remarks").notNull().default(""),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const schools = sqliteTable("schools", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const maintenanceTickets = sqliteTable("maintenance_tickets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticketNo: text("ticket_no").notNull().unique(),

@@ -1,0 +1,12 @@
+{
+    "name": "hostel-project",
+    "compatibility_date": "2026-05-22",
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "hostel-db",
+            "database_id": "local-db",
+            "migrations_dir": "drizzle"
+        }
+    ]
+}
