@@ -1,0 +1,5 @@
+id,reminder_key,day_of_month,subject,message,enabled,updated_at
+1,due-date,5,Payment due today,Your monthly hostel payment is due today. Please upload your payment slip in the portal.,true,2026-07-23 02:43:43
+2,first-overdue,8,Payment overdue reminder,Your hostel account is overdue. Please make payment and upload your payment slip.,true,2026-07-23 02:43:43
+3,second-overdue,15,Important payment reminder,Your hostel account remains overdue. Late-payment charges may apply.,true,2026-07-23 02:43:43
+4,final-overdue,21,Final payment reminder,This is the final scheduled reminder for the month. Please contact Accounts if assistance is required.,true,2026-07-23 02:43:43

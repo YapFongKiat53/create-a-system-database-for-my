@@ -1,0 +1,7 @@
+id,ticket_id,author_name,author_role,message,status_after,created_at
+1,1,Irena,staff,Light is not function,submitted,2026-07-24 07:04:02
+2,2,Irena,staff,Aircond is not cold,submitted,2026-07-24 07:19:34
+3,3,Irena,staff,LEFT THE KEY INSIDE THE ROOM,submitted,2026-07-24 07:26:35
+4,3,Irena,staff,Done unlock,closed,2026-07-24 08:13:20
+5,2,Irena,staff,Do aircond service,closed,2026-07-24 08:16:43
+6,1,Irena,staff,Change the light,closed,2026-07-24 08:17:19

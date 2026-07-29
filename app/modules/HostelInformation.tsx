@@ -198,8 +198,32 @@ export function HostelModule({
     (sum, row) => sum + reservationWeight(row, data),
     0,
   );
-  const sellable = Math.max(0, availability.length - committedWeight);
-  const resetFilters = () => {
+
+const baseAvailability = useMemo(() => {
+  return data.bedSpaces.filter((bed) => {
+    const available =
+      bed.availabilityState === "available-now" ||
+      (bed.availabilityState === "upcoming" && bed.availableFrom && bed.availableFrom <= availableDate);
+    
+    return (
+      available &&
+      (!bed.unitSurrenderDate || bed.unitSurrenderDate > availableDate) &&
+      (hostelFilter === "all" || bed.hostelCode === hostelFilter) &&
+      (unitFilter === "all" || String(bed.unitId) === unitFilter) &&
+      (roomCodeFilter === "all" || String(bed.roomLabel) === roomCodeFilter) &&
+      (genderFilter === "all" || bed.gender === genderFilter) &&
+      (roomFilter === "all" || bed.roomType === roomFilter) &&
+      (categoryFilter === "all" || bed.roomLabel === categoryFilter) &&
+      (bathroomFilter === "all" || bed.bathroomType === bathroomFilter) &&
+      (bedTypeFilter === "all" || bed.bedType === bedTypeFilter) &&
+      (!maxRate || (effectiveRate(bed) !== null && effectiveRate(bed) <= Number(maxRate)))
+    );
+  });
+}, [data.bedSpaces, availableDate, hostelFilter, unitFilter, roomCodeFilter, genderFilter, roomFilter, categoryFilter, bathroomFilter, bedTypeFilter, maxRate]);
+
+
+  const sellable = Math.max(0, baseAvailability.length - committedWeight);
+    const resetFilters = () => {
     setQuery("");
     setHostelFilter("all");
     setUnitFilter("all");
@@ -655,20 +679,6 @@ export function HostelModule({
                   <option value="all">Any bathroom</option>
                   <option value="attached">Attached</option>
                   <option value="non-attached">Non-attached</option>
-                  <option value="unknown">Not set</option>
-                </select>
-              </label>
-              <label>
-                Bed type
-                <select
-                  value={bedTypeFilter}
-                  onChange={(e) => setBedTypeFilter(e.target.value)}
-                >
-                  <option value="all">Any bed</option>
-                  <option value="single">Single bed</option>
-                  <option value="queen">Queen bed</option>
-                  <option value="two-single">2 single beds</option>
-                  <option value="bunk">Bunk bed</option>
                   <option value="unknown">Not set</option>
                 </select>
               </label>
@@ -1532,6 +1542,36 @@ export function HostelModule({
               if (ok) setConvertReservation(null);
             }}
           >
+            {/* ---------------- SECTION 1: Reservation Summary ---------------- */}
+            <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px', marginTop: '4px' }}>
+              <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>1. Reservation Summary</h4>
+            </div>
+
+            <div className="wide" style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '16px', fontSize: '14px', color: '#4b5563' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span>{convertReservation.reservationType === "group" ? "Representative:" : "Student Name:"}</span>
+                <strong style={{ color: '#111827' }}>{convertReservation.studentName}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span>Check-in Date:</span>
+                <strong style={{ color: '#111827' }}>{dateLabel(convertReservation.targetMoveInDate)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #d1d5db', paddingTop: '8px', marginTop: '4px' }}>
+                <span>Target Preferences:</span>
+                <strong style={{ color: '#111827', textAlign: 'right' }}>
+                  {convertReservation.preferredHostelName || "Any Hostel"}
+                  {convertReservation.reservationType === "individual" && convertReservation.roomCategory !== "any" 
+                    ? ` · Room ${convertReservation.roomCategory}` 
+                    : ""}
+                </strong>
+              </div>
+            </div>
+
+            {/* ---------------- SECTION 2: Final Assignment ---------------- */}
+            <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px' }}>
+              <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>2. Final Assignment</h4>
+            </div>
+
             {convertReservation.reservationType === "group" ? (
               <label className="wide">
                 Confirmed unit / house
@@ -1594,7 +1634,8 @@ export function HostelModule({
                 </select>
               </label>
             )}
-            <div className="form-actions wide">
+            
+            <div className="form-actions wide" style={{ marginTop: '16px' }}>
               <button
                 type="button"
                 className="secondary"
@@ -1663,22 +1704,58 @@ function ReservationEditor({
   const [bathroom, setBathroom] = useState(
     editingReservation?.bathroomType || reservationBed?.bathroomType || "any",
   );
+  const [unitId, setUnitId] = useState(
+    String(editingReservation?.preferredUnitId || reservationBed?.unitId || ""),
+  );
+  // Beds another live reservation already holds — never offer these again.
+  const reservedBedIds = new Set(
+    data.reservations
+      .filter(
+        (row) =>
+          row.status === "reserved" && row.id !== editingReservation?.id,
+      )
+      .flatMap((row) => [row.provisionalBedSpaceId, row.assignedBedSpaceId])
+      .filter(Boolean)
+      .map(String),
+  );
+  /** Free on the move-in date, not held by another reservation. */
+  const isSelectable = (bed: Row) =>
+    (bed.status === "vacant" ||
+      (bed.availableFrom && bed.availableFrom <= date)) &&
+    !reservedBedIds.has(String(bed.id));
+  /**
+   * A mixed / unspecified unit accepts any student, and a student with no
+   * stated preference accepts any unit — so compatibility runs both ways.
+   */
+  const genderFits = (bedGender: string) =>
+    ["mixed", "unspecified"].includes(gender) ||
+    ["mixed", "unspecified"].includes(String(bedGender)) ||
+    bedGender === gender;
+
+  // Each step only offers what the step before it allows.
+  const hostelBeds = data.bedSpaces.filter(
+    (bed) => isSelectable(bed) && (!hostelId || String(bed.hostelId) === hostelId),
+  );
+  const unitOptions = [
+    ...new Map(
+      hostelBeds
+        .filter((bed) => genderFits(bed.gender))
+        .map((bed) => [String(bed.unitId), String(bed.unitCode)]),
+    ).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
+  const scopedBeds = hostelBeds.filter(
+    (bed) => !unitId || String(bed.unitId) === unitId,
+  );
   const categories = [
-    ...new Set(data.bedSpaces.map((bed) => String(bed.roomLabel))),
+    ...new Set(scopedBeds.map((bed) => String(bed.roomLabel))),
   ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const options = data.bedSpaces.filter((bed) => {
-    const available =
-      bed.status === "vacant" ||
-      (bed.availableFrom && bed.availableFrom <= date);
-    return (
-      available &&
-      (!hostelId || String(bed.hostelId) === hostelId) &&
-      (["mixed", "unspecified"].includes(gender) || bed.gender === gender) &&
+  const options = scopedBeds.filter(
+    (bed) =>
+      genderFits(bed.gender) &&
       (roomType === "any" || bed.roomType === roomType) &&
       (category === "any" || bed.roomLabel === category) &&
-      (bathroom === "any" || bed.bathroomType === bathroom)
-    );
-  });
+      (bathroom === "any" || bed.bathroomType === bathroom),
+  );
   return (
     <form
       className="form-grid reservation-editor"
@@ -1775,16 +1852,43 @@ function ReservationEditor({
         />
       </label>
       <label>
-        Preferred hostel
+        1. Hostel
         <select
           name="preferredHostelId"
+          required
           value={hostelId}
-          onChange={(event) => setHostelId(event.target.value)}
+          onChange={(event) => {
+            setHostelId(event.target.value);
+            setUnitId("");
+            setCategory("any");
+          }}
         >
-          <option value="">Any hostel</option>
+          <option value="">Select hostel</option>
           {data.hostels.map((hostel) => (
             <option key={hostel.id} value={hostel.id}>
               {hostel.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        2. Unit
+        <select
+          name={kind === "group" ? "preferredUnitId" : "unitFilter"}
+          value={unitId}
+          disabled={!hostelId}
+          required={kind === "group"}
+          onChange={(event) => {
+            setUnitId(event.target.value);
+            setCategory("any");
+          }}
+        >
+          <option value="">
+            {hostelId ? "All units in this hostel" : "Select a hostel first"}
+          </option>
+          {unitOptions.map(([id, code]) => (
+            <option key={id} value={id}>
+              {code}
             </option>
           ))}
         </select>
@@ -1794,6 +1898,7 @@ function ReservationEditor({
         <select
           name="roomType"
           value={roomType}
+          disabled={!hostelId}
           onChange={(event) => setRoomType(event.target.value)}
         >
           <option value="any">Any room type</option>
@@ -1803,23 +1908,10 @@ function ReservationEditor({
       </label>
       {kind === "group" ? (
         <label className="wide">
-          Preferred whole unit / house
-          <SearchSelect
-            name="preferredUnitId"
-            defaultValue={editingReservation?.preferredUnitId}
-            options={data.units
-              .filter(
-                (unit) =>
-                  (!hostelId || String(unit.hostelId) === hostelId) &&
-                  (["mixed", "unspecified"].includes(gender) ||
-                    unit.gender === gender),
-              )
-              .map((unit) => ({
-                value: unit.id,
-                label: `${unit.hostelName} / ${unit.unitCode} · ${genderLabel(unit.gender)}`,
-              }))}
-            placeholder="Type unit number or hostel"
-          />
+          Whole unit / house
+          <small className="field-note">
+            The unit chosen in step 2 is reserved as a whole for this group.
+          </small>
         </label>
       ) : (
         <>
@@ -1828,6 +1920,7 @@ function ReservationEditor({
             <select
               name="roomCategory"
               value={category}
+              disabled={!hostelId}
               onChange={(event) => setCategory(event.target.value)}
             >
               <option value="any">Any category</option>
@@ -1843,28 +1936,42 @@ function ReservationEditor({
             <select
               name="bathroomType"
               value={bathroom}
+              disabled={!hostelId}
               onChange={(event) => setBathroom(event.target.value)}
             >
               <option value="any">Any bathroom</option>
               <option value="attached">Attached</option>
               <option value="non-attached">Non-attached</option>
+              <option value="unknown">Not set</option>
             </select>
           </label>
           <label className="wide">
-            Provisional room option
-            <SearchSelect
+            3. Room {hostelId && `— ${options.length} available`}
+            <select
               name="provisionalBedSpaceId"
+              disabled={!hostelId}
               defaultValue={
-                editingReservation?.provisionalBedSpaceId || reservationBed?.id
+                editingReservation?.provisionalBedSpaceId ||
+                reservationBed?.id ||
+                ""
               }
-              options={options.map((bed) => ({
-                value: bed.id,
-                label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(effectiveRate(bed))}`,
-              }))}
-              placeholder="Type room code, unit or hostel"
-            />
+            >
+              <option value="">
+                {!hostelId
+                  ? "Select a hostel first"
+                  : options.length
+                    ? "Select an available room"
+                    : "No free rooms match these choices"}
+              </option>
+              {options.map((bed) => (
+                <option key={bed.id} value={bed.id}>
+                  {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(effectiveRate(bed))}`}
+                </option>
+              ))}
+            </select>
             <small className="field-note">
-              Reference only; this is not the actual room assignment.
+              Only empty rooms that no other reservation is holding. Reference
+              only; this is not the actual room assignment.
             </small>
           </label>
         </>

@@ -1,6 +1,11 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "../../../db";
 import {
+  getSessionUser,
+  hashPassword,
+  permissionsForRole,
+} from "../../../db/auth";
+import {
   accessCards,
   accommodationAssignments,
   announcements,
@@ -34,6 +39,7 @@ import {
   rolePermissions,
   unitOwnerDetails,
   unitServices,
+  userSessions,
 } from "../../../db/schema";
 import inventorySource from "../../../data/hostel-inventory.json";
 import assignmentSource from "../../../data/student-assignments.json";
@@ -482,10 +488,16 @@ async function applyLatePaymentCharges() {
 }
 
 async function resolveCurrentUser(request: Request) {
-  const email = asText(
-    request.headers.get("oai-authenticated-user-email"),
-    "local-admin@hostelpro.internal",
-  ).toLowerCase();
+  // A signed-in session always wins over the platform SSO headers.
+  const sessionUser = await getSessionUser(request);
+  if (sessionUser)
+    return {
+      ...sessionUser,
+      permissions: await permissionsForRole(sessionUser.roleId),
+    };
+  const headerEmail = request.headers.get("oai-authenticated-user-email");
+  if (!headerEmail) return null;
+  const email = asText(headerEmail).toLowerCase();
   const encodedName = request.headers.get("oai-authenticated-user-full-name");
   let displayName =
     email === "local-admin@hostelpro.internal" ? "Irena" : email;
@@ -823,12 +835,14 @@ async function addReservationPayment(
 
 export async function GET(request: Request) {
   try {
+    await seedAdministration();
+    const currentUser = await resolveCurrentUser(request);
+    if (!currentUser)
+      return Response.json({ error: "Not signed in" }, { status: 401 });
     await seedInventory();
     await seedKnownRoomFeatures();
     await seedStudentAssignments();
-    await seedAdministration();
     await applyLatePaymentCharges();
-    const currentUser = await resolveCurrentUser(request);
     const db = getDb();
     const [
       rawBeds,
@@ -3247,6 +3261,18 @@ export async function POST(request: Request) {
           .set(values)
           .where(eq(appUsers.id, asNumber(body.userId)));
       else await db.insert(appUsers).values(values);
+    } else if (action === "user-set-password") {
+      const targetId = asNumber(body.userId);
+      const password = String(body.password || "");
+      if (!targetId) throw new Error("User is required");
+      if (password.length < 8)
+        throw new Error("Password must be at least 8 characters");
+      await db
+        .update(appUsers)
+        .set({ passwordHash: await hashPassword(password) })
+        .where(eq(appUsers.id, targetId));
+      // Force a fresh sign-in everywhere with the old password.
+      await db.delete(userSessions).where(eq(userSessions.userId, targetId));
     } else if (action === "role-permission") {
       if (!body.roleId || !asText(body.moduleKey))
         throw new Error("Role and module are required");

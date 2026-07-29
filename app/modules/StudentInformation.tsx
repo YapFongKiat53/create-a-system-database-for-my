@@ -84,8 +84,8 @@ export function StudentsModule({
     hostelFilter === "all"
       ? data.students
       : data.students.filter(
-          (s) => String(s.hostelId || "") === hostelFilter,
-        );
+        (s) => String(s.hostelId || "") === hostelFilter,
+      );
 
   const sortHeader = (key: string, label: string) => (
     <th>
@@ -379,11 +379,24 @@ export function StudentsModule({
                   </label>
                   <label>
                     Race
-                    <input name="race" defaultValue={student.race} />
+                    <select name="race" defaultValue={student.race || ""}>
+                      <option value="">Select race</option>
+                      <option value="Chinese">Chinese</option>
+                      <option value="Malay">Melayu</option>
+                      <option value="Indian">India</option>
+                      <option value="Others">Others</option>
+                    </select>
                   </label>
                   <label>
                     Religion
-                    <input name="religion" defaultValue={student.religion} />
+                    <select name="religion" defaultValue={student.religion || ""}>
+                      <option value="">Select religion</option>
+                      <option value="Hinduism">Hinduism</option>
+                      <option value="Buddhism">Buddhism</option>
+                      <option value="Islam">Islam</option>
+                      <option value="Christianity">Christianity</option>
+                      <option value="Others">Others</option>
+                    </select>
                   </label>
                 </div>
               </div>
@@ -659,7 +672,7 @@ export function StudentsModule({
                       <small>
                         {money(
                           Number(invoice.totalAmount) -
-                            Number(invoice.amountPaid),
+                          Number(invoice.amountPaid),
                           true,
                         )}{" "}
                         outstanding
@@ -669,10 +682,10 @@ export function StudentsModule({
                 {!data.invoices.some(
                   (invoice) => invoice.studentId === student.id,
                 ) && (
-                  <p className="empty-copy">
-                    No billing records for this student yet.
-                  </p>
-                )}
+                    <p className="empty-copy">
+                      No billing records for this student yet.
+                    </p>
+                  )}
               </div>
             </section>
             {student.assignmentId && (
@@ -976,10 +989,10 @@ export function StudentsModule({
               const ok = await save(
                 editSchool
                   ? {
-                      action: "school-update",
-                      schoolId: editSchool.id,
-                      ...formValues(e),
-                    }
+                    action: "school-update",
+                    schoolId: editSchool.id,
+                    ...formValues(e),
+                  }
                   : { action: "school-create", ...formValues(e) },
                 editSchool ? "School updated" : "School added",
               );

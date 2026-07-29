@@ -21,6 +21,7 @@ export function UserManagementModule({
   const [editingUser, setEditingUser] = useState<Row | null>(null);
   const [userOpen, setUserOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Row | null>(null);
+  const [passwordUser, setPasswordUser] = useState<Row | null>(null);
   const moduleLabels: Record<string, string> = {
     hostels: "Hostel information",
     "hostels-sales": "Hostel sales availability, reservations & pricing",
@@ -140,15 +141,23 @@ export function UserManagementModule({
                         </span>
                       </td>
                       <td>
-                        <button
-                          className="secondary compact"
-                          onClick={() => {
-                            setEditingUser(user);
-                            setUserOpen(true);
-                          }}
-                        >
-                          Edit
-                        </button>
+                        <div className="button-row">
+                          <button
+                            className="secondary compact"
+                            onClick={() => {
+                              setEditingUser(user);
+                              setUserOpen(true);
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="secondary compact"
+                            onClick={() => setPasswordUser(user)}
+                          >
+                            Set password
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -504,6 +513,53 @@ export function UserManagementModule({
               </button>
               <button className="primary" disabled={busy}>
                 {busy ? "Saving..." : "Save user"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {passwordUser && (
+        <Modal
+          title="Set login password"
+          kicker={passwordUser.email}
+          description="The account can sign in with this password immediately. Any existing sessions are signed out."
+          onClose={() => setPasswordUser(null)}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const ok = await save(
+                {
+                  action: "user-set-password",
+                  userId: passwordUser.id,
+                  ...formValues(event),
+                },
+                "Password updated",
+              );
+              if (ok) setPasswordUser(null);
+            }}
+          >
+            <label className="wide">
+              New password (minimum 8 characters)
+              <input
+                name="password"
+                type="password"
+                minLength={8}
+                required
+                autoComplete="new-password"
+              />
+            </label>
+            <div className="form-actions wide">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setPasswordUser(null)}
+              >
+                Cancel
+              </button>
+              <button className="primary" disabled={busy}>
+                Set password
               </button>
             </div>
           </form>

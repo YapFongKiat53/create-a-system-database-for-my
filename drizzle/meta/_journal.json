@@ -57,6 +57,13 @@
       "when": 1784818334876,
       "tag": "0007_overjoyed_gauntlet",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785206101714,
+      "tag": "0008_broad_stryfe",
+      "breakpoints": true
     }
   ]
 }

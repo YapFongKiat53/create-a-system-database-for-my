@@ -1,0 +1,10 @@
+id,reservation_id,charge_type,amount,notes
+1,2,first-month-rental,1000.0,
+2,2,deposit,3000.0,
+3,2,admin-fee,250.0,
+4,2,access-card-deposit,151.0,
+5,2,access-card-handling,20.0,
+6,3,first-month-rental,100.0,
+7,3,deposit,100.0,
+8,3,admin-fee,100.0,
+9,3,access-card-deposit,100.0,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Data, HostelTab, Row, View } from "./modules/shared";
+import { DashboardModule } from "./modules/Dashboard";
 import { HostelModule } from "./modules/HostelInformation";
 import { UnitsModule } from "./modules/UnitInformation";
 import { StudentsModule } from "./modules/StudentInformation";
@@ -14,7 +15,7 @@ import { UserManagementModule } from "./modules/UserManagement";
 
 export default function SystemApp() {
   const [data, setData] = useState<Data | null>(null);
-  const [view, setView] = useState<View>("hostels");
+  const [view, setView] = useState<View>("dashboard");
   const [tab, setTab] = useState<HostelTab>("availability");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -86,6 +87,13 @@ export default function SystemApp() {
     permission: string;
   }[] = [
     {
+      id: "dashboard",
+      label: "Dashboard",
+      mark: "D",
+      note: "Today at a glance",
+      permission: "",
+    },
+    {
       id: "hostels",
       label: "Hostel Information",
       mark: "H",
@@ -151,6 +159,8 @@ export default function SystemApp() {
   ];
   const navigation = allNavigation.filter(
     (item) =>
+      // An empty permission means the module is open to every signed-in role.
+      item.permission === "" ||
       !data ||
       data.currentUser?.permissions?.some(
         (permission: Row) =>
@@ -199,12 +209,29 @@ export default function SystemApp() {
           <p>Room assignment stays manual; billing uses operational records.</p>
         </div>
         <div className="sidebar-foot">
-          <span>IR</span>
+          <span>
+            {String(data?.currentUser?.displayName || "IR")
+              .slice(0, 2)
+              .toUpperCase()}
+          </span>
           <div>
             <strong>{data?.currentUser?.displayName || "Irena"}</strong>
             <small>{data?.currentUser?.roleName || "Administrator"}</small>
           </div>
         </div>
+        <button
+          className="sidebar-signout"
+          onClick={async () => {
+            await fetch("/api/auth", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "logout" }),
+            });
+            window.location.replace("/login");
+          }}
+        >
+          Sign out
+        </button>
       </aside>
       <main>
         <header className="topbar">
@@ -236,6 +263,12 @@ export default function SystemApp() {
           </div>
         ) : (
           <div className="content module-content">
+            {activeView === "dashboard" && (
+              <DashboardModule
+                data={data}
+                onOpenModule={(next) => setView(next as View)}
+              />
+            )}
             {activeView === "hostels" && (
               <HostelModule
                 data={data}

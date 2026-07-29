@@ -1,0 +1,6 @@
+id,code,name,address,status,created_at,electricity_rate,monthly_cleaning_fee,monthly_water_dispenser_fee
+1,ATR,Atria,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",active,2026-07-23 02:29:52,0.685,0.0,0.0
+2,DAM,Damai,"Jalan Tasik Raja Lumu U4/17, Taman Subang Delima, 40150 Shah Alam, Selangor",active,2026-07-23 02:29:52,0.685,0.0,0.0
+3,NDY,Nadayu 801,"1, Jalan Zuhrah U5/163, Subang Murni, Seksyen U5, 40150 Shah Alam, Selangor",active,2026-07-23 02:29:52,0.751,0.0,0.0
+4,SHP,Shop Hostel,"16-2 & 16-3, Jalan Nova U5/N, Subang Bestari, 40150 Shah Alam, Selangor",active,2026-07-23 02:29:52,0.685,0.0,0.0
+5,SR,Subang Residences,"Jalan Dalwu U5/98, 40150 Shah Alam, Selangor",active,2026-07-23 02:29:52,0.685,0.0,0.0

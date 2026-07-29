@@ -611,7 +611,22 @@ export const appUsers = sqliteTable("app_users", {
     .references(() => appRoles.id),
   studentId: integer("student_id").references(() => studentProfiles.id),
   status: text("status").notNull().default("active"),
+  // PBKDF2 digest: pbkdf2$<iterations>$<saltB64>$<hashB64>. Empty = no password set.
+  passwordHash: text("password_hash").notNull().default(""),
   lastLoginAt: text("last_login_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const userSessions = sqliteTable("user_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // SHA-256 of the cookie token; the raw token is never stored.
+  tokenHash: text("token_hash").notNull().unique(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => appUsers.id),
+  expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),

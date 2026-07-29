@@ -1,0 +1,8 @@
+id,role_key,name,description,is_system,created_at
+1,director,Director,Full system access and approvals.,true,2026-07-23 02:43:43
+2,manager,Manager,Full operational access and approvals.,true,2026-07-23 02:43:43
+3,finance,Finance,"Billing, owner agreements and financial reports.",true,2026-07-23 02:43:43
+4,sales,Sales,"Availability, reservations and student information.",true,2026-07-23 02:43:43
+5,maintenance,Maintenance,"Units, occupants, tickets, meters and operational costs.",true,2026-07-23 02:43:43
+6,technician,Technician,Maintenance tickets assigned to the technician.,true,2026-07-23 02:43:43
+7,tenant,Tenant,"Own room, billing, announcements and maintenance requests.",true,2026-07-23 02:43:43

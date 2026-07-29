@@ -38,6 +38,7 @@ export type Data = {
   importProgress: { assignments: number; expected: number };
 };
 export type View =
+  | "dashboard"
   | "hostels"
   | "units"
   | "students"

@@ -12,6 +12,7 @@ import {
   uploadAttachment,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import "../units-room-overview.css";
 
 export function UnitsModule({
   data,
@@ -28,6 +29,7 @@ export function UnitsModule({
   const [drawerTab, setDrawerTab] = useState("general");
   const [modal, setModal] = useState("");
   const [editingAsset, setEditingAsset] = useState<Row | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<Row | null>(null);
   const owner = data.owners.find((o) => o.unitId === unit?.id);
   const cards = data.accessCards.filter((c) => c.unitId === unit?.id);
   const services = data.services.filter((s) => s.unitId === unit?.id);
@@ -37,6 +39,7 @@ export function UnitsModule({
     for (const b of beds) {
       if (!map.has(b.roomId))
         map.set(b.roomId, {
+          ...b,
           id: b.roomId,
           label: b.roomLabel,
           type: b.roomType,
@@ -175,6 +178,7 @@ export function UnitsModule({
                         className="secondary compact"
                         onClick={() => {
                           setUnit(u);
+                          setSelectedRoom(null);
                           setDrawerTab("general");
                         }}
                       >
@@ -275,7 +279,12 @@ export function UnitsModule({
       {unit && (
         <div
           className="drawer-backdrop"
-          onMouseDown={(e) => e.target === e.currentTarget && setUnit(null)}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setSelectedRoom(null);
+              setUnit(null);
+            }
+          }}
         >
           <aside className="unit-drawer">
             <div className="drawer-head">
@@ -284,7 +293,14 @@ export function UnitsModule({
                 <h2>{unit.unitCode}</h2>
                 <p>{unit.address}</p>
               </div>
-              <button onClick={() => setUnit(null)}>×</button>
+              <button
+                onClick={() => {
+                  setSelectedRoom(null);
+                  setUnit(null);
+                }}
+              >
+                ×
+              </button>
             </div>
             <div className="drawer-tabs">
               <button
@@ -530,18 +546,6 @@ export function UnitsModule({
                   )}
                 </section>
                 <section className="drawer-section">
-                  <div className="section-title">
-                    <div>
-                      <small>ROOM DETAILS</small>
-                      <h3>Configuration and bed types</h3>
-                    </div>
-                    <button
-                      className="secondary compact"
-                      onClick={() => setModal("room")}
-                    >
-                      + Add room
-                    </button>
-                  </div>
                   <div className="room-list">
                     {rooms.map((room) => (
                       <article key={room.id}>
@@ -581,6 +585,13 @@ export function UnitsModule({
                           </button>
                           <button
                             type="button"
+                            className="primary compact"
+                            onClick={() => setSelectedRoom(room)}
+                          >
+                            View room
+                          </button>
+                          <button
+                            type="button"
                             className="danger compact"
                             onClick={() =>
                               save(
@@ -613,29 +624,6 @@ export function UnitsModule({
                                 defaultValue={bed.legacyCode}
                                 aria-label="Room code"
                               />
-                              <select
-                                value={bed.bedType}
-                                onChange={(e) =>
-                                  save(
-                                    {
-                                      action: "bed-type",
-                                      bedId: bed.id,
-                                      bedType: e.target.value,
-                                    },
-                                    "Bed type updated",
-                                  )
-                                }
-                              >
-                                <option value="unknown">
-                                  Bed type not set
-                                </option>
-                                <option value="single">Single bed</option>
-                                <option value="queen">Queen bed</option>
-                                <option value="two-single">
-                                  2 single beds
-                                </option>
-                                <option value="bunk">Bunk bed</option>
-                              </select>
                               <button className="secondary compact">
                                 Save code
                               </button>
@@ -675,6 +663,21 @@ export function UnitsModule({
             )}
           </aside>
         </div>
+      )}
+      {selectedRoom && unit && (
+        <RoomOverviewPanel
+          unit={unit}
+          room={selectedRoom}
+          attachments={data.attachments.filter(
+            (attachment) =>
+              attachment.contextType === "room" &&
+              attachment.recordId === selectedRoom.id,
+          )}
+          uploadedBy={data.currentUser?.displayName}
+          save={save}
+          busy={busy}
+          onClose={() => setSelectedRoom(null)}
+        />
       )}
       {modal === "unit" && (
         <Modal
@@ -974,16 +977,6 @@ export function UnitsModule({
               />
             </label>
             <label>
-              Bed type
-              <select name="bedType">
-                <option value="unknown">Not set</option>
-                <option value="single">Single bed</option>
-                <option value="queen">Queen bed</option>
-                <option value="two-single">2 single beds</option>
-                <option value="bunk">Bunk bed</option>
-              </select>
-            </label>
-            <label>
               Room code prefix
               <input name="codePrefix" placeholder={`${unit.unitCode}-A`} />
             </label>
@@ -996,6 +989,472 @@ export function UnitsModule({
         </Modal>
       )}
     </>
+  );
+}
+
+
+const ROOM_AMENITIES = [
+  { key: "bed", label: "Bed" },
+  { key: "mattress", label: "Mattress" },
+  { key: "study-table", label: "Study table" },
+  { key: "chair", label: "Chair" },
+  { key: "wardrobe", label: "Wardrobe" },
+  { key: "air-conditioner", label: "Air-conditioner" },
+  { key: "ceiling-fan", label: "Ceiling fan" },
+  { key: "curtain-blind", label: "Curtain / blind" },
+  { key: "power-sockets", label: "Power sockets" },
+  { key: "wifi", label: "Wi-Fi coverage" },
+];
+
+function normaliseAmenities(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // Older records may store comma-separated values.
+  }
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function roomValue(room: Row, key: string, fallback: any = "") {
+  const direct = room?.[key];
+  if (direct !== undefined && direct !== null && direct !== "") return direct;
+  const firstBed = room?.beds?.[0];
+  const bedValue = firstBed?.[key];
+  return bedValue !== undefined && bedValue !== null && bedValue !== ""
+    ? bedValue
+    : fallback;
+}
+
+function RoomOverviewPanel({
+  unit,
+  room,
+  attachments,
+  uploadedBy,
+  save,
+  busy,
+  onClose,
+}: {
+  unit: Row;
+  room: Row;
+  attachments: Row[];
+  uploadedBy?: string;
+  save: any;
+  busy: boolean;
+  onClose: () => void;
+}) {
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [amenities, setAmenities] = useState<string[]>(
+    normaliseAmenities(roomValue(room, "amenities", [])),
+  );
+
+  const beds: Row[] = room.beds || [];
+  const primaryBed = beds[0] || {};
+  const roomCode =
+    primaryBed.legacyCode || `${unit.unitCode}-${String(room.label || "Room")}`;
+  const occupiedBeds = beds.filter(
+    (bed) =>
+      bed.status === "occupied" ||
+      bed.occupantId ||
+      bed.tenantId ||
+      bed.studentId,
+  ).length;
+  const capacity = Math.max(beds.length, 1);
+  const isOccupied = occupiedBeds > 0;
+  const monthlyRate = roomValue(
+    room,
+    "monthlyRate",
+    roomValue(room, "salesRate", roomValue(room, "rent", "")),
+  );
+  const roomPhotos = attachments.filter(
+    (attachment) => attachment.fileType?.startsWith?.("image/") !== false,
+  );
+
+  const toggleAmenity = (key: string) => {
+    setAmenities((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    );
+  };
+
+  return (
+    <div
+      className="room-overview-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <aside className="room-overview-panel">
+        <header className="room-overview-header">
+          <div>
+            <button type="button" className="text-button" onClick={onClose}>
+              ← Back to {unit.unitCode}
+            </button>
+            <small>
+              {unit.hostelName} / {unit.unitCode}
+            </small>
+            <h2>Room {room.label}</h2>
+            <p>Room information, contents, photos and inspection condition.</p>
+          </div>
+          <button type="button" className="room-close" onClick={onClose}>
+            ×
+          </button>
+        </header>
+
+        <section className="room-hero-card">
+          <div className="room-photo-cover">
+            {roomPhotos[0] ? (
+              <img
+                src={`/api/files?id=${roomPhotos[0].id}`}
+                alt={`${roomCode} cover`}
+              />
+            ) : (
+              <div className="room-photo-placeholder">
+                <span>ROOM</span>
+                <small>No photo uploaded</small>
+              </div>
+            )}
+            <span className="photo-count">▧ {roomPhotos.length}</span>
+          </div>
+          <div className="room-hero-main">
+            <div className="room-title-line">
+              <div>
+                <h3>{roomCode}</h3>
+                <span className="room-type-pill">
+                  Room {room.label} · {titleCase(room.type || "single")}
+                </span>
+              </div>
+              <span className={`room-availability ${isOccupied ? "occupied" : "vacant"}`}>
+                {isOccupied ? "Occupied" : "Vacant"}
+              </span>
+            </div>
+            <div className="room-hero-facts">
+              <span>
+                <small>Hostel</small>
+                <strong>{unit.hostelName}</strong>
+              </span>
+              <span>
+                <small>Unit</small>
+                <strong>{unit.unitCode}</strong>
+              </span>
+              <span>
+                <small>Bathroom</small>
+                <strong>{titleCase(room.bathroomType || "not set")}</strong>
+              </span>
+              <span>
+                <small>Monthly rate</small>
+                <strong>{monthlyRate ? `RM ${monthlyRate}` : "Not set"}</strong>
+              </span>
+              <span>
+                <small>Availability</small>
+                <strong>{isOccupied ? "Currently occupied" : "Available now"}</strong>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className="room-stat-grid">
+          <article>
+            <span className="room-stat-icon">✓</span>
+            <div>
+              <small>Room status</small>
+              <strong>{isOccupied ? "Occupied" : "Vacant"}</strong>
+              <p>{isOccupied ? "Tenant assigned" : "Ready to assign"}</p>
+            </div>
+          </article>
+          <article>
+            <span className="room-stat-icon">RM</span>
+            <div>
+              <small>Monthly rent</small>
+              <strong>{monthlyRate ? `RM ${monthlyRate}` : "Not set"}</strong>
+              <p>Sales rate per month</p>
+            </div>
+          </article>
+          <article>
+            <span className="room-stat-icon">◎</span>
+            <div>
+              <small>Occupancy</small>
+              <strong>
+                {occupiedBeds} / {capacity}
+              </strong>
+              <p>{Math.round((occupiedBeds / capacity) * 100)}% occupied</p>
+            </div>
+          </article>
+          <article>
+            <span className="room-stat-icon">▰</span>
+            <div>
+              <small>Bed type</small>
+              <strong>{titleCase(primaryBed.bedType || "not set")}</strong>
+              <p>{titleCase(room.bathroomType || "Bathroom not set")}</p>
+            </div>
+          </article>
+        </section>
+
+        <form
+          className="room-overview-layout"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const ok = await save(
+              {
+                action: "room-details",
+                roomId: room.id,
+                ...formValues(event),
+                amenities: JSON.stringify(amenities),
+              },
+              "Room overview updated",
+            );
+            if (ok && photoFile) {
+              await uploadAttachment(
+                photoFile,
+                "room",
+                room.id,
+                uploadedBy,
+              );
+              setPhotoFile(null);
+            }
+          }}
+        >
+          <div className="room-main-column">
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>ROOM CONFIGURATION</small>
+                  <h3>Basic room information</h3>
+                </div>
+              </div>
+              <div className="form-grid room-edit-grid">
+                <label>
+                  Room label
+                  <input name="roomLabel" defaultValue={room.label} />
+                </label>
+                <label>
+                  Room type
+                  <select name="roomType" defaultValue={room.type}>
+                    <option value="single">Single room</option>
+                    <option value="sharing">Sharing room</option>
+                  </select>
+                </label>
+                <label>
+                  Bathroom
+                  <select name="bathroomType" defaultValue={room.bathroomType}>
+                    <option value="unknown">Bathroom not set</option>
+                    <option value="attached">Attached</option>
+                    <option value="non-attached">Non-attached</option>
+                  </select>
+                </label>
+                <label>
+                  Monthly sales rate
+                  <input
+                    name="monthlyRate"
+                    type="number"
+                    min="0"
+                    defaultValue={monthlyRate}
+                    placeholder="800"
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>INCLUDED IN THIS ROOM</small>
+                  <h3>Furniture and facilities</h3>
+                </div>
+                <span>{amenities.length} selected</span>
+              </div>
+              <div className="amenity-grid">
+                {ROOM_AMENITIES.map((item) => {
+                  const included = amenities.includes(item.key);
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`amenity-tile ${included ? "included" : ""}`}
+                      onClick={() => toggleAmenity(item.key)}
+                    >
+                      <span>{included ? "✓" : "+"}</span>
+                      <b>{item.label}</b>
+                      <small>{included ? "Included" : "Not included"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>ROOM CODES & BEDS</small>
+                  <h3>{beds.length} bed space record(s)</h3>
+                </div>
+              </div>
+              <div className="room-bed-table">
+                {beds.map((bed) => (
+                  <div key={bed.id}>
+                    <code>{bed.legacyCode || "Code not set"}</code>
+                    <span>{titleCase(bed.bedType || "Bed type not set")}</span>
+                    <span>{titleCase(bed.status || "Vacant")}</span>
+                  </div>
+                ))}
+                {!beds.length && <p className="empty-copy">No bed spaces added.</p>}
+              </div>
+            </section>
+
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>NOTES & REMARKS</small>
+                  <h3>Operational notes</h3>
+                </div>
+              </div>
+              <label className="room-notes-field">
+                Notes
+                <textarea
+                  name="roomNotes"
+                  defaultValue={roomValue(room, "roomNotes", roomValue(room, "notes", ""))}
+                  placeholder="Add room-specific notes, defects or instructions"
+                />
+              </label>
+            </section>
+          </div>
+
+          <div className="room-side-column">
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>BATHROOM & UTILITIES</small>
+                  <h3>Facilities status</h3>
+                </div>
+              </div>
+              <div className="utility-fields">
+                <label>
+                  Water heater
+                  <select name="waterHeater" defaultValue={roomValue(room, "waterHeater", "unknown")}>
+                    <option value="unknown">Not set</option>
+                    <option value="available">Available</option>
+                    <option value="not-available">Not available</option>
+                    <option value="repair">Needs repair</option>
+                  </select>
+                </label>
+                <label>
+                  Sink / basin
+                  <select name="sinkBasin" defaultValue={roomValue(room, "sinkBasin", "unknown")}>
+                    <option value="unknown">Not set</option>
+                    <option value="available">Available</option>
+                    <option value="not-available">Not available</option>
+                    <option value="repair">Needs repair</option>
+                  </select>
+                </label>
+                <label>
+                  Lighting
+                  <select name="lighting" defaultValue={roomValue(room, "lighting", "unknown")}>
+                    <option value="unknown">Not set</option>
+                    <option value="available">Available</option>
+                    <option value="not-available">Not available</option>
+                    <option value="repair">Needs repair</option>
+                  </select>
+                </label>
+                <label>
+                  Ventilation
+                  <select name="ventilation" defaultValue={roomValue(room, "ventilation", "unknown")}>
+                    <option value="unknown">Not set</option>
+                    <option value="available">Available</option>
+                    <option value="not-available">Not available</option>
+                    <option value="repair">Needs repair</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>ROOM PHOTOS</small>
+                  <h3>{roomPhotos.length} uploaded</h3>
+                </div>
+              </div>
+              <div className="room-photo-grid">
+                {roomPhotos.slice(0, 6).map((attachment) => (
+                  <a
+                    key={attachment.id}
+                    href={`/api/files?id=${attachment.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src={`/api/files?id=${attachment.id}`}
+                      alt={attachment.fileName || "Room photo"}
+                    />
+                  </a>
+                ))}
+                {!roomPhotos.length && (
+                  <div className="room-photo-empty">No room photos yet</div>
+                )}
+              </div>
+              <label className="room-photo-upload">
+                Add room photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    setPhotoFile(event.target.files?.[0] || null)
+                  }
+                />
+              </label>
+            </section>
+
+            <section className="room-content-card">
+              <div className="room-card-heading">
+                <div>
+                  <small>CONDITION / INSPECTION</small>
+                  <h3>Latest room condition</h3>
+                </div>
+              </div>
+              <div className="inspection-fields">
+                {[
+                  ["cleanliness", "Cleanliness"],
+                  ["furnitureCondition", "Furniture condition"],
+                  ["electricalCondition", "Electrical & sockets"],
+                  ["wallCondition", "Wall & paint"],
+                ].map(([name, label]) => (
+                  <label key={name}>
+                    {label}
+                    <select name={name} defaultValue={roomValue(room, name, "not-set")}>
+                      <option value="not-set">Not set</option>
+                      <option value="good">Good</option>
+                      <option value="fair">Fair</option>
+                      <option value="repair">Needs repair</option>
+                    </select>
+                  </label>
+                ))}
+                <label>
+                  Last inspected on
+                  <input
+                    name="lastInspectedOn"
+                    type="date"
+                    defaultValue={roomValue(room, "lastInspectedOn", "")}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <div className="room-save-bar">
+              <button type="button" className="secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button className="primary" disabled={busy}>
+                Save room overview
+              </button>
+            </div>
+          </div>
+        </form>
+      </aside>
+    </div>
   );
 }
 

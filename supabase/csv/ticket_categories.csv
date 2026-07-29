@@ -1,0 +1,13 @@
+id,category,subcategory,status,sort_order
+1,Electrical,Fan,active,0
+2,Electrical,Light,active,1
+3,Electrical,Power socket,active,2
+4,Plumbing,Tap / leaking,active,3
+5,Plumbing,Toilet,active,4
+6,Plumbing,Water heater,active,5
+7,Air-conditioner,Not cooling,active,6
+8,Furniture,Bed / wardrobe,active,7
+9,Access card / key,Door unlocking,active,8
+10,Internet,Wi-Fi connection,active,9
+11,Cleaning,Room cleaning,active,10
+12,Other,General issue,active,11
