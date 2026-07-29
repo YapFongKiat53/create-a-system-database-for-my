@@ -114,12 +114,12 @@ export function HostelModule({
       unitFilter === "all"
         ? []
         : [
-            ...new Set(
-              data.bedSpaces
-                .filter((bed) => String(bed.unitId) === unitFilter)
-                .map((bed) => String(bed.roomLabel)),
-            ),
-          ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+          ...new Set(
+            data.bedSpaces
+              .filter((bed) => String(bed.unitId) === unitFilter)
+              .map((bed) => String(bed.roomLabel)),
+          ),
+        ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
     [data, unitFilter],
   );
   const totals = useMemo(
@@ -199,31 +199,31 @@ export function HostelModule({
     0,
   );
 
-const baseAvailability = useMemo(() => {
-  return data.bedSpaces.filter((bed) => {
-    const available =
-      bed.availabilityState === "available-now" ||
-      (bed.availabilityState === "upcoming" && bed.availableFrom && bed.availableFrom <= availableDate);
-    
-    return (
-      available &&
-      (!bed.unitSurrenderDate || bed.unitSurrenderDate > availableDate) &&
-      (hostelFilter === "all" || bed.hostelCode === hostelFilter) &&
-      (unitFilter === "all" || String(bed.unitId) === unitFilter) &&
-      (roomCodeFilter === "all" || String(bed.roomLabel) === roomCodeFilter) &&
-      (genderFilter === "all" || bed.gender === genderFilter) &&
-      (roomFilter === "all" || bed.roomType === roomFilter) &&
-      (categoryFilter === "all" || bed.roomLabel === categoryFilter) &&
-      (bathroomFilter === "all" || bed.bathroomType === bathroomFilter) &&
-      (bedTypeFilter === "all" || bed.bedType === bedTypeFilter) &&
-      (!maxRate || (effectiveRate(bed) !== null && effectiveRate(bed) <= Number(maxRate)))
-    );
-  });
-}, [data.bedSpaces, availableDate, hostelFilter, unitFilter, roomCodeFilter, genderFilter, roomFilter, categoryFilter, bathroomFilter, bedTypeFilter, maxRate]);
+  const baseAvailability = useMemo(() => {
+    return data.bedSpaces.filter((bed) => {
+      const available =
+        bed.availabilityState === "available-now" ||
+        (bed.availabilityState === "upcoming" && bed.availableFrom && bed.availableFrom <= availableDate);
+
+      return (
+        available &&
+        (!bed.unitSurrenderDate || bed.unitSurrenderDate > availableDate) &&
+        (hostelFilter === "all" || bed.hostelCode === hostelFilter) &&
+        (unitFilter === "all" || String(bed.unitId) === unitFilter) &&
+        (roomCodeFilter === "all" || String(bed.roomLabel) === roomCodeFilter) &&
+        (genderFilter === "all" || bed.gender === genderFilter) &&
+        (roomFilter === "all" || bed.roomType === roomFilter) &&
+        (categoryFilter === "all" || bed.roomLabel === categoryFilter) &&
+        (bathroomFilter === "all" || bed.bathroomType === bathroomFilter) &&
+        (bedTypeFilter === "all" || bed.bedType === bedTypeFilter) &&
+        (!maxRate || (effectiveRate(bed) !== null && effectiveRate(bed) <= Number(maxRate)))
+      );
+    });
+  }, [data.bedSpaces, availableDate, hostelFilter, unitFilter, roomCodeFilter, genderFilter, roomFilter, categoryFilter, bathroomFilter, bedTypeFilter, maxRate]);
 
 
   const sellable = Math.max(0, baseAvailability.length - committedWeight);
-    const resetFilters = () => {
+  const resetFilters = () => {
     setQuery("");
     setHostelFilter("all");
     setUnitFilter("all");
@@ -363,22 +363,7 @@ const baseAvailability = useMemo(() => {
   return (
     <>
       <div className="sales-overview">
-        <section className="intro compact-intro">
-          <div>
-            <span className="section-kicker">SALES AVAILABILITY</span>
-            <h2>Find the right room for the date a student needs it.</h2>
-            <p>
-              Vacancies, upcoming contract endings and paid commitments are
-              calculated together. Reservations remain editable until manual
-              room assignment.
-            </p>
-          </div>
-          {canUseSales && (
-            <button className="primary" onClick={() => openReservation()}>
-              + New reservation
-            </button>
-          )}
-        </section>
+
         <section className="metrics">
           <Metric
             label="HOSTELS"
@@ -404,6 +389,13 @@ const baseAvailability = useMemo(() => {
             note={`${totals.special} special-use`}
             tone="coral"
           />
+        </section>
+        <section className="intro compact-intro">
+          {canUseSales && (
+            <button className="primary" onClick={() => openReservation()}>
+              + New reservation
+            </button>
+          )}
         </section>
         <section className="hostel-grid">
           {data.hostels.map((hostel) => {
@@ -536,7 +528,7 @@ const baseAvailability = useMemo(() => {
         </div>
         {currentHostelTab === "availability" && (
           <>
-            <div className="section-heading">
+            {/* <div className="section-heading">
               <div>
                 <small>DATE-BASED SEARCH</small>
                 <h3>Available on {dateLabel(availableDate)}</h3>
@@ -563,7 +555,7 @@ const baseAvailability = useMemo(() => {
                   availability.
                 </span>
               </div>
-            </div>
+            </div> */}
             <div className="filters availability-filters sticky-filters">
               <label className="search">
                 <span>Name, unit or room code</span>
@@ -1560,8 +1552,8 @@ const baseAvailability = useMemo(() => {
                 <span>Target Preferences:</span>
                 <strong style={{ color: '#111827', textAlign: 'right' }}>
                   {convertReservation.preferredHostelName || "Any Hostel"}
-                  {convertReservation.reservationType === "individual" && convertReservation.roomCategory !== "any" 
-                    ? ` · Room ${convertReservation.roomCategory}` 
+                  {convertReservation.reservationType === "individual" && convertReservation.roomCategory !== "any"
+                    ? ` · Room ${convertReservation.roomCategory}`
                     : ""}
                 </strong>
               </div>
@@ -1634,7 +1626,7 @@ const baseAvailability = useMemo(() => {
                 </select>
               </label>
             )}
-            
+
             <div className="form-actions wide" style={{ marginTop: '16px' }}>
               <button
                 type="button"
