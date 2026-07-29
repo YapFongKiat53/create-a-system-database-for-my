@@ -20,6 +20,7 @@ import {
   today,
 } from "./shared";
 import type { Data, HostelTab, Row } from "./shared";
+import React from "react";
 
 export function HostelModule({
   data,
@@ -360,11 +361,94 @@ export function HostelModule({
       ),
     );
 
+
+  const getIcon = (tone: string) => {
+    switch (tone) {
+      case 'green':
+        return (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18M5 21V7l8-4v18M13 21V9l8 4v8M9 11v2M9 15v2M17 15v2" />
+          </svg>
+        );
+      case 'navy':
+        return (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z" />
+            <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+          </svg>
+        );
+      case 'sand':
+        return (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 4v16M2 8h18a2 2 0 0 1 2 2v10M2 17h20M6 8v9" />
+            <circle cx="9" cy="11" r="2" />
+          </svg>
+        );
+      case 'coral':
+        return (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3v18h18" />
+            <path d="m19 9-5 5-4-4-3 3" />
+            <path d="M19 9h-4M19 9v4" />
+          </svg>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const Metric = ({
+    label,
+    value,
+    note,
+    tone,
+  }: {
+    label: string;
+    value: string | number;
+    note: string;
+    tone: string;
+  }) => {
+    return (
+      <div className={`metric-card tone-${tone}`}>
+        <div className="metric-icon">{getIcon(tone)}</div>
+        <div className="metric-content">
+          <span className="metric-label">{label}</span>
+          <span className="metric-value">{value}</span>
+          <span className="metric-note">{note}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const [expandedHostel, setExpandedHostel] = useState<string | null>(null);
+  const [expandedUnit, setExpandedUnit] = useState<string | null>(null);
+  const [unitSearchQuery, setUnitSearchQuery] = useState("");
+  const [unitStatusFilter, setUnitStatusFilter] = useState("all"); // 'all' | 'available' | 'unavailable'
+
+  const [roomSearchQuery, setRoomSearchQuery] = useState("");
+  const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied'
+
+  const toggleHostel = (id: string) => {
+    setExpandedHostel((prev) => (prev === id ? null : id));
+    setExpandedUnit(null);
+    // 切换 Hostel 时清空 Unit 筛选条件
+    setUnitSearchQuery("");
+    setUnitStatusFilter("all");
+  };
+
+  const toggleUnit = (id: string) => {
+    setExpandedUnit((prev) => (prev === id ? null : id));
+  };
+
+  const getInitial = (name?: string) => (name ? name.charAt(0).toUpperCase() : "?");
+
+
+
   return (
     <>
       <div className="sales-overview">
 
-        <section className="metrics">
+        <section className="metrics-container">
           <Metric
             label="HOSTELS"
             value={String(data.hostels.length)}
@@ -397,92 +481,189 @@ export function HostelModule({
             </button>
           )}
         </section>
-        <section className="hostel-grid">
-          {data.hostels.map((hostel) => {
-            const hostelCommitments = data.reservations
-              .filter(
-                (r) => commitsInventory(r) && r.preferredHostelId === hostel.id,
-              )
-              .reduce((sum, r) => sum + reservationWeight(r, data), 0);
-            const femaleCommit = data.reservations
-              .filter(
-                (r) =>
-                  commitsInventory(r) &&
-                  r.preferredHostelId === hostel.id &&
-                  r.preferredGender === "female",
-              )
-              .reduce((sum, r) => sum + reservationWeight(r, data), 0);
-            const maleCommit = data.reservations
-              .filter(
-                (r) =>
-                  commitsInventory(r) &&
-                  r.preferredHostelId === hostel.id &&
-                  r.preferredGender === "male",
-              )
-              .reduce((sum, r) => sum + reservationWeight(r, data), 0);
-            const percent = Math.round(
-              (hostel.occupied / Math.max(1, hostel.occupied + hostel.vacant)) *
-              100,
-            );
-            return (
-              <button
-                key={hostel.id}
-                className={
-                  hostelFilter === hostel.code
-                    ? "hostel-card selected"
-                    : "hostel-card"
-                }
-                onClick={() => {
-                  setHostelFilter(
-                    hostelFilter === hostel.code ? "all" : hostel.code,
-                  );
-                  setTab("availability");
-                }}
-              >
-                <div className="hostel-card-top">
-                  <span>{hostel.code}</span>
-                  <small>
-                    <b>{hostel.bedSpaces}</b> total codes
-                  </small>
-                </div>
-                <h3>{hostel.name}</h3>
-                <p>{hostel.address}</p>
-                <div className="hostel-occupancy">
-                  <strong>{percent}% occupied</strong>
-                  <span>
-                    {Math.max(0, hostel.vacant - hostelCommitments)} sellable
-                  </span>
-                </div>
-                <div className="progress">
-                  <i style={{ width: `${percent}%` }} />
-                </div>
-                <div className="hostel-card-stats">
-                  <span>
-                    <b>{hostel.units}</b> units
-                  </span>
-                  <span>
-                    <b>{hostel.occupied}</b> occupied
-                  </span>
-                  <span>
-                    <b>{hostel.vacant}</b> vacant
-                  </span>
-                </div>
-                <div className="gender-vacancy">
-                  <span>
-                    Female sellable{" "}
-                    <b>{Math.max(0, hostel.vacantFemale - femaleCommit)}</b>
-                  </span>
-                  <span>
-                    Male sellable{" "}
-                    <b>{Math.max(0, hostel.vacantMale - maleCommit)}</b>
-                  </span>
-                  <span>
-                    To confirm <b>{hostel.vacantUnassigned}</b>
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+        <section className="directory-table-container">
+          <div className="modern-property-table">
+            <div className="mpt-header">
+              <span>Property</span>
+              <span>Unit / Type</span>
+              <span>Gender</span>
+              <span>Status</span>
+              <span>Occupant</span>
+              <span>Action / Rate</span>
+            </div>
+
+            {data.hostels.map((hostel) => {
+              const unitsInHostel = data.units.filter(u => u.hostelId === hostel.id);
+              const isHostelExpanded = expandedHostel === hostel.id;
+
+              // 1. 提前处理好【过滤后的 Unit 数组】
+              const filteredUnits = unitsInHostel.filter((unit) => {
+                // 计算该 unit 是否 available (是否有空床位)
+                const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
+                const unitVacant = bedsInUnit.some(b => b.status === "vacant");
+
+                // 文本搜索逻辑 (搜 Unit 编号或性别)
+                const query = unitSearchQuery.toLowerCase().trim();
+                const matchesSearch = !query ||
+                  unit.unitCode?.toLowerCase().includes(query) ||
+                  genderLabel(unit.gender).toLowerCase().includes(query);
+
+                // 状态筛选逻辑
+                const matchesStatus = unitStatusFilter === "all" ||
+                  (unitStatusFilter === "available" && unitVacant) ||
+                  (unitStatusFilter === "unavailable" && !unitVacant);
+
+                return matchesSearch && matchesStatus;
+              });
+
+              return (
+                <React.Fragment key={hostel.id}>
+                  {/* 第一层：Hostel 级别 (保持不变) */}
+                  <div className="mpt-row hostel-row" onClick={() => toggleHostel(hostel.id)}>
+                    <div className="mpt-property">
+                      <img src={`https://ui-avatars.com/api/?name=${hostel.name}&background=f3f4f6&color=374151&size=128&font-size=0.33`} alt={hostel.name} />
+                      <div className="info">
+                        <strong>{hostel.name}</strong>
+                        <span>{hostel.address}</span>
+                      </div>
+                    </div>
+                    <div className="mpt-cell">{hostel.units} Units</div>
+                    <div className="mpt-cell">Mixed</div>
+                    <div className="mpt-cell">
+                      <span className={`status-badge ${hostel.vacant > 0 ? 'available' : 'occupied'}`}>
+                        {hostel.vacant > 0 ? 'Available' : 'Full'}
+                      </span>
+                    </div>
+                    <div className="mpt-cell">-</div>
+                    <div className="mpt-cell rate-cell">
+                      {hostel.vacant} vacant
+                    </div>
+                  </div>
+
+                  {/* =========================================
+                      第二层顶部：Unit 筛选栏 (Inline Filter)
+                      ========================================= */}
+                  {isHostelExpanded && (
+                    <div className="mpt-row unit-filter-row">
+                      <div className="inline-filters">
+                        <div className="search-input-wrapper">
+                          <svg className="search-icon" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          </svg>
+                          <input
+                            type="text"
+                            placeholder="Search unit code (e.g. A-1)..."
+                            value={unitSearchQuery}
+                            onChange={(e) => setUnitSearchQuery(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                        <select
+                          value={unitStatusFilter}
+                          onChange={(e) => setUnitStatusFilter(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <option value="all">All Units</option>
+                          <option value="available">Available Units</option>
+                          <option value="unavailable">Full / Unavailable</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 第二层：Unit 级别 (使用过滤后的 filteredUnits 进行映射) */}
+                  {isHostelExpanded && filteredUnits.map((unit) => {
+                    const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
+                    const unitVacant = bedsInUnit.some(b => b.status === "vacant");
+                    const isUnitExpanded = expandedUnit === unit.id;
+
+                    return (
+                      <React.Fragment key={unit.id}>
+                        <div className="mpt-row unit-row" onClick={(e) => {
+                          e.stopPropagation();
+                          toggleUnit(unit.id);
+                        }}>
+                          <div className="mpt-property">
+                            <div className="info">
+                              <strong style={{ color: '#4b5563' }}>Unit {unit.unitCode}</strong>
+                            </div>
+                          </div>
+                          <div className="mpt-cell">Apartment</div>
+                          <div className="mpt-cell">{genderLabel(unit.gender)}</div>
+                          <div className="mpt-cell">
+                            <span className={`status-badge ${unitVacant ? 'available' : 'unavailable'}`}>
+                              {unitVacant ? 'Available' : 'Unavailable'}
+                            </span>
+                          </div>
+                          <div className="mpt-cell">-</div>
+                          <div className="mpt-cell rate-cell">{bedsInUnit.filter(b => b.status === "vacant").length} vacant</div>
+                        </div>
+
+                        {/* 第三层：Room 级别 (不带过滤，直接显示该 Unit 下的所有房间) */}
+                        {isUnitExpanded && bedsInUnit.map((bed) => {
+                          const isAvailable = bed.status === "vacant" || bed.availabilityState === "available-now";
+
+                          return (
+                            <div className="mpt-row room-row" key={bed.id}>
+                              <div className="mpt-property">
+                                <div className="info">
+                                  <strong>Room {bed.roomLabel}</strong>
+                                  <span>{bed.legacyCode}</span>
+                                </div>
+                              </div>
+                              <div className="mpt-cell">{titleCase(bed.roomType)}</div>
+                              <div className="mpt-cell">{genderLabel(bed.gender)}</div>
+                              <div className="mpt-cell">
+                                <span className={`status-badge ${isAvailable ? 'available' : 'occupied'}`}>
+                                  {isAvailable ? 'Available' : 'Occupied'}
+                                </span>
+                              </div>
+                              <div className="mpt-cell occupant-cell">
+                                {bed.occupantName ? (
+                                  <>
+                                    <div className="occupant-avatar">{getInitial(bed.occupantName)}</div>
+                                    <span>{bed.occupantName}</span>
+                                  </>
+                                ) : (
+                                  <span style={{ color: '#9ca3af' }}>No occupant</span>
+                                )}
+                              </div>
+                              <div className="mpt-cell action-cell">
+                                {isAvailable ? (
+                                  <button
+                                    className="primary compact mpt-reserve-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openReservation(bed);
+                                    }}
+                                  >
+                                    Reserve
+                                  </button>
+                                ) : (
+                                  <button className="secondary compact mpt-reserve-btn disabled" disabled>
+                                    Unavailable
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* 当搜不到匹配的 Unit 时的空状态提示 */}
+                  {isHostelExpanded && unitsInHostel.length > 0 && filteredUnits.length === 0 && (
+                    <div className="mpt-row unit-row empty-result">
+                      <div className="mpt-cell" style={{ gridColumn: '1 / -1', textAlign: 'center', color: '#9ca3af', padding: '20px 0' }}>
+                        No units match your filter criteria.
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
         </section>
       </div>
       <section className="workspace panel hostel-workspace">

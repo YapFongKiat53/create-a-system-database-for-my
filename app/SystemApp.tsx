@@ -241,13 +241,6 @@ export default function SystemApp() {
             </p>
             <h1>{current.label}</h1>
           </div>
-          <div className="source-pill">
-            <span />
-            <div>
-              <small>PRIVATE WORKSPACE</small>
-              <strong>Cloud records active</strong>
-            </div>
-          </div>
         </header>
         {error && (
           <div className="error-banner">
