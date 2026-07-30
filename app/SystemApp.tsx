@@ -16,7 +16,7 @@ import { UserManagementModule } from "./modules/UserManagement";
 export default function SystemApp() {
   const [data, setData] = useState<Data | null>(null);
   const [view, setView] = useState<View>("dashboard");
-  const [tab, setTab] = useState<HostelTab>("availability");
+  const [tab, setTab] = useState<HostelTab>("reservations");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");

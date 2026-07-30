@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Modal,
   NATIONALITIES,
@@ -14,6 +14,128 @@ import {
 } from "./shared";
 import type { Data, Row } from "./shared";
 
+type DirectoryTab = "active" | "moved-out" | "agency";
+type CompletionFilter = "all" | "complete" | "incomplete";
+type SelectedStudentRef = {
+  studentId: string | number;
+  assignmentId?: string | number | null;
+};
+
+const UNASSIGNED_HOSTEL_KEY = "__unassigned__";
+const PAGE_SIZE = 20;
+
+function normaliseStatus(value: unknown, fallback = "") {
+  const status = String(value ?? fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
+  return status || fallback;
+}
+
+function isCurrentOccupant(student: Row) {
+  return (
+    normaliseStatus(student.profileStatus, "active") === "active" &&
+    normaliseStatus(student.assignmentStatus) === "active"
+  );
+}
+
+function isMovedOutOrInactive(student: Row) {
+  const inactiveStatuses = new Set([
+    "moved-out",
+    "inactive",
+    "ended",
+    "terminated",
+  ]);
+
+  return (
+    inactiveStatuses.has(normaliseStatus(student.profileStatus)) ||
+    inactiveStatuses.has(normaliseStatus(student.assignmentStatus))
+  );
+}
+
+function isActiveProfile(student: Row) {
+  return (
+    normaliseStatus(student.profileStatus, "active") === "active" &&
+    !isMovedOutOrInactive(student)
+  );
+}
+
+function isAgencyLinked(student: Row) {
+  return Boolean(String(student.agency || "").trim());
+}
+
+function isProfileIncomplete(student: Row) {
+  return (
+    !String(student.identityNo || "").trim() ||
+    !String(student.contactNumber || "").trim() ||
+    !String(student.email || "").trim() ||
+    !String(student.nationality || "").trim()
+  );
+}
+
+function hostelInitials(name: unknown) {
+  const text = String(name || "Hostel").trim();
+  const number = text.match(/\d/);
+  const firstLetter = text.match(/[A-Za-z]/)?.[0]?.toUpperCase() || "H";
+
+  if (number) return `${firstLetter}${number[0]}`;
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return `${words[0][0] || ""}${words[1][0] || ""}`.toUpperCase();
+  }
+
+  return text.slice(0, 2).toUpperCase();
+}
+
+function hostelAddress(hostel: Row | null) {
+  if (!hostel) return "Profiles not yet tied to a hostel or room.";
+  return (
+    hostel.address ||
+    hostel.propertyAddress ||
+    hostel.fullAddress ||
+    "Property address not set"
+  );
+}
+
+function studentMatchesHostel(student: Row, hostel: Row) {
+  const studentHostelId = String(student.hostelId ?? "").trim();
+  if (studentHostelId) return studentHostelId === String(hostel.id);
+
+  const studentHostelName = String(student.hostelName || "")
+    .trim()
+    .toLowerCase();
+  const hostelName = String(hostel.name || "").trim().toLowerCase();
+
+  return Boolean(studentHostelName && studentHostelName === hostelName);
+}
+
+function isUnassignedStudent(student: Row, hostels: Row[]) {
+  return !hostels.some((hostel) => studentMatchesHostel(student, hostel));
+}
+
+function paginationItems(currentPage: number, totalPages: number) {
+  const pages: Array<number | "ellipsis"> = [];
+
+  if (totalPages <= 7) {
+    for (let page = 1; page <= totalPages; page += 1) pages.push(page);
+    return pages;
+  }
+
+  pages.push(1);
+
+  if (currentPage > 4) pages.push("ellipsis");
+
+  const start = Math.max(2, currentPage - 1);
+  const end = Math.min(totalPages - 1, currentPage + 1);
+  for (let page = start; page <= end; page += 1) pages.push(page);
+
+  if (currentPage < totalPages - 3) pages.push("ellipsis");
+
+  pages.push(totalPages);
+  return pages;
+}
+
 export function StudentsModule({
   data,
   save,
@@ -23,15 +145,22 @@ export function StudentsModule({
   save: any;
   busy: boolean;
 }) {
+  const [selectedHostelKey, setSelectedHostelKey] = useState<string | null>(
+    null,
+  );
   const [query, setQuery] = useState("");
-  const [student, setStudent] = useState<Row | null>(null);
+  const [unitFilter, setUnitFilter] = useState("all");
+  const [schoolFilter, setSchoolFilter] = useState("all");
+  const [completionFilter, setCompletionFilter] =
+    useState<CompletionFilter>("all");
+  const [selectedStudentRef, setSelectedStudentRef] =
+    useState<SelectedStudentRef | null>(null);
   const [modal, setModal] = useState("");
-  const [hostelFilter, setHostelFilter] = useState("all");
-  const [directoryTab, setDirectoryTab] = useState<
-    "active" | "moved-out" | "agency"
-  >("active");
+  const [directoryTab, setDirectoryTab] =
+    useState<DirectoryTab>("active");
   const [sortKey, setSortKey] = useState("roomCode");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
   const [addAssignRoom, setAddAssignRoom] = useState(false);
   const [editSchool, setEditSchool] = useState<Row | null>(null);
 
@@ -42,247 +171,702 @@ export function StudentsModule({
   const withCurrent = (list: string[], current?: string) =>
     current && !list.includes(current) ? [current, ...list] : list;
 
-  const sortStudents = (key: string) => {
-    if (sortKey === key)
-      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDirection("asc");
-    }
-  };
-  const filtered = data.students
-    .filter((student) => {
-      const active =
-        student.profileStatus === "active" &&
-        student.assignmentStatus === "active";
-      const statusMatch =
-        directoryTab === "agency"
-          ? Boolean(student.agency)
-          : directoryTab === "active"
-            ? active
-            : !active;
-      const hostelMatch =
-        hostelFilter === "all" ||
-        String(student.hostelId || "") === hostelFilter;
-      const search = query.trim().toLowerCase();
-      const text =
-        `${student.fullName} ${student.studentCode} ${student.identityNo} ${student.roomCode} ${student.unitCode} ${student.hostelName} ${student.school} ${student.nationality} ${student.agency}`.toLowerCase();
-      return statusMatch && hostelMatch && (!search || text.includes(search));
-    })
-    .sort((left, right) => {
-      const a = String(left[sortKey] ?? "");
-      const b = String(right[sortKey] ?? "");
-      const result = a.localeCompare(b, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-      return sortDirection === "asc" ? result : -result;
-    });
+  const student = useMemo(() => {
+    if (!selectedStudentRef) return null;
 
-  // Summary cards follow the selected hostel so the whole view is scoped together.
-  const hostelStudents =
-    hostelFilter === "all"
-      ? data.students
-      : data.students.filter(
-        (s) => String(s.hostelId || "") === hostelFilter,
+    const assignmentId = selectedStudentRef.assignmentId ?? "";
+    const exact = data.students.find(
+      (item) =>
+        String(item.id) === String(selectedStudentRef.studentId) &&
+        String(item.assignmentId ?? "") === String(assignmentId),
+    );
+
+    return (
+      exact ||
+      data.students.find(
+        (item) => String(item.id) === String(selectedStudentRef.studentId),
+      ) ||
+      null
+    );
+  }, [data.students, selectedStudentRef]);
+
+  const hostelDirectory = useMemo(() => {
+    const rows: Array<{
+      key: string;
+      hostel: Row | null;
+      students: Row[];
+    }> = data.hostels.map((hostel) => ({
+      key: String(hostel.id),
+      hostel,
+      students: data.students.filter((item) =>
+        studentMatchesHostel(item, hostel),
+      ),
+    }));
+
+    const unassignedStudents = data.students.filter((item) =>
+      isUnassignedStudent(item, data.hostels),
+    );
+
+    if (unassignedStudents.length) {
+      rows.push({
+        key: UNASSIGNED_HOSTEL_KEY,
+        hostel: null,
+        students: unassignedStudents,
+      });
+    }
+
+    return rows;
+  }, [data.hostels, data.students]);
+
+  const selectedHostel = useMemo(() => {
+    if (!selectedHostelKey || selectedHostelKey === UNASSIGNED_HOSTEL_KEY)
+      return null;
+
+    return (
+      data.hostels.find(
+        (hostel) => String(hostel.id) === String(selectedHostelKey),
+      ) || null
+    );
+  }, [data.hostels, selectedHostelKey]);
+
+  const selectedHostelStudents = useMemo(() => {
+    if (!selectedHostelKey) return [];
+
+    if (selectedHostelKey === UNASSIGNED_HOSTEL_KEY) {
+      return data.students.filter((item) =>
+        isUnassignedStudent(item, data.hostels),
       );
+    }
+
+    if (!selectedHostel) return [];
+    return data.students.filter((item) =>
+      studentMatchesHostel(item, selectedHostel),
+    );
+  }, [data.hostels, data.students, selectedHostel, selectedHostelKey]);
+
+  const scopeStudents = selectedHostelKey
+    ? selectedHostelStudents
+    : data.students;
+
+  const unitOptions = useMemo(
+    () =>
+      [...new Set(
+        selectedHostelStudents
+          .map((item) => String(item.unitCode || "").trim())
+          .filter(Boolean),
+      )].sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+    [selectedHostelStudents],
+  );
+
+  const scopedSchoolOptions = useMemo(
+    () =>
+      [...new Set(
+        selectedHostelStudents
+          .map((item) => String(item.school || "").trim())
+          .filter(Boolean),
+      )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })),
+    [selectedHostelStudents],
+  );
+
+  const filteredStudents = useMemo(() => {
+    const search = query.trim().toLowerCase();
+
+    return selectedHostelStudents
+      .filter((item) => {
+        const tabMatch =
+          directoryTab === "agency"
+            ? isAgencyLinked(item)
+            : directoryTab === "active"
+              ? isActiveProfile(item)
+              : isMovedOutOrInactive(item);
+
+        const unitMatch =
+          unitFilter === "all" || String(item.unitCode || "") === unitFilter;
+        const schoolMatch =
+          schoolFilter === "all" || String(item.school || "") === schoolFilter;
+        const completionMatch =
+          completionFilter === "all" ||
+          (completionFilter === "incomplete"
+            ? isProfileIncomplete(item)
+            : !isProfileIncomplete(item));
+        const text = `${item.fullName || ""} ${item.studentCode || ""} ${
+          item.identityNo || ""
+        } ${item.roomCode || ""} ${item.unitCode || ""} ${
+          item.hostelName || ""
+        } ${item.school || ""} ${item.course || ""} ${
+          item.nationality || ""
+        } ${item.agency || ""}`.toLowerCase();
+
+        return (
+          tabMatch &&
+          unitMatch &&
+          schoolMatch &&
+          completionMatch &&
+          (!search || text.includes(search))
+        );
+      })
+      .sort((left, right) => {
+        const a = String(left[sortKey] ?? "");
+        const b = String(right[sortKey] ?? "");
+        const result = a.localeCompare(b, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        return sortDirection === "asc" ? result : -result;
+      });
+  }, [
+    completionFilter,
+    directoryTab,
+    query,
+    schoolFilter,
+    selectedHostelStudents,
+    sortDirection,
+    sortKey,
+    unitFilter,
+  ]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredStudents.length / PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, totalPages);
+  const paginatedStudents = filteredStudents.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+  const rangeStart = filteredStudents.length
+    ? (currentPage - 1) * PAGE_SIZE + 1
+    : 0;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, filteredStudents.length);
+
+  const allVacantBedOptions = useMemo(
+    () =>
+      data.bedSpaces
+        .filter((bed) => bed.status === "vacant")
+        .map((bed) => ({
+          value: bed.id,
+          label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode}`,
+        })),
+    [data.bedSpaces],
+  );
+
+  const addStudentBedOptions = useMemo(() => {
+    if (!selectedHostel) return allVacantBedOptions;
+
+    return data.bedSpaces
+      .filter(
+        (bed) =>
+          bed.status === "vacant" &&
+          (String(bed.hostelId || "") === String(selectedHostel.id) ||
+            (!bed.hostelId &&
+              String(bed.hostelName || "").toLowerCase() ===
+                String(selectedHostel.name || "").toLowerCase())),
+      )
+      .map((bed) => ({
+        value: bed.id,
+        label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode}`,
+      }));
+  }, [allVacantBedOptions, data.bedSpaces, selectedHostel]);
+
+  const resetDirectoryFilters = (resetTab = false) => {
+    setQuery("");
+    setUnitFilter("all");
+    setSchoolFilter("all");
+    setCompletionFilter("all");
+    setPage(1);
+    if (resetTab) setDirectoryTab("active");
+  };
+
+  const selectHostel = (key: string) => {
+    setSelectedHostelKey(key);
+    resetDirectoryFilters(true);
+  };
+
+  const backToHostels = () => {
+    setSelectedHostelKey(null);
+    resetDirectoryFilters(true);
+  };
+
+  const closeAddStudentModal = () => {
+    setModal("");
+    setAddAssignRoom(false);
+  };
+
+  const sortStudents = (key: string) => {
+    setPage(1);
+    if (sortKey === key) {
+      setSortDirection((direction) =>
+        direction === "asc" ? "desc" : "asc",
+      );
+      return;
+    }
+    setSortKey(key);
+    setSortDirection("asc");
+  };
 
   const sortHeader = (key: string, label: string) => (
     <th>
-      <button className="sort-button" onClick={() => sortStudents(key)}>
+      <button
+        type="button"
+        className="sort-button"
+        onClick={() => sortStudents(key)}
+      >
         {label}{" "}
         {sortKey === key ? (sortDirection === "asc" ? "↑" : "↓") : ""}
       </button>
     </th>
   );
 
-  const vacantBedOptions = data.bedSpaces
-    .filter((bed) => bed.status === "vacant")
-    .map((bed) => ({
-      value: bed.id,
-      label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode}`,
-    }));
+  const selectedHostelName =
+    selectedHostelKey === UNASSIGNED_HOSTEL_KEY
+      ? "Unassigned profiles"
+      : selectedHostel?.name || "Student directory";
 
   return (
     <>
-      <section className="intro compact-intro">
-        <div>
-          <span className="section-kicker">STUDENT & SUB-TENANT DIRECTORY</span>
-          <h2>Complete resident information tied to the actual room code.</h2>
-          <p>
-            Includes individual students and sub-tenants added after a group
-            reservation is confirmed.
-          </p>
-        </div>
-        <div className="button-row">
-          <button className="secondary" onClick={() => setModal("schools")}>
-            Manage schools
-          </button>
-          <button className="primary" onClick={() => setModal("add")}>
-            + Add student
-          </button>
-        </div>
-      </section>
-      <section className="module-metrics">
-        <Stat
-          value={
-            hostelStudents.filter((s) => s.assignmentStatus === "active").length
-          }
-          label="Current occupants"
-        />
-        <Stat
-          value={
-            hostelStudents.filter((s) => s.profileStatus !== "active").length
-          }
-          label="Moved out / inactive"
-        />
-        <Stat
-          value={hostelStudents.filter((s) => s.agency).length}
-          label="Agency-linked"
-        />
-        <Stat
-          value={
-            hostelStudents.filter((s) => !s.identityNo || !s.contactNumber)
-              .length
-          }
-          label="Profiles to complete"
-        />
-      </section>
-      <section className="panel">
-        <div className="workspace-tabs">
-          <button
-            className={directoryTab === "active" ? "active" : ""}
-            onClick={() => setDirectoryTab("active")}
-          >
-            Active students
-          </button>
-          <button
-            className={directoryTab === "moved-out" ? "active" : ""}
-            onClick={() => setDirectoryTab("moved-out")}
-          >
-            Moved-out / inactive
-          </button>
-          <button
-            className={directoryTab === "agency" ? "active" : ""}
-            onClick={() => setDirectoryTab("agency")}
-          >
-            Agency-linked
-          </button>
-        </div>
-        <div className="filters">
-          <label className="search">
-            <span>Search students</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name, IC/passport, room, school or country"
-            />
-          </label>
-          <label>
-            Hostel
-            <select
-              value={hostelFilter}
-              onChange={(event) => setHostelFilter(event.target.value)}
+      <div className="student-hostel-page">
+        <section className="intro compact-intro student-directory-intro">
+          <div>
+            <span className="section-kicker">
+              STUDENT &amp; SUB-TENANT DIRECTORY
+            </span>
+            <h2>
+              {selectedHostelKey
+                ? `${selectedHostelName} resident information.`
+                : "Choose a hostel before viewing resident profiles."}
+            </h2>
+            <p>
+              {selectedHostelKey
+                ? "Search, filter and manage students under the selected hostel."
+                : "Each hostel opens into its own student directory, filters and room-linked records."}
+            </p>
+          </div>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setModal("schools")}
             >
-              <option value="all">All hostels</option>
-              {data.hostels.map((hostel) => (
-                <option key={hostel.id} value={hostel.id}>
-                  {hostel.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="secondary reset-button"
-            onClick={() => {
-              setQuery("");
-              setHostelFilter("all");
-            }}
-          >
-            Reset filters
-          </button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {sortHeader("fullName", "Name")}
-                {sortHeader("roomCode", "Room")}
-                {sortHeader("contactNumber", "Contact")}
-                {sortHeader("school", "School / course")}
-                {sortHeader("monthlyRental", "Rental")}
-                {sortHeader("leaseEndDate", "Lease end")}
-                {sortHeader("salesperson", "Sales / agency")}
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.slice(0, 250).map((s) => (
-                <tr key={`${s.id}-${s.assignmentId || 0}`}>
-                  <td>
-                    <strong>{s.fullName}</strong>
-                    <small>{s.identityNo || "IC / passport not set"}</small>
-                  </td>
-                  <td>
-                    {s.roomCode ? (
-                      <>
-                        <code>{s.roomCode}</code>
+              Manage schools
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => setModal("add")}
+            >
+              + Add student
+            </button>
+          </div>
+        </section>
+
+        <section className="module-metrics student-directory-metrics">
+          <Stat
+            value={scopeStudents.filter(isCurrentOccupant).length}
+            label="Current occupants"
+          />
+          <Stat
+            value={scopeStudents.filter(isMovedOutOrInactive).length}
+            label="Moved out / inactive"
+          />
+          <Stat
+            value={scopeStudents.filter(isAgencyLinked).length}
+            label="Agency-linked"
+          />
+          <Stat
+            value={scopeStudents.filter(isProfileIncomplete).length}
+            label="Profiles to complete"
+          />
+        </section>
+
+        {!selectedHostelKey ? (
+          <section className="panel student-hostel-directory-panel">
+            <div className="student-hostel-list-header">
+              <span>Property</span>
+              <span>Current</span>
+              <span>Moved out</span>
+              <span>Agency</span>
+              <span>Incomplete</span>
+              <span>Action</span>
+            </div>
+
+            <div className="student-hostel-list">
+              {hostelDirectory.map(({ key, hostel, students }) => {
+                const name = hostel?.name || "Unassigned profiles";
+                const currentCount = students.filter(isCurrentOccupant).length;
+                const movedCount = students.filter(isMovedOutOrInactive).length;
+                const agencyCount = students.filter(isAgencyLinked).length;
+                const incompleteCount = students.filter(
+                  isProfileIncomplete,
+                ).length;
+
+                return (
+                  <article className="student-hostel-row" key={key}>
+                    <div className="student-hostel-property">
+                      <span className="student-hostel-avatar">
+                        {hostel ? hostelInitials(hostel.name) : "--"}
+                      </span>
+                      <div>
+                        <strong>{name}</strong>
+                        <p>{hostelAddress(hostel)}</p>
                         <small>
-                          {s.hostelName} / {s.unitCode}
+                          {students.length} student profile
+                          {students.length === 1 ? "" : "s"}
                         </small>
-                      </>
+                      </div>
+                    </div>
+
+                    <div className="student-hostel-stat">
+                      <strong>{currentCount}</strong>
+                      <small>occupants</small>
+                    </div>
+                    <div className="student-hostel-stat">
+                      <strong>{movedCount}</strong>
+                      <small>inactive</small>
+                    </div>
+                    <div className="student-hostel-stat">
+                      <strong>{agencyCount}</strong>
+                      <small>linked</small>
+                    </div>
+                    <div className="student-hostel-stat">
+                      <strong>{incompleteCount}</strong>
+                      <small>to complete</small>
+                    </div>
+
+                    <div className="student-hostel-action">
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        onClick={() => selectHostel(key)}
+                      >
+                        View students
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="student-selected-hostel">
+              <button
+                type="button"
+                className="student-back-button"
+                onClick={backToHostels}
+              >
+                ← All hostels
+              </button>
+
+              <div className="student-selected-hostel-card">
+                <span className="student-hostel-avatar large">
+                  {selectedHostel
+                    ? hostelInitials(selectedHostel.name)
+                    : "--"}
+                </span>
+                <div className="student-selected-hostel-copy">
+                  <small>SELECTED HOSTEL</small>
+                  <h3>{selectedHostelName}</h3>
+                  <p>{hostelAddress(selectedHostel)}</p>
+                </div>
+                <div className="student-selected-hostel-total">
+                  <small>Total profiles</small>
+                  <strong>{selectedHostelStudents.length}</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel student-filter-panel">
+              <div className="workspace-tabs">
+                <button
+                  type="button"
+                  className={directoryTab === "active" ? "active" : ""}
+                  onClick={() => {
+                    setDirectoryTab("active");
+                    setPage(1);
+                  }}
+                >
+                  Active students
+                </button>
+                <button
+                  type="button"
+                  className={directoryTab === "moved-out" ? "active" : ""}
+                  onClick={() => {
+                    setDirectoryTab("moved-out");
+                    setPage(1);
+                  }}
+                >
+                  Moved-out / inactive
+                </button>
+                <button
+                  type="button"
+                  className={directoryTab === "agency" ? "active" : ""}
+                  onClick={() => {
+                    setDirectoryTab("agency");
+                    setPage(1);
+                  }}
+                >
+                  Agency-linked
+                </button>
+              </div>
+
+              <div className="student-second-level-filters">
+                <label className="search student-search-field">
+                  <span>Search students</span>
+                  <input
+                    value={query}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Name, IC/passport, room, school or country"
+                  />
+                </label>
+
+                <label>
+                  Unit
+                  <select
+                    value={unitFilter}
+                    onChange={(event) => {
+                      setUnitFilter(event.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="all">All units</option>
+                    {unitOptions.map((unitCode) => (
+                      <option key={unitCode} value={unitCode}>
+                        {unitCode}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  School
+                  <select
+                    value={schoolFilter}
+                    onChange={(event) => {
+                      setSchoolFilter(event.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="all">All schools</option>
+                    {scopedSchoolOptions.map((school) => (
+                      <option key={school} value={school}>
+                        {school}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Profile details
+                  <select
+                    value={completionFilter}
+                    onChange={(event) => {
+                      setCompletionFilter(
+                        event.target.value as CompletionFilter,
+                      );
+                      setPage(1);
+                    }}
+                  >
+                    <option value="all">All profiles</option>
+                    <option value="complete">Complete profiles</option>
+                    <option value="incomplete">Needs completion</option>
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  className="secondary reset-button student-reset-button"
+                  onClick={() => resetDirectoryFilters(false)}
+                >
+                  Reset filters
+                </button>
+              </div>
+            </section>
+
+            <section className="panel student-results-panel">
+              <div className="student-results-heading">
+                <div>
+                  <small>STUDENT INFORMATION</small>
+                  <h3>
+                    {filteredStudents.length} matching student
+                    {filteredStudents.length === 1 ? "" : "s"}
+                  </h3>
+                </div>
+                <span>
+                  {selectedHostelName} · {titleCase(directoryTab)}
+                </span>
+              </div>
+
+              <div className="table-wrap student-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      {sortHeader("fullName", "Name")}
+                      {sortHeader("roomCode", "Room")}
+                      {sortHeader("contactNumber", "Contact")}
+                      {sortHeader("school", "School / course")}
+                      {sortHeader("monthlyRental", "Rental")}
+                      {sortHeader("leaseEndDate", "Lease end")}
+                      {sortHeader("salesperson", "Sales / agency")}
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedStudents.length ? (
+                      paginatedStudents.map((item) => (
+                        <tr key={`${item.id}-${item.assignmentId || 0}`}>
+                          <td>
+                            <strong>{item.fullName}</strong>
+                            <small>
+                              {item.identityNo || "IC / passport not set"}
+                            </small>
+                          </td>
+                          <td>
+                            {item.roomCode ? (
+                              <>
+                                <code>{item.roomCode}</code>
+                                <small>
+                                  {item.hostelName} / {item.unitCode}
+                                </small>
+                              </>
+                            ) : (
+                              <span className="muted">Not assigned</span>
+                            )}
+                          </td>
+                          <td>
+                            {item.contactNumber || "-"}
+                            <small>{item.email || "Email not set"}</small>
+                          </td>
+                          <td>
+                            {item.school || "-"}
+                            <small>
+                              {item.course || "Course not set"} ·{" "}
+                              {item.nationality || "Nationality not set"}
+                            </small>
+                          </td>
+                          <td>{money(item.monthlyRental)}</td>
+                          <td>
+                            <strong className="lease-end">
+                              {dateLabel(item.leaseEndDate)}
+                            </strong>
+                            <small>
+                              Starts {dateLabel(item.leaseStartDate)}
+                            </small>
+                          </td>
+                          <td>
+                            {item.salesperson || "-"}
+                            <small>{item.agency || "Direct"}</small>
+                          </td>
+                          <td>
+                            <span
+                              className={`unit-status ${
+                                item.assignmentStatus || item.profileStatus
+                              }`}
+                            >
+                              {titleCase(
+                                item.assignmentStatus || item.profileStatus,
+                              )}
+                            </span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              onClick={() =>
+                                setSelectedStudentRef({
+                                  studentId: item.id,
+                                  assignmentId: item.assignmentId,
+                                })
+                              }
+                            >
+                              Open profile
+                            </button>
+                          </td>
+                        </tr>
+                      ))
                     ) : (
-                      <span className="muted">Not assigned</span>
+                      <tr>
+                        <td colSpan={9}>
+                          <div className="student-empty-state">
+                            <strong>No students found</strong>
+                            <span>
+                              Try changing the tab, search or second-level
+                              filters.
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td>
-                    {s.contactNumber || "-"}
-                    <small>{s.email || "Email not set"}</small>
-                  </td>
-                  <td>
-                    {s.school || "-"}
-                    <small>
-                      {s.course || "Course not set"} ·{" "}
-                      {s.nationality || "Nationality not set"}
-                    </small>
-                  </td>
-                  <td>{money(s.monthlyRental)}</td>
-                  <td>
-                    <strong className="lease-end">
-                      {dateLabel(s.leaseEndDate)}
-                    </strong>
-                    <small>Starts {dateLabel(s.leaseStartDate)}</small>
-                  </td>
-                  <td>
-                    {s.salesperson || "-"}
-                    <small>{s.agency || "Direct"}</small>
-                  </td>
-                  <td>
-                    <span
-                      className={`unit-status ${s.assignmentStatus || s.profileStatus}`}
-                    >
-                      {titleCase(s.assignmentStatus || s.profileStatus)}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      className="secondary compact"
-                      onClick={() => setStudent(s)}
-                    >
-                      Open profile
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                  </tbody>
+                </table>
+              </div>
+
+              <footer className="student-pagination">
+                <span>
+                  Showing {rangeStart} to {rangeEnd} of {filteredStudents.length}{" "}
+                  students
+                </span>
+
+                <div className="student-pagination-buttons">
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage(Math.max(1, currentPage - 1))}
+                    aria-label="Previous page"
+                  >
+                    ‹
+                  </button>
+
+                  {paginationItems(currentPage, totalPages).map(
+                    (item, index) =>
+                      item === "ellipsis" ? (
+                        <span
+                          className="student-pagination-ellipsis"
+                          key={`ellipsis-${index}`}
+                        >
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          key={item}
+                          className={`student-page-button ${
+                            item === currentPage ? "active" : ""
+                          }`}
+                          onClick={() => setPage(item)}
+                        >
+                          {item}
+                        </button>
+                      ),
+                  )}
+
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    disabled={currentPage >= totalPages}
+                    onClick={() =>
+                      setPage(Math.min(totalPages, currentPage + 1))
+                    }
+                    aria-label="Next page"
+                  >
+                    ›
+                  </button>
+                </div>
+              </footer>
+            </section>
+          </>
+        )}
+      </div>
       {student && (
         <div
           className="drawer-backdrop"
-          onMouseDown={(e) => e.target === e.currentTarget && setStudent(null)}
+          onMouseDown={(e) => e.target === e.currentTarget && setSelectedStudentRef(null)}
         >
           <aside className="unit-drawer student-drawer">
             <div className="drawer-head">
@@ -295,7 +879,7 @@ export function StudentsModule({
                     : "Room not assigned"}
                 </p>
               </div>
-              <button onClick={() => setStudent(null)}>×</button>
+              <button onClick={() => setSelectedStudentRef(null)}>×</button>
             </div>
             <form
               className="drawer-section"
@@ -382,8 +966,8 @@ export function StudentsModule({
                     <select name="race" defaultValue={student.race || ""}>
                       <option value="">Select race</option>
                       <option value="Chinese">Chinese</option>
-                      <option value="Malay">Melayu</option>
-                      <option value="Indian">India</option>
+                      <option value="Malay">Malay</option>
+                      <option value="Indian">Indian</option>
                       <option value="Others">Others</option>
                     </select>
                   </label>
@@ -659,13 +1243,13 @@ export function StudentsModule({
               </div>
               <div className="compact-list">
                 {data.invoices
-                  .filter((invoice) => invoice.studentId === student.id)
+                  .filter((invoice) => String(invoice.studentId) === String(student.id))
                   .slice(0, 12)
                   .map((invoice) => (
                     <span key={invoice.id}>
                       <code>{invoice.invoiceNo}</code>
                       <b>
-                        {invoice.items
+                        {(invoice.items || [])
                           .map((item: Row) => item.description)
                           .join(", ") || "No items"}
                       </b>
@@ -680,7 +1264,7 @@ export function StudentsModule({
                     </span>
                   ))}
                 {!data.invoices.some(
-                  (invoice) => invoice.studentId === student.id,
+                  (invoice) => String(invoice.studentId) === String(student.id),
                 ) && (
                     <p className="empty-copy">
                       No billing records for this student yet.
@@ -736,7 +1320,7 @@ export function StudentsModule({
         <Modal
           title="Add new student"
           kicker="NEW RESIDENT PROFILE"
-          onClose={() => setModal("")}
+          onClose={closeAddStudentModal}
           wide
         >
           <form
@@ -747,10 +1331,7 @@ export function StudentsModule({
                 { action: "student-create", ...formValues(e) },
                 "Student added",
               );
-              if (ok) {
-                setModal("");
-                setAddAssignRoom(false);
-              }
+              if (ok) closeAddStudentModal();
             }}
           >
             <div className="drawer-subsection wide">
@@ -795,11 +1376,24 @@ export function StudentsModule({
                 </label>
                 <label>
                   Race
-                  <input name="race" />
+                  <select name="race" defaultValue="">
+                    <option value="">Select race</option>
+                    <option value="Chinese">Chinese</option>
+                    <option value="Malay">Malay</option>
+                    <option value="Indian">Indian</option>
+                    <option value="Others">Others</option>
+                  </select>
                 </label>
                 <label>
                   Religion
-                  <input name="religion" />
+                  <select name="religion" defaultValue="">
+                    <option value="">Select religion</option>
+                    <option value="Hinduism">Hinduism</option>
+                    <option value="Buddhism">Buddhism</option>
+                    <option value="Islam">Islam</option>
+                    <option value="Christianity">Christianity</option>
+                    <option value="Others">Others</option>
+                  </select>
                 </label>
               </div>
             </div>
@@ -879,7 +1473,7 @@ export function StudentsModule({
                     <SearchSelect
                       name="bedSpaceId"
                       required
-                      options={vacantBedOptions}
+                      options={addStudentBedOptions}
                       placeholder="Type room code, unit or hostel"
                     />
                   </label>
@@ -945,7 +1539,7 @@ export function StudentsModule({
               );
               if (ok) {
                 setModal("");
-                setStudent(null);
+                setSelectedStudentRef(null);
               }
             }}
           >
@@ -1129,7 +1723,7 @@ export function StudentsModule({
               );
               if (ok) {
                 setModal("");
-                setStudent(null);
+                setSelectedStudentRef(null);
               }
             }}
           >
@@ -1138,7 +1732,7 @@ export function StudentsModule({
               <SearchSelect
                 name="bedSpaceId"
                 required
-                options={vacantBedOptions}
+                options={allVacantBedOptions}
                 placeholder="Type room code, unit or hostel"
               />
             </label>
@@ -1184,4 +1778,4 @@ export function StudentsModule({
       )}
     </>
   );
-}
+} 
