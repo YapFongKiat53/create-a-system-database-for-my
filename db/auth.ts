@@ -136,27 +136,28 @@ export async function getSessionUser(
   const token = readSessionCookie(request);
   if (!token) return null;
   const db = getDb();
-  const row = await db
-    .select({
-      id: appUsers.id,
-      email: appUsers.email,
-      displayName: appUsers.displayName,
-      status: appUsers.status,
-      studentId: appUsers.studentId,
-      roleId: appRoles.id,
-      roleKey: appRoles.roleKey,
-      roleName: appRoles.name,
-    })
-    .from(userSessions)
-    .innerJoin(appUsers, eq(userSessions.userId, appUsers.id))
-    .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
-    .where(
-      and(
-        eq(userSessions.tokenHash, await sha256(token)),
-        gt(userSessions.expiresAt, new Date().toISOString()),
-      ),
-    )
-    .get();
+  const row = (
+    await db
+      .select({
+        id: appUsers.id,
+        email: appUsers.email,
+        displayName: appUsers.displayName,
+        status: appUsers.status,
+        studentId: appUsers.studentId,
+        roleId: appRoles.id,
+        roleKey: appRoles.roleKey,
+        roleName: appRoles.name,
+      })
+      .from(userSessions)
+      .innerJoin(appUsers, eq(userSessions.userId, appUsers.id))
+      .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+      .where(
+        and(
+          eq(userSessions.tokenHash, await sha256(token)),
+          gt(userSessions.expiresAt, new Date().toISOString()),
+        ),
+      )
+  )[0];
   if (!row || row.status !== "active") return null;
   return row;
 }
