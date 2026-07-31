@@ -12,9 +12,11 @@ function getClient() {
   }
   // Cloudflare Workers forbids reusing I/O objects (sockets) across request
   // boundaries, so the client can't be cached at module scope — create a
-  // fresh one per call. Supabase's pooled (Supavisor) connection is designed
-  // for exactly this pattern of many short-lived connections.
-  return postgres(bindings.DATABASE_URL, { max: 5 });
+  // fresh one per call. Each client is now ephemeral (built fresh per
+  // getDb() call, torn down with the request), so it only ever needs one
+  // connection; Supabase's pooled (Supavisor) connection is designed for
+  // exactly this pattern of many short-lived connections.
+  return postgres(bindings.DATABASE_URL, { max: 1 });
 }
 
 export function getDb() {
