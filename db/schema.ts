@@ -1,21 +1,24 @@
 import { sql } from "drizzle-orm";
 import {
-  integer,
-  real,
-  sqliteTable,
+  bigserial,
+  boolean,
+  doublePrecision,
+  pgTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+  integer,
+  bigint,
+} from "drizzle-orm/pg-core";
 
-export const hostelProperties = sqliteTable("hostel_properties", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const hostelProperties = pgTable("hostel_properties", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   code: text("code").notNull().unique(),
   name: text("name").notNull(),
   address: text("address").notNull(),
   status: text("status").notNull().default("active"),
-  electricityRate: real("electricity_rate").notNull().default(0),
-  monthlyCleaningFee: real("monthly_cleaning_fee").notNull().default(0),
-  monthlyWaterDispenserFee: real("monthly_water_dispenser_fee")
+  electricityRate: doublePrecision("electricity_rate").notNull().default(0),
+  monthlyCleaningFee: doublePrecision("monthly_cleaning_fee").notNull().default(0),
+  monthlyWaterDispenserFee: doublePrecision("monthly_water_dispenser_fee")
     .notNull()
     .default(0),
   createdAt: text("created_at")
@@ -23,10 +26,10 @@ export const hostelProperties = sqliteTable("hostel_properties", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const hostelUnits = sqliteTable(
+export const hostelUnits = pgTable(
   "hostel_units",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     hostelId: integer("hostel_id")
       .notNull()
       .references(() => hostelProperties.id),
@@ -45,10 +48,10 @@ export const hostelUnits = sqliteTable(
   ],
 );
 
-export const hostelRooms = sqliteTable(
+export const hostelRooms = pgTable(
   "hostel_rooms",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     unitId: integer("unit_id")
       .notNull()
       .references(() => hostelUnits.id),
@@ -56,8 +59,8 @@ export const hostelRooms = sqliteTable(
     status: text("status").notNull().default("active"),
     bathroomType: text("bathroom_type").notNull().default("unknown"),
     roomType: text("room_type").notNull().default("auto"),
-    salesRate: real("sales_rate"),
-    promotionRate: real("promotion_rate"),
+    salesRate: doublePrecision("sales_rate"),
+    promotionRate: doublePrecision("promotion_rate"),
     promotionStartDate: text("promotion_start_date"),
     promotionEndDate: text("promotion_end_date"),
     meterSerial: text("meter_serial").notNull().default(""),
@@ -67,10 +70,10 @@ export const hostelRooms = sqliteTable(
   ],
 );
 
-export const bedSpaces = sqliteTable(
+export const bedSpaces = pgTable(
   "bed_spaces",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     roomId: integer("room_id")
       .notNull()
       .references(() => hostelRooms.id),
@@ -80,8 +83,8 @@ export const bedSpaces = sqliteTable(
     specialUse: text("special_use"),
     bedType: text("bed_type").notNull().default("unknown"),
     meterSerial: text("meter_serial").notNull().default(""),
-    monthlyRental: real("monthly_rental"),
-    legacyAccessCardDeposit: real("legacy_access_card_deposit"),
+    monthlyRental: doublePrecision("monthly_rental"),
+    legacyAccessCardDeposit: doublePrecision("legacy_access_card_deposit"),
     updatedAt: text("updated_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -89,13 +92,13 @@ export const bedSpaces = sqliteTable(
   (table) => [uniqueIndex("room_bed_unique").on(table.roomId, table.bedLabel)],
 );
 
-export const accessCards = sqliteTable("access_cards", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const accessCards = pgTable("access_cards", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   unitId: integer("unit_id")
     .notNull()
     .references(() => hostelUnits.id),
   cardCode: text("card_code").notNull().unique(),
-  depositAmount: real("deposit_amount").notNull().default(0),
+  depositAmount: doublePrecision("deposit_amount").notNull().default(0),
   status: text("status").notNull().default("available"),
   notes: text("notes").notNull().default(""),
   createdAt: text("created_at")
@@ -103,8 +106,8 @@ export const accessCards = sqliteTable("access_cards", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const studentProfiles = sqliteTable("student_profiles", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const studentProfiles = pgTable("student_profiles", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   sourceKey: text("source_key").notNull().unique(),
   studentCode: text("student_code").notNull().default(""),
   fullName: text("full_name").notNull(),
@@ -130,10 +133,10 @@ export const studentProfiles = sqliteTable("student_profiles", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const accommodationAssignments = sqliteTable(
+export const accommodationAssignments = pgTable(
   "accommodation_assignments",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     sourceKey: text("source_key").notNull().unique(),
     studentId: integer("student_id")
       .notNull()
@@ -141,18 +144,18 @@ export const accommodationAssignments = sqliteTable(
     bedSpaceId: integer("bed_space_id")
       .notNull()
       .references(() => bedSpaces.id),
-    monthlyRental: real("monthly_rental"),
-    securityDeposit: real("security_deposit"),
-    accessCardDeposit: real("access_card_deposit"),
-    parkingDeposit: real("parking_deposit"),
+    monthlyRental: doublePrecision("monthly_rental"),
+    securityDeposit: doublePrecision("security_deposit"),
+    accessCardDeposit: doublePrecision("access_card_deposit"),
+    parkingDeposit: doublePrecision("parking_deposit"),
     salesperson: text("salesperson").notNull().default(""),
     checkInDate: text("check_in_date"),
     agreementStartDate: text("agreement_start_date"),
     agreementEndDate: text("agreement_end_date"),
     agreementDuration: text("agreement_duration").notNull().default(""),
     checkOutDate: text("check_out_date"),
-    checkInMeter: real("check_in_meter"),
-    checkOutMeter: real("check_out_meter"),
+    checkInMeter: doublePrecision("check_in_meter"),
+    checkOutMeter: doublePrecision("check_out_meter"),
     sourceReservationId: integer("source_reservation_id"),
     remarks: text("remarks").notNull().default(""),
     status: text("status").notNull().default("active"),
@@ -162,8 +165,8 @@ export const accommodationAssignments = sqliteTable(
   },
 );
 
-export const reservations = sqliteTable("reservations", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const reservations = pgTable("reservations", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   referenceNo: text("reference_no").notNull().unique(),
   studentName: text("student_name").notNull(),
   reservationType: text("reservation_type").notNull().default("individual"),
@@ -182,7 +185,7 @@ export const reservations = sqliteTable("reservations", {
   bathroomType: text("bathroom_type").notNull().default("any"),
   targetMoveInDate: text("target_move_in_date").notNull(),
   expectedEndDate: text("expected_end_date"),
-  budgetMax: real("budget_max"),
+  budgetMax: doublePrecision("budget_max"),
   provisionalBedSpaceId: integer("provisional_bed_space_id").references(
     () => bedSpaces.id,
   ),
@@ -191,10 +194,10 @@ export const reservations = sqliteTable("reservations", {
   ),
   holdExpiresAt: text("hold_expires_at"),
   paymentStatus: text("payment_status").notNull().default("unpaid"),
-  amountPaid: real("amount_paid").notNull().default(0),
-  totalPayable: real("total_payable"),
+  amountPaid: doublePrecision("amount_paid").notNull().default(0),
+  totalPayable: doublePrecision("total_payable"),
   paymentReference: text("payment_reference").notNull().default(""),
-  inventoryCommitted: integer("inventory_committed", { mode: "boolean" })
+  inventoryCommitted: boolean("inventory_committed")
     .notNull()
     .default(false),
   paymentUpdatedAt: text("payment_updated_at"),
@@ -206,8 +209,8 @@ export const reservations = sqliteTable("reservations", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const unitServices = sqliteTable("unit_services", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const unitServices = pgTable("unit_services", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   unitId: integer("unit_id")
     .notNull()
     .references(() => hostelUnits.id),
@@ -229,10 +232,10 @@ export const unitServices = sqliteTable("unit_services", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const unitOwnerDetails = sqliteTable(
+export const unitOwnerDetails = pgTable(
   "unit_owner_details",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     unitId: integer("unit_id")
       .notNull()
       .references(() => hostelUnits.id),
@@ -252,16 +255,16 @@ export const unitOwnerDetails = sqliteTable(
     bankName: text("bank_name").notNull().default(""),
     leaseStartDate: text("lease_start_date"),
     leaseEndDate: text("lease_end_date"),
-    monthlyLeaseRental: real("monthly_lease_rental"),
-    servicePercentage: real("service_percentage"),
-    securityDeposit: real("security_deposit"),
-    utilityDeposit: real("utility_deposit"),
-    commissionAmount: real("commission_amount"),
+    monthlyLeaseRental: doublePrecision("monthly_lease_rental"),
+    servicePercentage: doublePrecision("service_percentage"),
+    securityDeposit: doublePrecision("security_deposit"),
+    utilityDeposit: doublePrecision("utility_deposit"),
+    commissionAmount: doublePrecision("commission_amount"),
     tnbAccount: text("tnb_account").notNull().default(""),
     airSelangorAccount: text("air_selangor_account").notNull().default(""),
     indahWaterAccount: text("indah_water_account").notNull().default(""),
-    monthlyCleaningFee: real("monthly_cleaning_fee"),
-    monthlyWaterDispenserFee: real("monthly_water_dispenser_fee"),
+    monthlyCleaningFee: doublePrecision("monthly_cleaning_fee"),
+    monthlyWaterDispenserFee: doublePrecision("monthly_water_dispenser_fee"),
     notes: text("notes").notNull().default(""),
     updatedAt: text("updated_at")
       .notNull()
@@ -270,12 +273,12 @@ export const unitOwnerDetails = sqliteTable(
   (table) => [uniqueIndex("unit_owner_unique").on(table.unitId)],
 );
 
-export const reservationPayments = sqliteTable("reservation_payments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const reservationPayments = pgTable("reservation_payments", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   reservationId: integer("reservation_id")
     .notNull()
     .references(() => reservations.id),
-  amount: real("amount").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
   reference: text("reference").notNull().default(""),
   paymentMethod: text("payment_method").notNull().default("bank-transfer"),
   paidAt: text("paid_at")
@@ -284,34 +287,34 @@ export const reservationPayments = sqliteTable("reservation_payments", {
   notes: text("notes").notNull().default(""),
 });
 
-export const reservationCharges = sqliteTable("reservation_charges", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const reservationCharges = pgTable("reservation_charges", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   reservationId: integer("reservation_id")
     .notNull()
     .references(() => reservations.id),
   chargeType: text("charge_type").notNull(),
-  amount: real("amount").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
   notes: text("notes").notNull().default(""),
 });
 
-export const studentRateChanges = sqliteTable("student_rate_changes", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const studentRateChanges = pgTable("student_rate_changes", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   assignmentId: integer("assignment_id")
     .notNull()
     .references(() => accommodationAssignments.id),
   effectiveDate: text("effective_date").notNull(),
-  monthlyRental: real("monthly_rental"),
-  securityDeposit: real("security_deposit"),
+  monthlyRental: doublePrecision("monthly_rental"),
+  securityDeposit: doublePrecision("security_deposit"),
   reason: text("reason").notNull().default(""),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const parkingLots = sqliteTable(
+export const parkingLots = pgTable(
   "parking_lots",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     hostelId: integer("hostel_id")
       .notNull()
       .references(() => hostelProperties.id),
@@ -325,8 +328,8 @@ export const parkingLots = sqliteTable(
   ],
 );
 
-export const parkingRentals = sqliteTable("parking_rentals", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const parkingRentals = pgTable("parking_rentals", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   parkingLotId: integer("parking_lot_id")
     .notNull()
     .references(() => parkingLots.id),
@@ -337,8 +340,8 @@ export const parkingRentals = sqliteTable("parking_rentals", {
   unitNumber: text("unit_number").notNull().default(""),
   carPlateNumber: text("car_plate_number").notNull().default(""),
   carModel: text("car_model").notNull().default(""),
-  monthlyRental: real("monthly_rental").notNull().default(0),
-  depositAmount: real("deposit_amount").notNull().default(0),
+  monthlyRental: doublePrecision("monthly_rental").notNull().default(0),
+  depositAmount: doublePrecision("deposit_amount").notNull().default(0),
   startDate: text("start_date").notNull(),
   endDate: text("end_date"),
   paidUntil: text("paid_until"),
@@ -350,14 +353,14 @@ export const parkingRentals = sqliteTable("parking_rentals", {
   notes: text("notes").notNull().default(""),
 });
 
-export const ownerParkingPayments = sqliteTable("owner_parking_payments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const ownerParkingPayments = pgTable("owner_parking_payments", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   unitId: integer("unit_id")
     .notNull()
     .references(() => hostelUnits.id),
   parkingLotId: integer("parking_lot_id").references(() => parkingLots.id),
   period: text("period").notNull().default(""),
-  amount: real("amount").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
   paymentDate: text("payment_date").notNull(),
   method: text("method").notNull().default("bank-transfer"),
   reference: text("reference").notNull().default(""),
@@ -368,16 +371,16 @@ export const ownerParkingPayments = sqliteTable("owner_parking_payments", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const schools = sqliteTable("schools", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const schools = pgTable("schools", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   name: text("name").notNull().unique(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const maintenanceTickets = sqliteTable("maintenance_tickets", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const maintenanceTickets = pgTable("maintenance_tickets", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   ticketNo: text("ticket_no").notNull().unique(),
   studentId: integer("student_id").references(() => studentProfiles.id),
   hostelId: integer("hostel_id").references(() => hostelProperties.id),
@@ -396,9 +399,9 @@ export const maintenanceTickets = sqliteTable("maintenance_tickets", {
   costResponsibility: text("cost_responsibility")
     .notNull()
     .default("management"),
-  estimatedCost: real("estimated_cost"),
-  actualCost: real("actual_cost"),
-  studentCharge: real("student_charge"),
+  estimatedCost: doublePrecision("estimated_cost"),
+  actualCost: doublePrecision("actual_cost"),
+  studentCharge: doublePrecision("student_charge"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -407,8 +410,8 @@ export const maintenanceTickets = sqliteTable("maintenance_tickets", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const ticketMessages = sqliteTable("ticket_messages", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const ticketMessages = pgTable("ticket_messages", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   ticketId: integer("ticket_id")
     .notNull()
     .references(() => maintenanceTickets.id),
@@ -421,10 +424,10 @@ export const ticketMessages = sqliteTable("ticket_messages", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const ticketCategories = sqliteTable(
+export const ticketCategories = pgTable(
   "ticket_categories",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     category: text("category").notNull(),
     subcategory: text("subcategory").notNull(),
     status: text("status").notNull().default("active"),
@@ -435,8 +438,8 @@ export const ticketCategories = sqliteTable(
   ],
 );
 
-export const generalCosts = sqliteTable("general_costs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const generalCosts = pgTable("general_costs", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   costDate: text("cost_date").notNull(),
   hostelId: integer("hostel_id").references(() => hostelProperties.id),
   unitId: integer("unit_id").references(() => hostelUnits.id),
@@ -444,8 +447,8 @@ export const generalCosts = sqliteTable("general_costs", {
   costType: text("cost_type").notNull().default("maintenance"),
   description: text("description").notNull(),
   responsibility: text("responsibility").notNull().default("management"),
-  amount: real("amount").notNull().default(0),
-  studentCharge: real("student_charge").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
+  studentCharge: doublePrecision("student_charge").notNull().default(0),
   notes: text("notes").notNull().default(""),
   createdBy: text("created_by").notNull().default("Administrator"),
   createdAt: text("created_at")
@@ -453,8 +456,8 @@ export const generalCosts = sqliteTable("general_costs", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const storedAttachments = sqliteTable("stored_attachments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const storedAttachments = pgTable("stored_attachments", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   contextType: text("context_type").notNull(),
   recordId: integer("record_id").notNull(),
   objectKey: text("object_key").notNull().unique(),
@@ -469,14 +472,14 @@ export const storedAttachments = sqliteTable("stored_attachments", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const meterReadings = sqliteTable("meter_readings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const meterReadings = pgTable("meter_readings", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   bedSpaceId: integer("bed_space_id")
     .notNull()
     .references(() => bedSpaces.id),
   roomId: integer("room_id").references(() => hostelRooms.id),
   readingDate: text("reading_date").notNull(),
-  readingValue: real("reading_value").notNull(),
+  readingValue: doublePrecision("reading_value").notNull(),
   readingType: text("reading_type").notNull().default("monthly"),
   submittedBy: text("submitted_by").notNull().default("Maintenance Team"),
   notes: text("notes").notNull().default(""),
@@ -485,8 +488,8 @@ export const meterReadings = sqliteTable("meter_readings", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const billingCycles = sqliteTable("billing_cycles", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const billingCycles = pgTable("billing_cycles", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   periodLabel: text("period_label").notNull().unique(),
   cutoffDate: text("cutoff_date").notNull(),
   dueDate: text("due_date").notNull(),
@@ -497,8 +500,8 @@ export const billingCycles = sqliteTable("billing_cycles", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const billingInvoices = sqliteTable("billing_invoices", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const billingInvoices = pgTable("billing_invoices", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   invoiceNo: text("invoice_no").notNull().unique(),
   cycleId: integer("cycle_id")
     .notNull()
@@ -511,32 +514,32 @@ export const billingInvoices = sqliteTable("billing_invoices", {
   ),
   dueDate: text("due_date").notNull(),
   status: text("status").notNull().default("unpaid"),
-  totalAmount: real("total_amount").notNull().default(0),
-  amountPaid: real("amount_paid").notNull().default(0),
+  totalAmount: doublePrecision("total_amount").notNull().default(0),
+  amountPaid: doublePrecision("amount_paid").notNull().default(0),
   invoiceFrequency: text("invoice_frequency").notNull().default("on-request"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const billingItems = sqliteTable("billing_items", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const billingItems = pgTable("billing_items", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   invoiceId: integer("invoice_id")
     .notNull()
     .references(() => billingInvoices.id),
   itemType: text("item_type").notNull(),
   description: text("description").notNull(),
-  quantity: real("quantity").notNull().default(1),
-  rate: real("rate").notNull().default(0),
-  amount: real("amount").notNull().default(0),
+  quantity: doublePrecision("quantity").notNull().default(1),
+  rate: doublePrecision("rate").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
 });
 
-export const billingPaymentRecords = sqliteTable("billing_payment_records", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const billingPaymentRecords = pgTable("billing_payment_records", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   invoiceId: integer("invoice_id")
     .notNull()
     .references(() => billingInvoices.id),
-  amount: real("amount").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
   reference: text("reference").notNull().default(""),
   remark: text("remark").notNull().default(""),
   status: text("status").notNull().default("pending-verification"),
@@ -548,18 +551,18 @@ export const billingPaymentRecords = sqliteTable("billing_payment_records", {
     .default(sql`CURRENT_TIMESTAMP`),
   verifiedAt: text("verified_at"),
   verifiedBy: text("verified_by").notNull().default(""),
-  verifiedAmount: real("verified_amount"),
+  verifiedAmount: doublePrecision("verified_amount"),
   actualReference: text("actual_reference").notNull().default(""),
   receiptNo: text("receipt_no").notNull().default(""),
 });
 
-export const billingItemAdjustments = sqliteTable("billing_item_adjustments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const billingItemAdjustments = pgTable("billing_item_adjustments", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   billingItemId: integer("billing_item_id")
     .notNull()
     .references(() => billingItems.id),
-  previousAmount: real("previous_amount").notNull().default(0),
-  newAmount: real("new_amount").notNull().default(0),
+  previousAmount: doublePrecision("previous_amount").notNull().default(0),
+  newAmount: doublePrecision("new_amount").notNull().default(0),
   reason: text("reason").notNull(),
   requestedBy: text("requested_by").notNull(),
   approvalStatus: text("approval_status").notNull().default("pending"),
@@ -570,8 +573,8 @@ export const billingItemAdjustments = sqliteTable("billing_item_adjustments", {
   approvedAt: text("approved_at"),
 });
 
-export const announcements = sqliteTable("announcements", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const announcements = pgTable("announcements", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   title: text("title").notNull(),
   body: text("body").notNull(),
   audienceType: text("audience_type").notNull().default("all"),
@@ -580,7 +583,7 @@ export const announcements = sqliteTable("announcements", {
   unitId: integer("unit_id").references(() => hostelUnits.id),
   priority: text("priority").notNull().default("normal"),
   status: text("status").notNull().default("published"),
-  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  pinned: boolean("pinned").notNull().default(false),
   publishAt: text("publish_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -591,19 +594,19 @@ export const announcements = sqliteTable("announcements", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const appRoles = sqliteTable("app_roles", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const appRoles = pgTable("app_roles", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   roleKey: text("role_key").notNull().unique(),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
-  isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+  isSystem: boolean("is_system").notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const appUsers = sqliteTable("app_users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const appUsers = pgTable("app_users", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   email: text("email").notNull().unique(),
   displayName: text("display_name").notNull(),
   roleId: integer("role_id")
@@ -619,8 +622,8 @@ export const appUsers = sqliteTable("app_users", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const userSessions = sqliteTable("user_sessions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const userSessions = pgTable("user_sessions", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   // SHA-256 of the cookie token; the raw token is never stored.
   tokenHash: text("token_hash").notNull().unique(),
   userId: integer("user_id")
@@ -632,23 +635,23 @@ export const userSessions = sqliteTable("user_sessions", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const rolePermissions = sqliteTable(
+export const rolePermissions = pgTable(
   "role_permissions",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     roleId: integer("role_id")
       .notNull()
       .references(() => appRoles.id),
     moduleKey: text("module_key").notNull(),
-    canView: integer("can_view", { mode: "boolean" }).notNull().default(false),
-    canCreate: integer("can_create", { mode: "boolean" })
+    canView: boolean("can_view").notNull().default(false),
+    canCreate: boolean("can_create")
       .notNull()
       .default(false),
-    canEdit: integer("can_edit", { mode: "boolean" }).notNull().default(false),
-    canDelete: integer("can_delete", { mode: "boolean" })
+    canEdit: boolean("can_edit").notNull().default(false),
+    canDelete: boolean("can_delete")
       .notNull()
       .default(false),
-    canApprove: integer("can_approve", { mode: "boolean" })
+    canApprove: boolean("can_approve")
       .notNull()
       .default(false),
   },
@@ -657,13 +660,13 @@ export const rolePermissions = sqliteTable(
   ],
 );
 
-export const reminderTemplates = sqliteTable("reminder_templates", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const reminderTemplates = pgTable("reminder_templates", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   reminderKey: text("reminder_key").notNull().unique(),
   dayOfMonth: integer("day_of_month").notNull(),
   subject: text("subject").notNull(),
   message: text("message").notNull(),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -672,25 +675,25 @@ export const reminderTemplates = sqliteTable("reminder_templates", {
 // The original prototype tables remain declared so the hosted migration can add
 // the rebuilt module without risking destructive changes. The application no
 // longer reads or writes these tables.
-export const legacyHostels = sqliteTable("hostels", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyHostels = pgTable("hostels", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   name: text("name").notNull(),
   address: text("address").notNull().default(""),
   wardenName: text("warden_name").notNull().default(""),
 });
-export const legacyRooms = sqliteTable("rooms", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyRooms = pgTable("rooms", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   hostelId: integer("hostel_id")
     .notNull()
     .references(() => legacyHostels.id),
   roomNumber: text("room_number").notNull(),
   floor: integer("floor").notNull().default(1),
   capacity: integer("capacity").notNull().default(2),
-  monthlyRate: real("monthly_rate").notNull().default(0),
+  monthlyRate: doublePrecision("monthly_rate").notNull().default(0),
   status: text("status").notNull().default("available"),
 });
-export const legacyStudents = sqliteTable("students", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyStudents = pgTable("students", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   studentNo: text("student_no").notNull().unique(),
   fullName: text("full_name").notNull(),
   email: text("email").notNull(),
@@ -704,8 +707,8 @@ export const legacyStudents = sqliteTable("students", {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
-export const legacyComplaints = sqliteTable("complaints", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyComplaints = pgTable("complaints", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   ticketNo: text("ticket_no").notNull().unique(),
   studentId: integer("student_id")
     .notNull()
@@ -723,26 +726,26 @@ export const legacyComplaints = sqliteTable("complaints", {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
-export const legacyInvoices = sqliteTable("invoices", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyInvoices = pgTable("invoices", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   invoiceNo: text("invoice_no").notNull().unique(),
   studentId: integer("student_id")
     .notNull()
     .references(() => legacyStudents.id),
   description: text("description").notNull(),
-  amount: real("amount").notNull(),
+  amount: doublePrecision("amount").notNull(),
   dueDate: text("due_date").notNull(),
   status: text("status").notNull().default("unpaid"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
-export const legacyPayments = sqliteTable("payments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const legacyPayments = pgTable("payments", {
+  id: bigserial("id", { mode: "bigint" }).primaryKey(),
   invoiceId: integer("invoice_id")
     .notNull()
     .references(() => legacyInvoices.id),
-  amount: real("amount").notNull(),
+  amount: doublePrecision("amount").notNull(),
   method: text("method").notNull().default("bank transfer"),
   reference: text("reference").notNull().default(""),
   paidAt: text("paid_at")
