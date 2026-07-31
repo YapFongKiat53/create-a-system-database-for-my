@@ -1713,11 +1713,12 @@ export async function POST(request: Request) {
     } else if (action === "unit-create") {
       if (!body.hostelId || !asText(body.unitCode))
         throw new Error("Hostel and unit number are required");
-      const property = await db
-        .select()
-        .from(hostelProperties)
-        .where(eq(hostelProperties.id, asNumber(body.hostelId)))
-        .get();
+      const property = (
+        await db
+          .select()
+          .from(hostelProperties)
+          .where(eq(hostelProperties.id, asNumber(body.hostelId)))
+      )[0];
       if (!property) throw new Error("Hostel not found");
       const unitCode = asText(body.unitCode);
       const result = (
@@ -2449,28 +2450,29 @@ export async function POST(request: Request) {
       let contactNumber = asText(body.contactNumber);
       let unitNumber = asText(body.unitNumber);
       if (tenantType === "in-house" && body.studentId) {
-        const linked = await db
-          .select({
-            fullName: studentProfiles.fullName,
-            contactNumber: studentProfiles.contactNumber,
-            unitCode: hostelUnits.unitCode,
-          })
-          .from(studentProfiles)
-          .leftJoin(
-            accommodationAssignments,
-            and(
-              eq(accommodationAssignments.studentId, studentProfiles.id),
-              eq(accommodationAssignments.status, "active"),
-            ),
-          )
-          .leftJoin(
-            bedSpaces,
-            eq(accommodationAssignments.bedSpaceId, bedSpaces.id),
-          )
-          .leftJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
-          .leftJoin(hostelUnits, eq(hostelRooms.unitId, hostelUnits.id))
-          .where(eq(studentProfiles.id, asNumber(body.studentId)))
-          .get();
+        const linked = (
+          await db
+            .select({
+              fullName: studentProfiles.fullName,
+              contactNumber: studentProfiles.contactNumber,
+              unitCode: hostelUnits.unitCode,
+            })
+            .from(studentProfiles)
+            .leftJoin(
+              accommodationAssignments,
+              and(
+                eq(accommodationAssignments.studentId, studentProfiles.id),
+                eq(accommodationAssignments.status, "active"),
+              ),
+            )
+            .leftJoin(
+              bedSpaces,
+              eq(accommodationAssignments.bedSpaceId, bedSpaces.id),
+            )
+            .leftJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
+            .leftJoin(hostelUnits, eq(hostelRooms.unitId, hostelUnits.id))
+            .where(eq(studentProfiles.id, asNumber(body.studentId)))
+        )[0];
         if (linked) {
           tenantName = linked.fullName;
           contactNumber = linked.contactNumber;
@@ -2510,11 +2512,12 @@ export async function POST(request: Request) {
     } else if (action === "parking-rental-update") {
       const rentalId = asNumber(body.rentalId);
       if (!rentalId) throw new Error("Rental is required");
-      const existing = await db
-        .select()
-        .from(parkingRentals)
-        .where(eq(parkingRentals.id, rentalId))
-        .get();
+      const existing = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(eq(parkingRentals.id, rentalId))
+      )[0];
       if (!existing) throw new Error("Parking rental not found");
       const status = asText(body.status, existing.status || "active");
       await db
@@ -2546,11 +2549,12 @@ export async function POST(request: Request) {
     } else if (action === "parking-rental-delete") {
       const rentalId = asNumber(body.rentalId);
       if (!rentalId) throw new Error("Rental is required");
-      const rental = await db
-        .select()
-        .from(parkingRentals)
-        .where(eq(parkingRentals.id, rentalId))
-        .get();
+      const rental = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(eq(parkingRentals.id, rentalId))
+      )[0];
       await db.delete(parkingRentals).where(eq(parkingRentals.id, rentalId));
       if (rental?.parkingLotId && rental.status === "active")
         await db
@@ -2638,11 +2642,12 @@ export async function POST(request: Request) {
       const ticketId = asNumber(body.ticketId);
       if (!ticketId) throw new Error("Ticket is required");
       if (currentUser.roleKey === "tenant") {
-        const ownTicket = await db
-          .select({ studentId: maintenanceTickets.studentId })
-          .from(maintenanceTickets)
-          .where(eq(maintenanceTickets.id, ticketId))
-          .get();
+        const ownTicket = (
+          await db
+            .select({ studentId: maintenanceTickets.studentId })
+            .from(maintenanceTickets)
+            .where(eq(maintenanceTickets.id, ticketId))
+        )[0];
         if (!ownTicket || ownTicket.studentId !== currentUser.studentId)
           throw new Error("You can only update your own ticket");
         if (!asText(body.message))
@@ -2733,12 +2738,13 @@ export async function POST(request: Request) {
       const roomId = asNumber(body.roomId);
       if (!roomId || !body.readingDate || body.readingValue === "")
         throw new Error("Room code, date and reading are required");
-      const canonicalBed = await db
-        .select({ id: bedSpaces.id })
-        .from(bedSpaces)
-        .where(eq(bedSpaces.roomId, roomId))
-        .orderBy(asc(bedSpaces.id))
-        .get();
+      const canonicalBed = (
+        await db
+          .select({ id: bedSpaces.id })
+          .from(bedSpaces)
+          .where(eq(bedSpaces.roomId, roomId))
+          .orderBy(asc(bedSpaces.id))
+      )[0];
       if (!canonicalBed) throw new Error("Room has no room code");
       await db
         .update(hostelRooms)
@@ -2966,11 +2972,12 @@ export async function POST(request: Request) {
     } else if (action === "billing-verify") {
       const paymentId = asNumber(body.paymentId);
       if (!paymentId) throw new Error("Payment is required");
-      const payment = await db
-        .select()
-        .from(billingPaymentRecords)
-        .where(eq(billingPaymentRecords.id, paymentId))
-        .get();
+      const payment = (
+        await db
+          .select()
+          .from(billingPaymentRecords)
+          .where(eq(billingPaymentRecords.id, paymentId))
+      )[0];
       if (!payment) throw new Error("Payment not found");
       await db
         .update(billingPaymentRecords)
@@ -2983,17 +2990,17 @@ export async function POST(request: Request) {
           receiptNo: `RCT-${payment.invoiceId}-${paymentId}`,
         })
         .where(eq(billingPaymentRecords.id, paymentId));
-      const totals = await d1
-        .prepare(
-          "SELECT COALESCE(SUM(COALESCE(verified_amount, amount)),0) total FROM billing_payment_records WHERE invoice_id=? AND (status='verified' OR id=?)",
+      const totals = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COALESCE(SUM(COALESCE(verified_amount, amount)),0) total FROM billing_payment_records WHERE invoice_id=${payment.invoiceId} AND (status='verified' OR id=${paymentId})`,
         )
-        .bind(payment.invoiceId, paymentId)
-        .first<{ total: number }>();
-      const invoice = await db
-        .select()
-        .from(billingInvoices)
-        .where(eq(billingInvoices.id, payment.invoiceId))
-        .get();
+      )[0];
+      const invoice = (
+        await db
+          .select()
+          .from(billingInvoices)
+          .where(eq(billingInvoices.id, payment.invoiceId))
+      )[0];
       const paid = Number(totals?.total || 0);
       await db
         .update(billingInvoices)
@@ -3104,11 +3111,12 @@ export async function POST(request: Request) {
       let roleId = asNumber(body.roleId);
       const linkedStudentId = asNullableNumber(body.studentId);
       if (linkedStudentId) {
-        const tenantRole = await db
-          .select({ id: appRoles.id })
-          .from(appRoles)
-          .where(eq(appRoles.roleKey, "tenant"))
-          .get();
+        const tenantRole = (
+          await db
+            .select({ id: appRoles.id })
+            .from(appRoles)
+            .where(eq(appRoles.roleKey, "tenant"))
+        )[0];
         if (tenantRole) roleId = tenantRole.id;
       }
       const values = {
@@ -3192,18 +3200,17 @@ export async function POST(request: Request) {
     } else if (action === "role-delete") {
       const roleId = asNumber(body.roleId);
       if (!roleId) throw new Error("Role is required");
-      const role = await db
-        .select()
-        .from(appRoles)
-        .where(eq(appRoles.id, roleId))
-        .get();
+      const role = (
+        await db.select().from(appRoles).where(eq(appRoles.id, roleId))
+      )[0];
       if (!role) throw new Error("Role not found");
       if (role.isSystem) throw new Error("Built-in roles cannot be deleted");
-      const inUse = await db
-        .select({ id: appUsers.id })
-        .from(appUsers)
-        .where(eq(appUsers.roleId, roleId))
-        .get();
+      const inUse = (
+        await db
+          .select({ id: appUsers.id })
+          .from(appUsers)
+          .where(eq(appUsers.roleId, roleId))
+      )[0];
       if (inUse)
         throw new Error("Reassign users on this role before deleting it");
       await db
