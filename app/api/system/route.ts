@@ -1552,37 +1552,27 @@ async function electricityShareForAssignment(
   cutoffDate: string,
   electricityRate: number,
 ) {
-  const d1 = getD1();
-  const readings = await d1
-    .prepare(
-      `
+  const db = getDb();
+  const readings = await db.execute<{ reading_value: number }>(sql`
     SELECT reading_value FROM meter_readings
-    WHERE COALESCE(room_id, (SELECT room_id FROM bed_spaces WHERE id=bed_space_id))=?
-      AND reading_date<=?
+    WHERE COALESCE(room_id, (SELECT room_id FROM bed_spaces WHERE id=bed_space_id))=${roomId}
+      AND reading_date<=${cutoffDate}
     ORDER BY reading_date DESC, id DESC LIMIT 2
-  `,
-    )
-    .bind(roomId, cutoffDate)
-    .all<{ reading_value: number }>();
-  if (readings.results.length < 2) return { usage: 0, amount: 0 };
-  const current = Number(readings.results[0].reading_value);
-  const previous = Number(readings.results[1].reading_value);
+  `);
+  if (readings.length < 2) return { usage: 0, amount: 0 };
+  const current = Number(readings[0].reading_value);
+  const previous = Number(readings[1].reading_value);
   if (!(current > previous)) return { usage: 0, amount: 0 };
-  const occupants = await d1
-    .prepare(
-      `
+  const occupants = await db.execute<{
+    id: number;
+    check_in_meter: number | null;
+    check_out_meter: number | null;
+  }>(sql`
     SELECT a.id, a.check_in_meter, a.check_out_meter FROM accommodation_assignments a
     JOIN bed_spaces b ON a.bed_space_id=b.id
-    WHERE b.room_id=? AND (a.status='active' OR a.check_out_date>=substr(?,1,7)||'-01')
-  `,
-    )
-    .bind(roomId, cutoffDate)
-    .all<{
-      id: number;
-      check_in_meter: number | null;
-      check_out_meter: number | null;
-    }>();
-  const intervals = occupants.results
+    WHERE b.room_id=${roomId} AND (a.status='active' OR a.check_out_date>=substr(${cutoffDate},1,7)||'-01')
+  `);
+  const intervals = occupants
     .map((occupant) => ({
       id: occupant.id,
       start:
