@@ -2441,6 +2441,296 @@ git commit -m "db: convert units/rooms action handlers to Postgres"
 
 ---
 
+### Task 9b: Sweep remaining `.get()`/raw-D1 calls missed by original reconnaissance (added during execution)
+
+> **Why this task exists:** Task 9's implementer found that `unit-create`'s
+> property lookup uses `.get()` and is broken at runtime — a bug that
+> predates this task and isn't part of the code Task 9 was scoped to touch.
+> Investigating turned up a real, systemic gap in the plan's original
+> reconnaissance: the "Confirmed NO raw D1 calls in" list (see the note at
+> the end of the original catalog) was built by grepping only for
+> `.prepare(`/`.batch(` — it never re-checked those same handlers for
+> Drizzle's `.get()` shortcut, which doesn't exist on the Postgres query
+> builder either. A full `grep -n "\.get()" app/api/system/route.ts` run
+> after Task 9 landed found 17 remaining calls; cross-referencing each
+> against Tasks 10-13's actual planned scope found 11 of them are NOT
+> covered by any existing task, plus one additional raw `d1.prepare()` call
+> inside `billing-verify` that was never catalogued at all (the original
+> catalog listed `billing-verify` as "not fully read"). This task fixes all
+> of them in one pass, all using the same already-proven R2 (`.get()` →
+> `(await query)[0]`) and R3 (`db.execute(sql\`...\`)`) patterns.
+
+**Files:**
+- Modify: `app/api/system/route.ts` — `unit-create` (property lookup only —
+  the INSERT itself is already correctly converted by Task 9), `parking-rental`
+  (`linked` lookup), `parking-rental-update` (`existing` lookup),
+  `parking-rental-delete` (`rental` lookup), `ticket-message` (`ownTicket`
+  lookup), `meter-reading` (`canonicalBed` lookup), `billing-verify`
+  (`payment` lookup, the raw `totals` query, `invoice` lookup), `user-save`
+  (`tenantRole` lookup), `role-delete` (`role` lookup, `inUse` lookup).
+
+- [ ] **Step 1: `unit-create`'s property lookup**
+
+```ts
+// Before
+      const property = await db
+        .select()
+        .from(hostelProperties)
+        .where(eq(hostelProperties.id, asNumber(body.hostelId)))
+        .get();
+```
+
+```ts
+// After
+      const property = (
+        await db
+          .select()
+          .from(hostelProperties)
+          .where(eq(hostelProperties.id, asNumber(body.hostelId)))
+      )[0];
+```
+
+- [ ] **Step 2: `parking-rental`'s `linked` lookup**
+
+```ts
+// Before
+          .where(eq(studentProfiles.id, asNumber(body.studentId)))
+          .get();
+```
+
+```ts
+// After
+          .where(eq(studentProfiles.id, asNumber(body.studentId)))
+      )[0];
+```
+
+(This one needs the opening of the statement re-wrapped in parens too — the full statement starts at `const linked = await db` several lines above the `.where(...)`; wrap the entire `db.select({...}).from(...).leftJoin(...)....where(...)` chain in `(await ...)` and drop `.get()`, matching every other conversion in this task.)
+
+- [ ] **Step 3: `parking-rental-update`'s `existing` lookup**
+
+```ts
+// Before
+      const existing = await db
+        .select()
+        .from(parkingRentals)
+        .where(eq(parkingRentals.id, rentalId))
+        .get();
+```
+
+```ts
+// After
+      const existing = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(eq(parkingRentals.id, rentalId))
+      )[0];
+```
+
+- [ ] **Step 4: `parking-rental-delete`'s `rental` lookup**
+
+```ts
+// Before
+      const rental = await db
+        .select()
+        .from(parkingRentals)
+        .where(eq(parkingRentals.id, rentalId))
+        .get();
+```
+
+```ts
+// After
+      const rental = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(eq(parkingRentals.id, rentalId))
+      )[0];
+```
+
+- [ ] **Step 5: `ticket-message`'s `ownTicket` lookup**
+
+```ts
+// Before
+        const ownTicket = await db
+          .select({ studentId: maintenanceTickets.studentId })
+          .from(maintenanceTickets)
+          .where(eq(maintenanceTickets.id, ticketId))
+          .get();
+```
+
+```ts
+// After
+        const ownTicket = (
+          await db
+            .select({ studentId: maintenanceTickets.studentId })
+            .from(maintenanceTickets)
+            .where(eq(maintenanceTickets.id, ticketId))
+        )[0];
+```
+
+- [ ] **Step 6: `meter-reading`'s `canonicalBed` lookup**
+
+```ts
+// Before
+      const canonicalBed = await db
+        .select({ id: bedSpaces.id })
+        .from(bedSpaces)
+        .where(eq(bedSpaces.roomId, roomId))
+        .orderBy(asc(bedSpaces.id))
+        .get();
+```
+
+```ts
+// After
+      const canonicalBed = (
+        await db
+          .select({ id: bedSpaces.id })
+          .from(bedSpaces)
+          .where(eq(bedSpaces.roomId, roomId))
+          .orderBy(asc(bedSpaces.id))
+      )[0];
+```
+
+- [ ] **Step 7: `billing-verify`'s `payment` lookup, raw `totals` query, and `invoice` lookup**
+
+```ts
+// Before
+      const payment = await db
+        .select()
+        .from(billingPaymentRecords)
+        .where(eq(billingPaymentRecords.id, paymentId))
+        .get();
+      if (!payment) throw new Error("Payment not found");
+      await db
+        .update(billingPaymentRecords)
+        .set({
+          status: "verified",
+          verifiedAt: nowIso(),
+          verifiedBy: currentUser.displayName,
+          verifiedAmount: asNumber(body.verifiedAmount, payment.amount),
+          actualReference: asText(body.actualReference),
+          receiptNo: `RCT-${payment.invoiceId}-${paymentId}`,
+        })
+        .where(eq(billingPaymentRecords.id, paymentId));
+      const totals = await d1
+        .prepare(
+          "SELECT COALESCE(SUM(COALESCE(verified_amount, amount)),0) total FROM billing_payment_records WHERE invoice_id=? AND (status='verified' OR id=?)",
+        )
+        .bind(payment.invoiceId, paymentId)
+        .first<{ total: number }>();
+      const invoice = await db
+        .select()
+        .from(billingInvoices)
+        .where(eq(billingInvoices.id, payment.invoiceId))
+        .get();
+```
+
+```ts
+// After
+      const payment = (
+        await db
+          .select()
+          .from(billingPaymentRecords)
+          .where(eq(billingPaymentRecords.id, paymentId))
+      )[0];
+      if (!payment) throw new Error("Payment not found");
+      await db
+        .update(billingPaymentRecords)
+        .set({
+          status: "verified",
+          verifiedAt: nowIso(),
+          verifiedBy: currentUser.displayName,
+          verifiedAmount: asNumber(body.verifiedAmount, payment.amount),
+          actualReference: asText(body.actualReference),
+          receiptNo: `RCT-${payment.invoiceId}-${paymentId}`,
+        })
+        .where(eq(billingPaymentRecords.id, paymentId));
+      const totals = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COALESCE(SUM(COALESCE(verified_amount, amount)),0) total FROM billing_payment_records WHERE invoice_id=${payment.invoiceId} AND (status='verified' OR id=${paymentId})`,
+        )
+      )[0];
+      const invoice = (
+        await db
+          .select()
+          .from(billingInvoices)
+          .where(eq(billingInvoices.id, payment.invoiceId))
+      )[0];
+```
+
+- [ ] **Step 8: `user-save`'s `tenantRole` lookup**
+
+```ts
+// Before
+        const tenantRole = await db
+          .select({ id: appRoles.id })
+          .from(appRoles)
+          .where(eq(appRoles.roleKey, "tenant"))
+          .get();
+```
+
+```ts
+// After
+        const tenantRole = (
+          await db
+            .select({ id: appRoles.id })
+            .from(appRoles)
+            .where(eq(appRoles.roleKey, "tenant"))
+        )[0];
+```
+
+- [ ] **Step 9: `role-delete`'s `role` and `inUse` lookups**
+
+```ts
+// Before
+      const role = await db
+        .select()
+        .from(appRoles)
+        .where(eq(appRoles.id, roleId))
+        .get();
+      if (!role) throw new Error("Role not found");
+      if (role.isSystem) throw new Error("Built-in roles cannot be deleted");
+      const inUse = await db
+        .select({ id: appUsers.id })
+        .from(appUsers)
+        .where(eq(appUsers.roleId, roleId))
+        .get();
+```
+
+```ts
+// After
+      const role = (
+        await db.select().from(appRoles).where(eq(appRoles.id, roleId))
+      )[0];
+      if (!role) throw new Error("Role not found");
+      if (role.isSystem) throw new Error("Built-in roles cannot be deleted");
+      const inUse = (
+        await db
+          .select({ id: appUsers.id })
+          .from(appUsers)
+          .where(eq(appUsers.roleId, roleId))
+      )[0];
+```
+
+- [ ] **Step 10: Typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: the errors fixed by this task (11 `.get()` sites + 1 raw `d1` call) are gone. Remaining errors should only be the ones already anticipated as belonging to Tasks 10-13 (reservation/student/maintenance/billing handlers not yet converted) — cross-check against `grep -n "\.get()\|getD1\b" app/api/system/route.ts` to confirm no orphaned sites remain outside what those tasks already cover.
+
+- [ ] **Step 11: Live test**
+
+Using the same test director account as Task 9 (`local-admin@hostelpro.internal`), exercise at minimum: `parking-rental` (create one for an existing student), `parking-rental-update`, `parking-rental-delete`, `meter-reading` (submit one for a real room code), `user-save` (create a test user), `role-delete` (create a throwaway test role first, then delete it) via direct `curl` calls to `/api/system`. `ticket-message` and `billing-verify` need existing tickets/payments to act on — either use ones created via earlier live tests in this plan, or create minimal throwaway ones first. Confirm no 500s and correct resulting state; clean up all test data created.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add app/api/system/route.ts
+git commit -m "db: sweep remaining .get()/raw-D1 calls missed by original reconnaissance"
+```
+
+---
+
 ### Task 10: Reservations action handlers
 
 **Files:**
