@@ -2043,13 +2043,10 @@ export async function POST(request: Request) {
           ? await addReservationPayment(reservationId, body)
           : Number(
               (
-                await d1
-                  .prepare(
-                    "SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ?",
-                  )
-                  .bind(reservationId)
-                  .first<{ total: number }>()
-              )?.total || 0,
+                await db.execute<{ total: number }>(
+                  sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+                )
+              )[0]?.total || 0,
             );
       await db
         .update(reservations)
@@ -2080,22 +2077,25 @@ export async function POST(request: Request) {
     } else if (action === "reservation-delete") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
-      await d1.batch([
-        d1
-          .prepare("DELETE FROM reservation_payments WHERE reservation_id = ?")
-          .bind(reservationId),
-        d1
-          .prepare("DELETE FROM reservation_charges WHERE reservation_id = ?")
-          .bind(reservationId),
-        d1.prepare("DELETE FROM reservations WHERE id = ?").bind(reservationId),
-      ]);
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`DELETE FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM reservations WHERE id = ${reservationId}`,
+        );
+      });
     } else if (action === "reservation-convert") {
       const reservationId = asNumber(body.reservationId);
-      const reservation = await db
-        .select()
-        .from(reservations)
-        .where(eq(reservations.id, reservationId))
-        .get();
+      const reservation = (
+        await db
+          .select()
+          .from(reservations)
+          .where(eq(reservations.id, reservationId))
+      )[0];
       if (!reservation) throw new Error("Reservation not found");
       if (reservation.reservationType === "group") {
         if (!body.unitId) throw new Error("Select the confirmed unit / house");
@@ -2113,50 +2113,31 @@ export async function POST(request: Request) {
         );
         if (!bedId) throw new Error("Select the actual room code manually");
         const key = `reservation:${reservationId}`;
-        await d1
-          .prepare(
-            "INSERT OR IGNORE INTO student_profiles (source_key, student_code, full_name, gender, salesperson, status) VALUES (?, ?, ?, ?, ?, 'active')",
+        await db.execute(sql`
+          INSERT INTO student_profiles (source_key, student_code, full_name, gender, salesperson, status)
+          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.salesPerson}, 'active')
+          ON CONFLICT DO NOTHING
+        `);
+        const student = (
+          await db.execute<{ id: number }>(
+            sql`SELECT id FROM student_profiles WHERE source_key = ${key}`,
           )
-          .bind(
-            key,
-            `STU-${reservationId}`,
-            reservation.studentName,
-            reservation.preferredGender,
-            reservation.salesPerson,
-          )
-          .run();
-        const student = await d1
-          .prepare("SELECT id FROM student_profiles WHERE source_key = ?")
-          .bind(key)
-          .first<{ id: number }>();
+        )[0];
         if (!student) throw new Error("Unable to create student profile");
-        await d1
-          .prepare(
-            "INSERT OR IGNORE INTO accommodation_assignments (source_key, student_id, bed_space_id, salesperson, check_in_date, agreement_start_date, status, remarks, source_reservation_id) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
-          )
-          .bind(
-            key,
-            student.id,
-            bedId,
-            reservation.salesPerson,
-            reservation.targetMoveInDate,
-            reservation.targetMoveInDate,
-            reservation.notes,
-            reservationId,
-          )
-          .run();
-        await d1.batch([
-          d1
-            .prepare(
-              "UPDATE bed_spaces SET status = 'occupied', updated_at = ? WHERE id = ?",
-            )
-            .bind(nowIso(), bedId),
-          d1
-            .prepare(
-              "UPDATE reservations SET assigned_bed_space_id = ?, status = 'converted', converted_at = ? WHERE id = ?",
-            )
-            .bind(bedId, nowIso(), reservationId),
-        ]);
+        await db.execute(sql`
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, salesperson, check_in_date, agreement_start_date, status, remarks, source_reservation_id)
+          VALUES (${key}, ${student.id}, ${bedId}, ${reservation.salesPerson}, ${reservation.targetMoveInDate}, ${reservation.targetMoveInDate}, 'active', ${reservation.notes}, ${reservationId})
+          ON CONFLICT DO NOTHING
+        `);
+        const now = nowIso();
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`UPDATE bed_spaces SET status = 'occupied', updated_at = ${now} WHERE id = ${bedId}`,
+          );
+          await tx.execute(
+            sql`UPDATE reservations SET assigned_bed_space_id = ${bedId}, status = 'converted', converted_at = ${now} WHERE id = ${reservationId}`,
+          );
+        });
       }
     } else if (action === "student-update") {
       const studentId = asNumber(body.studentId);
