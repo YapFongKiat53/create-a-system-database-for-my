@@ -2177,28 +2177,18 @@ export async function POST(request: Request) {
             ),
           );
         if (activeParking.length) {
-          await runBatches(
-            activeParking.map((rental) =>
-              d1
-                .prepare(
-                  "UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ?) WHERE id=?",
-                )
-                .bind(
-                  asText(
-                    body.checkOutDate,
-                    new Date().toISOString().slice(0, 10),
-                  ),
-                  rental.id,
-                ),
+          const checkOutDate = asText(
+            body.checkOutDate,
+            new Date().toISOString().slice(0, 10),
+          );
+          await runBatches(activeParking, (rental, tx) =>
+            tx.execute(
+              sql`UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ${checkOutDate}) WHERE id=${rental.id}`,
             ),
           );
-          await runBatches(
-            activeParking.map((rental) =>
-              d1
-                .prepare(
-                  "UPDATE parking_lots SET status='available' WHERE id=?",
-                )
-                .bind(rental.parkingLotId),
+          await runBatches(activeParking, (rental, tx) =>
+            tx.execute(
+              sql`UPDATE parking_lots SET status='available' WHERE id=${rental.parkingLotId}`,
             ),
           );
         }
@@ -2219,61 +2209,24 @@ export async function POST(request: Request) {
           .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)));
     } else if (action === "student-create") {
       if (!asText(body.fullName)) throw new Error("Full name is required");
-      const result = await d1
-        .prepare(
-          "INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, religion, nationality, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(
-          `manual:${Date.now()}`,
-          asText(body.studentCode),
-          asText(body.fullName),
-          asText(body.identityNo),
-          asText(body.contactNumber),
-          asText(body.email),
-          asNullableText(body.dateOfBirth),
-          asText(body.gender, "unspecified"),
-          asText(body.race),
-          asText(body.religion),
-          asText(body.nationality),
-          asText(body.hometown),
-          asText(body.course),
-          asText(body.school),
-          asText(body.applicationFormNo),
-          asText(body.receiptNo),
-          asText(body.salesperson),
-          asText(body.agency),
-          asText(body.remarks),
-          asText(body.profileStatus, "active"),
-        )
-        .run();
-      const newStudentId = Number(result.meta.last_row_id);
+      const result = (
+        await db.execute<{ id: number }>(sql`
+          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, religion, nationality, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status)
+          VALUES (${`manual:${Date.now()}`}, ${asText(body.studentCode)}, ${asText(body.fullName)}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asNullableText(body.dateOfBirth)}, ${asText(body.gender, "unspecified")}, ${asText(body.race)}, ${asText(body.religion)}, ${asText(body.nationality)}, ${asText(body.hometown)}, ${asText(body.course)}, ${asText(body.school)}, ${asText(body.applicationFormNo)}, ${asText(body.receiptNo)}, ${asText(body.salesperson)}, ${asText(body.agency)}, ${asText(body.remarks)}, ${asText(body.profileStatus, "active")})
+          RETURNING id
+        `)
+      )[0];
+      const newStudentId = Number(result.id);
       createdId = newStudentId;
       if (body.bedSpaceId) {
         const bedId = asNumber(body.bedSpaceId);
-        await d1
-          .prepare(
-            "INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, parking_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
-          )
-          .bind(
-            `manual:${newStudentId}:${Date.now()}`,
-            newStudentId,
-            bedId,
-            asNullableNumber(body.monthlyRental),
-            asNullableNumber(body.securityDeposit),
-            asNullableNumber(body.accessCardDeposit),
-            asNullableNumber(body.parkingDeposit),
-            asText(body.salesperson),
-            asNullableText(body.checkInDate),
-            asNullableText(body.leaseStartDate),
-            asNullableText(body.leaseEndDate),
-          )
-          .run();
-        await d1
-          .prepare(
-            "UPDATE bed_spaces SET status='occupied', updated_at=? WHERE id=?",
-          )
-          .bind(nowIso(), bedId)
-          .run();
+        await db.execute(sql`
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, parking_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, status)
+          VALUES (${`manual:${newStudentId}:${Date.now()}`}, ${newStudentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asNullableNumber(body.parkingDeposit)}, ${asText(body.salesperson)}, ${asNullableText(body.checkInDate)}, ${asNullableText(body.leaseStartDate)}, ${asNullableText(body.leaseEndDate)}, 'active')
+        `);
+        await db.execute(
+          sql`UPDATE bed_spaces SET status='occupied', updated_at=${nowIso()} WHERE id=${bedId}`,
+        );
       }
     } else if (action === "student-move-out") {
       const studentId = asNumber(body.studentId);
@@ -2283,28 +2236,19 @@ export async function POST(request: Request) {
         new Date().toISOString().slice(0, 10),
       );
       if (body.assignmentId) {
-        const assignment = await db
-          .select()
-          .from(accommodationAssignments)
-          .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)))
-          .get();
-        await d1
-          .prepare(
-            "UPDATE accommodation_assignments SET status='ended', check_out_date=COALESCE(check_out_date, ?), check_out_meter=COALESCE(?, check_out_meter) WHERE id=?",
-          )
-          .bind(
-            checkOut,
-            asNullableNumber(body.checkOutMeter),
-            asNumber(body.assignmentId),
-          )
-          .run();
+        const assignment = (
+          await db
+            .select()
+            .from(accommodationAssignments)
+            .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)))
+        )[0];
+        await db.execute(
+          sql`UPDATE accommodation_assignments SET status='ended', check_out_date=COALESCE(check_out_date, ${checkOut}), check_out_meter=COALESCE(${asNullableNumber(body.checkOutMeter)}, check_out_meter) WHERE id=${asNumber(body.assignmentId)}`,
+        );
         if (assignment?.bedSpaceId)
-          await d1
-            .prepare(
-              "UPDATE bed_spaces SET status='vacant', updated_at=? WHERE id=?",
-            )
-            .bind(nowIso(), assignment.bedSpaceId)
-            .run();
+          await db.execute(
+            sql`UPDATE bed_spaces SET status='vacant', updated_at=${nowIso()} WHERE id=${assignment.bedSpaceId}`,
+          );
       }
       await db
         .update(studentProfiles)
@@ -2320,20 +2264,14 @@ export async function POST(request: Request) {
           ),
         );
       if (activeParking.length) {
-        await runBatches(
-          activeParking.map((rental) =>
-            d1
-              .prepare(
-                "UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ?) WHERE id=?",
-              )
-              .bind(checkOut, rental.id),
+        await runBatches(activeParking, (rental, tx) =>
+          tx.execute(
+            sql`UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ${checkOut}) WHERE id=${rental.id}`,
           ),
         );
-        await runBatches(
-          activeParking.map((rental) =>
-            d1
-              .prepare("UPDATE parking_lots SET status='available' WHERE id=?")
-              .bind(rental.parkingLotId),
+        await runBatches(activeParking, (rental, tx) =>
+          tx.execute(
+            sql`UPDATE parking_lots SET status='available' WHERE id=${rental.parkingLotId}`,
           ),
         );
       }
@@ -2369,52 +2307,30 @@ export async function POST(request: Request) {
         bedId = asNumber(body.bedSpaceId);
       if (!studentId || !oldAssignmentId || !bedId || !body.effectiveDate)
         throw new Error("Student, new room and effective date are required");
-      const old = await db
-        .select()
-        .from(accommodationAssignments)
-        .where(eq(accommodationAssignments.id, oldAssignmentId))
-        .get();
+      const old = (
+        await db
+          .select()
+          .from(accommodationAssignments)
+          .where(eq(accommodationAssignments.id, oldAssignmentId))
+      )[0];
       if (!old) throw new Error("Current assignment not found");
       const key = `move:${studentId}:${Date.now()}`;
-      await d1.batch([
-        d1
-          .prepare(
-            "UPDATE accommodation_assignments SET status='moved', check_out_date=?, check_out_meter=? WHERE id=?",
-          )
-          .bind(
-            asText(body.effectiveDate),
-            asNullableNumber(body.checkOutMeter),
-            oldAssignmentId,
-          ),
-        d1
-          .prepare(
-            "UPDATE bed_spaces SET status='vacant', updated_at=? WHERE id=?",
-          )
-          .bind(nowIso(), old.bedSpaceId),
-        d1
-          .prepare(
-            "INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
-          )
-          .bind(
-            key,
-            studentId,
-            bedId,
-            asNullableNumber(body.monthlyRental),
-            asNullableNumber(body.securityDeposit),
-            asNullableNumber(body.accessCardDeposit),
-            asText(body.salesperson),
-            asText(body.effectiveDate),
-            asText(body.effectiveDate),
-            asNullableText(body.leaseEndDate),
-            asNullableNumber(body.checkInMeter),
-            asText(body.reason),
-          ),
-        d1
-          .prepare(
-            "UPDATE bed_spaces SET status='occupied', updated_at=? WHERE id=?",
-          )
-          .bind(nowIso(), bedId),
-      ]);
+      const changeNow = nowIso();
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`UPDATE accommodation_assignments SET status='moved', check_out_date=${asText(body.effectiveDate)}, check_out_meter=${asNullableNumber(body.checkOutMeter)} WHERE id=${oldAssignmentId}`,
+        );
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status='vacant', updated_at=${changeNow} WHERE id=${old.bedSpaceId}`,
+        );
+        await tx.execute(sql`
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status)
+          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active')
+        `);
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status='occupied', updated_at=${changeNow} WHERE id=${bedId}`,
+        );
+      });
     } else if (action === "parking-lot") {
       if (!body.hostelId || !asText(body.lotNumber))
         throw new Error("Hostel and parking lot number are required");
