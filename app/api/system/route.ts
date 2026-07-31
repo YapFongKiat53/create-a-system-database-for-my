@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { getD1, getDb } from "../../../db";
+import { getD1, getDb, type PgTx } from "../../../db";
 import {
   getSessionUser,
   hashPassword,
@@ -114,9 +114,15 @@ function chunks<T>(values: T[], size: number) {
   return result;
 }
 
-async function runBatches(statements: D1PreparedStatement[], size = 50) {
-  const d1 = getD1();
-  for (const group of chunks(statements, size)) await d1.batch(group);
+async function runBatches<T>(
+  items: readonly T[],
+  build: (item: T, tx: PgTx) => Promise<unknown>,
+) {
+  if (!items.length) return;
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    for (const item of items) await build(item, tx);
+  });
 }
 
 function nextDay(value: string | null) {
@@ -315,43 +321,26 @@ function permissionFor(role: string, moduleKey: string) {
 }
 
 async function seedAdministration() {
-  const d1 = getD1();
-  await runBatches(
-    roleBlueprints.map((role) =>
-      d1
-        .prepare(
-          "INSERT OR IGNORE INTO app_roles (role_key, name, description, is_system) VALUES (?, ?, ?, 1)",
-        )
-        .bind(role.key, role.name, role.description),
+  const db = getDb();
+  await runBatches(roleBlueprints, (role, tx) =>
+    tx.execute(
+      sql`INSERT INTO app_roles (role_key, name, description, is_system) VALUES (${role.key}, ${role.name}, ${role.description}, true) ON CONFLICT DO NOTHING`,
     ),
   );
-  const roles = await getDb().select().from(appRoles);
-  const statements: D1PreparedStatement[] = [];
-  for (const role of roles)
-    for (const moduleKey of permissionModules) {
-      const p = permissionFor(role.roleKey, moduleKey);
-      statements.push(
-        d1
-          .prepare(
-            `
-      INSERT OR IGNORE INTO role_permissions
+  const roles = await db.select().from(appRoles);
+  const permissionRows = roles.flatMap((role) =>
+    permissionModules.map((moduleKey) => ({ role, moduleKey })),
+  );
+  await runBatches(permissionRows, ({ role, moduleKey }, tx) => {
+    const p = permissionFor(role.roleKey, moduleKey);
+    return tx.execute(sql`
+      INSERT INTO role_permissions
         (role_id, module_key, can_view, can_create, can_edit, can_delete, can_approve)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `,
-          )
-          .bind(
-            role.id,
-            moduleKey,
-            Number(p.view),
-            Number(p.create),
-            Number(p.edit),
-            Number(p.delete),
-            Number(p.approve),
-          ),
-      );
-    }
-  await runBatches(statements);
-  const categories = [
+      VALUES (${role.id}, ${moduleKey}, ${p.view}, ${p.create}, ${p.edit}, ${p.delete}, ${p.approve})
+      ON CONFLICT DO NOTHING
+    `);
+  });
+  const categories: [string, string][] = [
     ["Electrical", "Fan"],
     ["Electrical", "Light"],
     ["Electrical", "Power socket"],
@@ -366,15 +355,17 @@ async function seedAdministration() {
     ["Other", "General issue"],
   ];
   await runBatches(
-    categories.map(([category, subcategory], index) =>
-      d1
-        .prepare(
-          "INSERT OR IGNORE INTO ticket_categories (category, subcategory, sort_order) VALUES (?, ?, ?)",
-        )
-        .bind(category, subcategory, index),
-    ),
+    categories.map(([category, subcategory], index) => ({
+      category,
+      subcategory,
+      index,
+    })),
+    ({ category, subcategory, index }, tx) =>
+      tx.execute(
+        sql`INSERT INTO ticket_categories (category, subcategory, sort_order) VALUES (${category}, ${subcategory}, ${index}) ON CONFLICT DO NOTHING`,
+      ),
   );
-  const reminders = [
+  const reminders: [string, number, string, string][] = [
     [
       "due-date",
       5,
@@ -401,44 +392,42 @@ async function seedAdministration() {
     ],
   ];
   await runBatches(
-    reminders.map(([key, day, subject, message]) =>
-      d1
-        .prepare(
-          "INSERT OR IGNORE INTO reminder_templates (reminder_key, day_of_month, subject, message) VALUES (?, ?, ?, ?)",
-        )
-        .bind(key, day, subject, message),
-    ),
+    reminders.map(([key, day, subject, message]) => ({
+      key,
+      day,
+      subject,
+      message,
+    })),
+    ({ key, day, subject, message }, tx) =>
+      tx.execute(
+        sql`INSERT INTO reminder_templates (reminder_key, day_of_month, subject, message) VALUES (${key}, ${day}, ${subject}, ${message}) ON CONFLICT DO NOTHING`,
+      ),
   );
 }
 
 async function applyLatePaymentCharges() {
-  const d1 = getD1();
+  const db = getDb();
   const today = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     timeZone: "Asia/Kuala_Lumpur",
   }).format(new Date());
-  const rows = await d1
-    .prepare(
-      `
+  const rows = await db.execute<{
+    id: number;
+    due_date: string;
+    amount_paid: number;
+    rental: number;
+    late_item_id: number | null;
+  }>(sql`
     SELECT i.id, i.due_date, i.amount_paid,
       COALESCE((SELECT SUM(amount) FROM billing_items WHERE invoice_id=i.id AND item_type='room-rental'),0) rental,
       (SELECT id FROM billing_items WHERE invoice_id=i.id AND item_type='late-payment-charge' LIMIT 1) late_item_id
     FROM billing_invoices i
     JOIN billing_cycles c ON c.id=i.cycle_id
-    WHERE c.status='posted' AND i.due_date < ?
-  `,
-    )
-    .bind(today)
-    .all<{
-      id: number;
-      due_date: string;
-      amount_paid: number;
-      rental: number;
-      late_item_id: number | null;
-    }>();
-  for (const invoice of rows.results) {
+    WHERE c.status='posted' AND i.due_date < ${today}
+  `);
+  for (const invoice of rows) {
     if (
       Number(invoice.amount_paid || 0) >= Number(invoice.rental || 0) ||
       Number(invoice.rental || 0) <= 0
@@ -454,36 +443,18 @@ async function applyLatePaymentCharges() {
     );
     const amount = days * 3;
     if (!amount) continue;
+    const description = `Late payment charge (${days} day${days === 1 ? "" : "s"})`;
     if (invoice.late_item_id)
-      await d1
-        .prepare(
-          "UPDATE billing_items SET quantity=?, rate=3, amount=?, description=? WHERE id=?",
-        )
-        .bind(
-          days,
-          amount,
-          `Late payment charge (${days} day${days === 1 ? "" : "s"})`,
-          invoice.late_item_id,
-        )
-        .run();
+      await db.execute(
+        sql`UPDATE billing_items SET quantity=${days}, rate=3, amount=${amount}, description=${description} WHERE id=${invoice.late_item_id}`,
+      );
     else
-      await d1
-        .prepare(
-          "INSERT INTO billing_items (invoice_id,item_type,description,quantity,rate,amount) VALUES (?,'late-payment-charge',?,?,3,?)",
-        )
-        .bind(
-          invoice.id,
-          `Late payment charge (${days} day${days === 1 ? "" : "s"})`,
-          days,
-          amount,
-        )
-        .run();
-    await d1
-      .prepare(
-        "UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=?) WHERE id=?",
-      )
-      .bind(invoice.id, invoice.id)
-      .run();
+      await db.execute(
+        sql`INSERT INTO billing_items (invoice_id,item_type,description,quantity,rate,amount) VALUES (${invoice.id},'late-payment-charge',${description},${days},3,${amount})`,
+      );
+    await db.execute(
+      sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${invoice.id}) WHERE id=${invoice.id}`,
+    );
   }
 }
 

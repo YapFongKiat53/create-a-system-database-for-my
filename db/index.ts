@@ -1,7 +1,14 @@
 import { env } from "cloudflare:workers";
+import type { ExtractTablesWithRelations } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import type { PostgresJsTransaction } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+
+export type PgTx = PostgresJsTransaction<
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
 
 function getClient() {
   const bindings = env as unknown as { DATABASE_URL?: string };
