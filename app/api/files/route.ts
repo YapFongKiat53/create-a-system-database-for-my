@@ -34,7 +34,9 @@ export async function GET(request:Request) {
   try {
     const id = Number(new URL(request.url).searchParams.get("id") || 0);
     if (!id) return new Response("Missing attachment", { status:400 });
-    const row = await getDb().select().from(storedAttachments).where(eq(storedAttachments.id, id)).get();
+    const row = (
+      await getDb().select().from(storedAttachments).where(eq(storedAttachments.id, id))
+    )[0];
     if (!row) return new Response("Attachment not found", { status:404 });
     const object = await getBucket().get(row.objectKey);
     if (!object) return new Response("Stored file not found", { status:404 });

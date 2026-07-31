@@ -64,17 +64,18 @@ export async function POST(request: Request) {
       { status: 400 },
     );
 
-  const row = await getDb()
-    .select({
-      id: appUsers.id,
-      status: appUsers.status,
-      passwordHash: appUsers.passwordHash,
-      roleKey: appRoles.roleKey,
-    })
-    .from(appUsers)
-    .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
-    .where(eq(appUsers.email, email))
-    .get();
+  const row = (
+    await getDb()
+      .select({
+        id: appUsers.id,
+        status: appUsers.status,
+        passwordHash: appUsers.passwordHash,
+        roleKey: appRoles.roleKey,
+      })
+      .from(appUsers)
+      .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+      .where(eq(appUsers.email, email))
+  )[0];
 
   // Same message whether the account is missing, disabled or the password is
   // wrong, so the form can't be used to discover which emails exist.
