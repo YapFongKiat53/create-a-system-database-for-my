@@ -66,6 +66,18 @@ Functions/values that need **no change** because Postgres already supports the s
 
 ### Task 1: Swap the database driver
 
+> **Amended during execution:** the original Step 1 code below cached the
+> `postgres()` client at module scope (`let client; if (!client) client = ...`).
+> Task 5's live testing found this breaks on alternating requests — Cloudflare
+> Workers forbids reusing I/O objects (sockets) across request boundaries, so
+> the cached client's socket became invalid on every other request, throwing
+> "Cannot perform I/O on behalf of a different request." Fixed in commit
+> `345c5a9`: `getClient()` now creates a fresh `postgres()` client per call
+> instead of caching it (Supabase's pooled Supavisor connection is designed
+> for exactly this many-short-lived-connections pattern). The code block
+> below is left as originally written for historical accuracy — do not copy
+> the caching pattern; use the fix instead.
+
 **Files:**
 - Modify: `db/index.ts`
 
