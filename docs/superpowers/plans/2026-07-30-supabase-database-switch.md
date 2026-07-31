@@ -1116,14 +1116,46 @@ git commit -m "auth: fix login and file-download lookups for postgres-js driver 
 
 ### Task 6: Convert the batching helpers and seed/late-fee functions
 
+> **Amended during execution:** the original Step 1 below used a bare
+> `PgTransaction` type (no type arguments) for the `tx` parameter, and
+> `items: T[]` (mutable array) for the items parameter. Neither compiles:
+> `PgTransaction` requires 1-3 type arguments (`TS2707`), and the first real
+> caller, `seedAdministration`'s `roleBlueprints` (declared `as const`,
+> i.e. a readonly tuple), isn't assignable to a mutable `T[]` parameter
+> (`TS2345`), which also breaks inference for `role`/`moduleKey` inside the
+> callback. Found and correctly escalated (not unilaterally patched) by
+> Task 6's implementer, since 4 later tasks (7, 9, 11, 13) depend on this
+> exact shared signature. Fixed by: (a) exporting a concrete `PgTx` type
+> alias from `db/index.ts`, added as a new Step 0 below, and (b) widening
+> `runBatches`'s `items` parameter to `readonly T[]`. Every later task's
+> `runBatches(...)` call site is unaffected — none of them annotate `tx`'s
+> type explicitly, so they simply pick up the corrected inferred type.
+
 **Files:**
+- Modify: `db/index.ts` (add and export a `PgTx` type alias)
 - Modify: `app/api/system/route.ts:110-120` (`chunks`, `runBatches`)
 - Modify: `app/api/system/route.ts:317-488` (`seedAdministration`, `applyLatePaymentCharges`)
 
 **Interfaces:**
-- Produces: `runBatches(statements: (tx: PgTx) => Promise<unknown>[] | Promise<unknown>, ...)` — **signature changes** (see below), so every call site of `runBatches` elsewhere in the file (Tasks 7–12) must be updated to match. Consumed by: `seedAdministration`, `seedKnownRoomFeatures`, `seedStudentAssignments`, `replaceReservationCharges`, `room-add`, `bulk-room-price`, `student-move-out`, `student-update`.
+- Produces: `runBatches<T>(items: readonly T[], build: (item: T, tx: PgTx) => Promise<unknown>)` — **signature changes** (see below), so every call site of `runBatches` elsewhere in the file (Tasks 7–12) must be updated to match. Consumed by: `seedAdministration`, `seedKnownRoomFeatures`, `seedStudentAssignments`, `replaceReservationCharges`, `room-add`, `bulk-room-price`, `student-move-out`, `student-update`. Also produces: `PgTx` (exported from `db/index.ts`), the concrete, schema-typed transaction type used by every `runBatches` callback and by `db.transaction(async (tx) => ...)` call sites in Tasks 9-13.
 
 D1's `runBatches` took an array of already-built `D1PreparedStatement` objects. Postgres has no equivalent "prepared statement object you build then hand to a batch call" — instead, wrap the whole batch in one transaction and run each statement inside it. To keep every call site's shape as close to the original as possible (minimizing changes elsewhere), `runBatches` now takes a **factory function** that receives the transaction and returns the array of promises to run inside it:
+
+- [ ] **Step 0: Export a `PgTx` type alias from `db/index.ts`**
+
+```ts
+// db/index.ts — add these two imports and one exported type,
+// alongside the existing imports/exports (do not remove anything else)
+import type { ExtractTablesWithRelations } from "drizzle-orm";
+import type { PostgresJsTransaction } from "drizzle-orm/postgres-js";
+
+export type PgTx = PostgresJsTransaction<
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
+```
+
+This is the concrete transaction type for the `postgres-js` driver, parameterized with the app's actual `schema` (so `tx.select()`/`.insert()`/etc. inside a transaction stay fully typed) — `PgTransaction` alone (from `drizzle-orm/pg-core`) is a generic base class requiring 1-3 type arguments and doesn't compile used bare.
 
 - [ ] **Step 1: Replace `chunks`/`runBatches`**
 
@@ -1145,8 +1177,8 @@ async function runBatches(statements: D1PreparedStatement[], size = 50) {
 ```ts
 // After
 async function runBatches<T>(
-  items: T[],
-  build: (item: T, tx: PgTransaction) => Promise<unknown>,
+  items: readonly T[],
+  build: (item: T, tx: PgTx) => Promise<unknown>,
 ) {
   if (!items.length) return;
   const db = getDb();
@@ -1156,11 +1188,15 @@ async function runBatches<T>(
 }
 ```
 
-Add the `PgTransaction` type import at the top of the file (needed for the new `runBatches` signature):
+`items` is `readonly T[]` (not `T[]`) specifically so `as const` arrays like `roleBlueprints` can be passed directly without spreading/copying — the function never mutates `items`, so this is a pure widening, not a behavior change.
+
+Update the import of `getD1, getDb` from `../../../db` to also bring in the new type:
 
 ```ts
-// Add to the existing `import { and, asc, desc, eq, sql } from "drizzle-orm";` region
-import type { PgTransaction } from "drizzle-orm/pg-core";
+// Before
+import { getD1, getDb } from "../../../db";
+// After
+import { getD1, getDb, type PgTx } from "../../../db";
 ```
 
 Note: this changes every call site from `runBatches(array.map((x) => d1.prepare(...).bind(...)))` (an array of pre-built statements) to `runBatches(array, (x, tx) => tx.execute(sql\`...\`))` (an array of source items plus a per-item builder function that receives the transaction). This is a deliberate shape change — see each call site's conversion in Tasks 7–12.
@@ -3499,6 +3535,6 @@ git commit -m "db: complete Supabase database-layer switch, verified end-to-end"
 
 **Placeholder scan:** No TBD/TODO. Every step shows real before/after code taken directly from the current file (verified by direct reads during planning, not reconstructed from memory) or, where a step is a mechanical repeat of an already-fully-shown pattern (e.g. the second `runBatches` call in `student-move-out`'s parking cleanup), the plan says exactly which earlier step's pattern to apply and to what code, not "similar to above" without specifics.
 
-**Type consistency:** `runBatches<T>(items: T[], build: (item: T, tx: PgTransaction) => Promise<unknown>)` — this exact signature is used identically at every one of its 9 call sites across Tasks 6-13. `db.execute<T>(sql...)` resolving to `T[]` directly (no `.rows`/`.results` wrapper) is used consistently throughout, matching the verified `PostgresJsQueryResultHKT` type from the installed driver.
+**Type consistency:** `runBatches<T>(items: readonly T[], build: (item: T, tx: PgTx) => Promise<unknown>)` (using the `PgTx` alias exported from `db/index.ts`) — this exact signature is used identically at every one of its 9 call sites across Tasks 6-13. `db.execute<T>(sql...)` resolving to `T[]` directly (no `.rows`/`.results` wrapper) is used consistently throughout, matching the verified `PostgresJsQueryResultHKT` type from the installed driver.
 
 **Scope check:** This is one atomic unit of work — the schema and query layer must convert together (a partially-converted app doesn't run), so it isn't decomposed into independent sub-plans, per the design spec's own reasoning.
