@@ -1611,7 +1611,6 @@ async function electricityShareForAssignment(
 export async function POST(request: Request) {
   try {
     const db = getDb();
-    const d1 = getD1();
     const body = (await request.json()) as Record<string, unknown>;
     const action = asText(body.action);
     let createdId: number | undefined;
@@ -1721,17 +1720,13 @@ export async function POST(request: Request) {
         .get();
       if (!property) throw new Error("Hostel not found");
       const unitCode = asText(body.unitCode);
-      const result = await d1
-        .prepare(
-          "INSERT INTO hostel_units (hostel_id, unit_code, address, gender, status, notes, owner_name, surrender_notes) VALUES (?, ?, ?, ?, 'active', '', '', '') RETURNING id",
-        )
-        .bind(
-          asNumber(body.hostelId),
-          unitCode,
-          fullUnitAddress(unitCode, property.code, property.address),
-          asText(body.gender, "unspecified"),
-        )
-        .first<{ id: number }>();
+      const result = (
+        await db.execute<{ id: number }>(sql`
+          INSERT INTO hostel_units (hostel_id, unit_code, address, gender, status, notes, owner_name, surrender_notes)
+          VALUES (${asNumber(body.hostelId)}, ${unitCode}, ${fullUnitAddress(unitCode, property.code, property.address)}, ${asText(body.gender, "unspecified")}, 'active', '', '', '')
+          RETURNING id
+        `)
+      )[0];
       createdId = result?.id;
     } else if (action === "unit-update") {
       const gender = asText(body.gender, "unspecified");
@@ -1802,73 +1797,60 @@ export async function POST(request: Request) {
         })
         .where(eq(hostelRooms.id, asNumber(body.roomId)));
       if (asText(body.roomType) === "single") {
-        const room = await d1
-          .prepare(
-            `
+        const room = (
+          await db.execute<{ room_label: string; unit_code: string }>(sql`
           SELECT r.room_label, u.unit_code FROM hostel_rooms r
-          JOIN hostel_units u ON r.unit_id=u.id WHERE r.id=?
-        `,
-          )
-          .bind(asNumber(body.roomId))
-          .first<{ room_label: string; unit_code: string }>();
-        const roomBeds = await d1
-          .prepare(
-            `
+          JOIN hostel_units u ON r.unit_id=u.id WHERE r.id=${asNumber(body.roomId)}
+        `)
+        )[0];
+        const roomBeds = await db.execute<{
+          id: number;
+          legacy_code: string;
+          assignments: number;
+        }>(sql`
           SELECT b.id, b.legacy_code,
             (SELECT COUNT(*) FROM accommodation_assignments a WHERE a.bed_space_id=b.id) assignments
-          FROM bed_spaces b WHERE b.room_id=? ORDER BY b.id
-        `,
-          )
-          .bind(asNumber(body.roomId))
-          .all<{ id: number; legacy_code: string; assignments: number }>();
-        if (roomBeds.results.length > 1) {
-          const removable = roomBeds.results.slice(1);
+          FROM bed_spaces b WHERE b.room_id=${asNumber(body.roomId)} ORDER BY b.id
+        `);
+        if (roomBeds.length > 1) {
+          const removable = roomBeds.slice(1);
           if (removable.some((bed) => Number(bed.assignments) > 0))
             throw new Error(
               "This room cannot become single until the extra bed assignment history is cleared",
             );
-          await runBatches(
-            removable.map((bed) =>
-              d1.prepare("DELETE FROM bed_spaces WHERE id=?").bind(bed.id),
-            ),
+          await runBatches(removable, (bed, tx) =>
+            tx.execute(sql`DELETE FROM bed_spaces WHERE id=${bed.id}`),
           );
         }
-        const first = roomBeds.results[0];
+        const first = roomBeds[0];
         if (first && room)
-          await d1
-            .prepare(
-              "UPDATE bed_spaces SET bed_label='1', legacy_code=? WHERE id=?",
-            )
-            .bind(`${room.unit_code}-${room.room_label}1`, first.id)
-            .run();
+          await db.execute(
+            sql`UPDATE bed_spaces SET bed_label='1', legacy_code=${`${room.unit_code}-${room.room_label}1`} WHERE id=${first.id}`,
+          );
       }
     } else if (action === "room-delete") {
       const roomId = asNumber(body.roomId);
       if (!roomId) throw new Error("Room is required");
-      const used = await d1
-        .prepare(
-          `
+      const used = (
+        await db.execute<{ total: number }>(sql`
         SELECT COUNT(*) total FROM accommodation_assignments
-        WHERE bed_space_id IN (SELECT id FROM bed_spaces WHERE room_id=?)
-      `,
-        )
-        .bind(roomId)
-        .first<{ total: number }>();
+        WHERE bed_space_id IN (SELECT id FROM bed_spaces WHERE room_id=${roomId})
+      `)
+      )[0];
       if (Number(used?.total || 0) > 0)
         throw new Error("Rooms with assignment history cannot be deleted");
-      await d1.batch([
-        d1.prepare("DELETE FROM bed_spaces WHERE room_id=?").bind(roomId),
-        d1.prepare("DELETE FROM hostel_rooms WHERE id=?").bind(roomId),
-      ]);
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`DELETE FROM bed_spaces WHERE room_id=${roomId}`);
+        await tx.execute(sql`DELETE FROM hostel_rooms WHERE id=${roomId}`);
+      });
     } else if (action === "bed-delete") {
       const bedId = asNumber(body.bedId);
       if (!bedId) throw new Error("Room code is required");
-      const used = await d1
-        .prepare(
-          "SELECT COUNT(*) total FROM accommodation_assignments WHERE bed_space_id=?",
+      const used = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COUNT(*) total FROM accommodation_assignments WHERE bed_space_id=${bedId}`,
         )
-        .bind(bedId)
-        .first<{ total: number }>();
+      )[0];
       if (Number(used?.total || 0) > 0)
         throw new Error(
           "A room code with assignment history cannot be deleted",
@@ -1877,22 +1859,19 @@ export async function POST(request: Request) {
     } else if (action === "room-add") {
       if (!body.unitId || !asText(body.roomLabel))
         throw new Error("Unit and room category are required");
-      const unit = await d1
-        .prepare("SELECT unit_code FROM hostel_units WHERE id = ?")
-        .bind(asNumber(body.unitId))
-        .first<{ unit_code: string }>();
+      const unit = (
+        await db.execute<{ unit_code: string }>(
+          sql`SELECT unit_code FROM hostel_units WHERE id = ${asNumber(body.unitId)}`,
+        )
+      )[0];
       if (!unit) throw new Error("Unit not found");
-      const room = await d1
-        .prepare(
-          "INSERT INTO hostel_rooms (unit_id, room_label, status, bathroom_type, room_type) VALUES (?, ?, 'active', ?, ?) RETURNING id",
-        )
-        .bind(
-          asNumber(body.unitId),
-          asText(body.roomLabel),
-          asText(body.bathroomType, "unknown"),
-          asText(body.roomType, "single"),
-        )
-        .first<{ id: number }>();
+      const room = (
+        await db.execute<{ id: number }>(sql`
+          INSERT INTO hostel_rooms (unit_id, room_label, status, bathroom_type, room_type)
+          VALUES (${asNumber(body.unitId)}, ${asText(body.roomLabel)}, 'active', ${asText(body.bathroomType, "unknown")}, ${asText(body.roomType, "single")})
+          RETURNING id
+        `)
+      )[0];
       if (!room) throw new Error("Unable to create room");
       const bedCount = Math.max(1, Math.min(5, asNumber(body.bedCount, 1)));
       const bedType = asText(body.bedType, "unknown");
@@ -1901,18 +1880,14 @@ export async function POST(request: Request) {
         `${unit.unit_code}-${asText(body.roomLabel)}`,
       );
       await runBatches(
-        Array.from({ length: bedCount }, (_, index) =>
-          d1
-            .prepare(
-              "INSERT INTO bed_spaces (room_id, bed_label, legacy_code, status, bed_type) VALUES (?, ?, ?, 'vacant', ?)",
-            )
-            .bind(
-              room.id,
-              String(index + 1),
-              `${prefix}${bedCount === 1 ? "1" : index + 1}`,
-              bedType,
-            ),
-        ),
+        Array.from({ length: bedCount }, (_, index) => ({
+          label: String(index + 1),
+          code: `${prefix}${bedCount === 1 ? "1" : index + 1}`,
+        })),
+        (bed, tx) =>
+          tx.execute(
+            sql`INSERT INTO bed_spaces (room_id, bed_label, legacy_code, status, bed_type) VALUES (${room.id}, ${bed.label}, ${bed.code}, 'vacant', ${bedType})`,
+          ),
       );
       createdId = room.id;
     } else if (action === "bulk-room-price") {
@@ -1929,54 +1904,36 @@ export async function POST(request: Request) {
       const rate = asNullableNumber(body.salesRate);
       if (rate === null || rate < 0)
         throw new Error("Enter a valid sales rate");
-      await runBatches(
-        roomIds.map((roomId) =>
-          d1
-            .prepare(
-              `UPDATE hostel_rooms SET ${field} = ?, promotion_start_date = CASE WHEN ? = 'promotion_rate' THEN ? ELSE promotion_start_date END, promotion_end_date = CASE WHEN ? = 'promotion_rate' THEN ? ELSE promotion_end_date END WHERE id = ? AND EXISTS (SELECT 1 FROM bed_spaces WHERE room_id = ? AND status = 'vacant')`,
-            )
-            .bind(
-              rate,
-              field,
-              asNullableText(body.promotionStartDate),
-              field,
-              asNullableText(body.promotionEndDate),
-              roomId,
-              roomId,
-            ),
-        ),
+      await runBatches(roomIds, (roomId, tx) =>
+        tx.execute(sql`
+          UPDATE hostel_rooms
+          SET ${sql.raw(field)} = ${rate},
+              promotion_start_date = CASE WHEN ${field} = 'promotion_rate' THEN ${asNullableText(body.promotionStartDate)} ELSE promotion_start_date END,
+              promotion_end_date = CASE WHEN ${field} = 'promotion_rate' THEN ${asNullableText(body.promotionEndDate)} ELSE promotion_end_date END
+          WHERE id = ${roomId} AND EXISTS (SELECT 1 FROM bed_spaces WHERE room_id = ${roomId} AND status = 'vacant')
+        `),
       );
     } else if (action === "promotion-end") {
       if (!body.hostelId) throw new Error("Hostel is required");
+      const endDate = asText(
+        body.endDate,
+        new Date().toISOString().slice(0, 10),
+      );
       const conditions = [
-        "u.hostel_id = ?",
-        "r.promotion_rate IS NOT NULL",
-        "(r.promotion_end_date IS NULL OR r.promotion_end_date > ?)",
+        sql`u.hostel_id = ${asNumber(body.hostelId)}`,
+        sql`r2.promotion_rate IS NOT NULL`,
+        sql`(r2.promotion_end_date IS NULL OR r2.promotion_end_date > ${endDate})`,
       ];
-      const values: unknown[] = [
-        asNumber(body.hostelId),
-        asText(body.endDate, new Date().toISOString().slice(0, 10)),
-      ];
-      if (asText(body.roomCategory, "any") !== "any") {
-        conditions.push("r.room_label = ?");
-        values.push(asText(body.roomCategory));
-      }
-      if (asText(body.roomType, "any") !== "any") {
-        conditions.push("r.room_type = ?");
-        values.push(asText(body.roomType));
-      }
-      values.push(asText(body.endDate, new Date().toISOString().slice(0, 10)));
-      await d1
-        .prepare(
-          `
-        UPDATE hostel_rooms AS r SET promotion_end_date = ? WHERE r.id IN (
+      if (asText(body.roomCategory, "any") !== "any")
+        conditions.push(sql`r2.room_label = ${asText(body.roomCategory)}`);
+      if (asText(body.roomType, "any") !== "any")
+        conditions.push(sql`r2.room_type = ${asText(body.roomType)}`);
+      await db.execute(sql`
+        UPDATE hostel_rooms AS r SET promotion_end_date = ${endDate} WHERE r.id IN (
           SELECT r2.id FROM hostel_rooms r2 JOIN hostel_units u ON r2.unit_id=u.id
-          WHERE ${conditions.map((value) => value.replace(/\br\./g, "r2.")).join(" AND ")}
+          WHERE ${sql.join(conditions, sql` AND `)}
         )
-      `,
-        )
-        .bind(values[values.length - 1], ...values.slice(0, -1))
-        .run();
+      `);
     } else if (action === "hostel-rates") {
       if (!body.hostelId) throw new Error("Hostel is required");
       await db
