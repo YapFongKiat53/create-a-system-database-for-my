@@ -479,32 +479,30 @@ async function resolveCurrentUser(request: Request) {
       /* fall back to email */
     }
   const db = getDb();
-  let user = await db
-    .select({
-      id: appUsers.id,
-      email: appUsers.email,
-      displayName: appUsers.displayName,
-      status: appUsers.status,
-      studentId: appUsers.studentId,
-      roleId: appRoles.id,
-      roleKey: appRoles.roleKey,
-      roleName: appRoles.name,
-    })
-    .from(appUsers)
-    .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
-    .where(eq(appUsers.email, email))
-    .get();
-  if (!user) {
-    const count = await db
-      .select({ value: sql<number>`count(*)` })
+  let user = (
+    await db
+      .select({
+        id: appUsers.id,
+        email: appUsers.email,
+        displayName: appUsers.displayName,
+        status: appUsers.status,
+        studentId: appUsers.studentId,
+        roleId: appRoles.id,
+        roleKey: appRoles.roleKey,
+        roleName: appRoles.name,
+      })
       .from(appUsers)
-      .get();
+      .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+      .where(eq(appUsers.email, email))
+  )[0];
+  if (!user) {
+    const count = (
+      await db.select({ value: sql<number>`count(*)` }).from(appUsers)
+    )[0];
     const roleKey = Number(count?.value || 0) === 0 ? "director" : "tenant";
-    const role = await db
-      .select()
-      .from(appRoles)
-      .where(eq(appRoles.roleKey, roleKey))
-      .get();
+    const role = (
+      await db.select().from(appRoles).where(eq(appRoles.roleKey, roleKey))
+    )[0];
     if (role) {
       await db.insert(appUsers).values({ email, displayName, roleId: role.id });
       user = {
@@ -624,52 +622,38 @@ async function seedInventory() {
 }
 
 async function seedKnownRoomFeatures() {
-  const d1 = getD1();
-  const known = [
+  const db = getDb();
+  const known: [string, string, string][] = [
     ["1201", "A", "non-attached"],
     ["1201", "B", "attached"],
     ["1201", "C", "non-attached"],
     ["1201", "D", "non-attached"],
     ["1304", "A", "non-attached"],
   ];
-  await runBatches(
-    known.map(([unitCode, roomLabel, bathroomType]) =>
-      d1
-        .prepare(
-          `
-    UPDATE hostel_rooms SET bathroom_type = ?
+  await runBatches(known, ([unitCode, roomLabel, bathroomType], tx) =>
+    tx.execute(sql`
+    UPDATE hostel_rooms SET bathroom_type = ${bathroomType}
     WHERE bathroom_type = 'unknown' AND id IN (
       SELECT r.id FROM hostel_rooms r JOIN hostel_units u ON r.unit_id = u.id
       JOIN hostel_properties h ON u.hostel_id = h.id
-      WHERE h.code = 'ATR' AND u.unit_code = ? AND r.room_label = ?
+      WHERE h.code = 'ATR' AND u.unit_code = ${unitCode} AND r.room_label = ${roomLabel}
     )
-  `,
-        )
-        .bind(bathroomType, unitCode, roomLabel),
-    ),
-    25,
+  `),
   );
-  await d1
-    .prepare(
-      `
+  await db.execute(sql`
     UPDATE hostel_rooms SET room_type = CASE
       WHEN (SELECT COUNT(*) FROM bed_spaces b WHERE b.room_id = hostel_rooms.id) > 1 THEN 'sharing'
       ELSE 'single' END WHERE room_type = 'auto'
-  `,
-    )
-    .run();
-  await d1
-    .prepare(
-      `UPDATE hostel_properties
+  `);
+  await db.execute(sql`
+    UPDATE hostel_properties
        SET electricity_rate = CASE WHEN code = 'NDY' THEN 0.751 ELSE 0.685 END
-       WHERE electricity_rate IN (0, 0.57)`,
-    )
-    .run();
+       WHERE electricity_rate IN (0, 0.57)
+  `);
 }
 
 async function seedStudentAssignments() {
   const db = getDb();
-  const d1 = getD1();
   const [profiles, assignments, beds] = await Promise.all([
     db.select({ sourceKey: studentProfiles.sourceKey }).from(studentProfiles),
     db
@@ -683,24 +667,12 @@ async function seedStudentAssignments() {
   const missingProfiles = importedAssignments.filter(
     (record) => !profileKeys.has(record.sourceKey),
   );
-  await runBatches(
-    missingProfiles.map((record) =>
-      d1
-        .prepare(
-          `
-    INSERT OR IGNORE INTO student_profiles (source_key, student_code, full_name, nationality, hometown, course)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `,
-        )
-        .bind(
-          record.sourceKey,
-          record.student.sourceCode,
-          record.student.fullName,
-          record.student.nationality,
-          record.student.hometown,
-          record.student.course,
-        ),
-    ),
+  await runBatches(missingProfiles, (record, tx) =>
+    tx.execute(sql`
+    INSERT INTO student_profiles (source_key, student_code, full_name, nationality, hometown, course)
+    VALUES (${record.sourceKey}, ${record.student.sourceCode}, ${record.student.fullName}, ${record.student.nationality}, ${record.student.hometown}, ${record.student.course})
+    ON CONFLICT DO NOTHING
+  `),
   );
 
   const allProfiles = await db
@@ -715,40 +687,20 @@ async function seedStudentAssignments() {
       profileIds.has(record.sourceKey) &&
       bedIds.has(record.legacyCode),
   );
-  await runBatches(
-    missingAssignments.map((record) =>
-      d1
-        .prepare(
-          `
-    INSERT OR IGNORE INTO accommodation_assignments
+  await runBatches(missingAssignments, (record, tx) =>
+    tx.execute(sql`
+    INSERT INTO accommodation_assignments
       (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit,
        salesperson, check_in_date, agreement_start_date, agreement_end_date, agreement_duration,
        check_out_date, check_in_meter, remarks, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-  `,
-        )
-        .bind(
-          record.sourceKey,
-          profileIds.get(record.sourceKey),
-          bedIds.get(record.legacyCode),
-          record.assignment.monthlyRental,
-          record.assignment.securityDeposit,
-          record.assignment.accessCardDeposit,
-          record.assignment.salesperson,
-          record.assignment.checkInDate,
-          record.assignment.agreementStartDate,
-          record.assignment.agreementEndDate,
-          record.assignment.agreementDuration,
-          record.assignment.checkOutDate,
-          record.assignment.checkInMeter,
-          record.assignment.remarks,
-        ),
-    ),
+    VALUES (${record.sourceKey}, ${profileIds.get(record.sourceKey)}, ${bedIds.get(record.legacyCode)}, ${record.assignment.monthlyRental}, ${record.assignment.securityDeposit}, ${record.assignment.accessCardDeposit}, ${record.assignment.salesperson}, ${record.assignment.checkInDate}, ${record.assignment.agreementStartDate}, ${record.assignment.agreementEndDate}, ${record.assignment.agreementDuration}, ${record.assignment.checkOutDate}, ${record.assignment.checkInMeter}, ${record.assignment.remarks}, 'active')
+    ON CONFLICT DO NOTHING
+  `),
   );
 }
 
 async function replaceReservationCharges(reservationId: number, raw: unknown) {
-  const d1 = getD1();
+  const db = getDb();
   let values: Record<string, unknown> = {};
   if (typeof raw === "string" && raw) {
     try {
@@ -758,21 +710,16 @@ async function replaceReservationCharges(reservationId: number, raw: unknown) {
     }
   } else if (raw && typeof raw === "object")
     values = raw as Record<string, unknown>;
-  await d1
-    .prepare("DELETE FROM reservation_charges WHERE reservation_id = ?")
-    .bind(reservationId)
-    .run();
+  await db.execute(
+    sql`DELETE FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+  );
   const rows = chargeTypes
     .map((type) => ({ type, amount: asNumber(values[type], 0) }))
     .filter((row) => row.amount > 0);
   if (rows.length)
-    await runBatches(
-      rows.map((row) =>
-        d1
-          .prepare(
-            "INSERT INTO reservation_charges (reservation_id, charge_type, amount) VALUES (?, ?, ?)",
-          )
-          .bind(reservationId, row.type, row.amount),
+    await runBatches(rows, (row, tx) =>
+      tx.execute(
+        sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount) VALUES (${reservationId}, ${row.type}, ${row.amount})`,
       ),
     );
   return rows.reduce((sum, row) => sum + row.amount, 0);
@@ -782,25 +729,23 @@ async function addReservationPayment(
   reservationId: number,
   body: Record<string, unknown>,
 ) {
+  const db = getDb();
   const amount = asNumber(body.paymentAmount ?? body.amountPaid, 0);
   if (amount > 0 || asText(body.paymentReference)) {
-    await getDb()
-      .insert(reservationPayments)
-      .values({
-        reservationId,
-        amount,
-        reference: asText(body.paymentReference),
-        paymentMethod: asText(body.paymentMethod, "bank-transfer"),
-        paidAt: asNullableText(body.paidAt) || nowIso(),
-        notes: asText(body.paymentNotes),
-      });
+    await db.insert(reservationPayments).values({
+      reservationId,
+      amount,
+      reference: asText(body.paymentReference),
+      paymentMethod: asText(body.paymentMethod, "bank-transfer"),
+      paidAt: asNullableText(body.paidAt) || nowIso(),
+      notes: asText(body.paymentNotes),
+    });
   }
-  const total = await getD1()
-    .prepare(
-      "SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ?",
+  const total = (
+    await db.execute<{ total: number }>(
+      sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
     )
-    .bind(reservationId)
-    .first<{ total: number }>();
+  )[0];
   return Number(total?.total || 0);
 }
 
