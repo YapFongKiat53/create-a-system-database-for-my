@@ -2483,12 +2483,11 @@ export async function POST(request: Request) {
           }).format(new Date()),
         );
         if (localDay > 20) {
-          const outstanding = await d1
-            .prepare(
-              "SELECT COALESCE(SUM(total_amount - amount_paid),0) amount FROM billing_invoices WHERE student_id=? AND status IN ('unpaid','partial')",
+          const outstanding = (
+            await db.execute<{ amount: number }>(
+              sql`SELECT COALESCE(SUM(total_amount - amount_paid),0) amount FROM billing_invoices WHERE student_id=${currentUser.studentId} AND status IN ('unpaid','partial')`,
             )
-            .bind(currentUser.studentId)
-            .first<{ amount: number }>();
+          )[0];
           if (Number(outstanding?.amount || 0) > 0)
             throw new Error(
               "Maintenance ticket submission is paused because payment remains outstanding after the 20th. Please contact Management for emergency assistance.",
@@ -2664,16 +2663,14 @@ export async function POST(request: Request) {
         throw new Error("The CSV file does not contain meter readings");
       for (const row of rows) {
         const code = asText(row.roomCode).toLowerCase();
-        const match = await d1
-          .prepare(
-            `
+        const match = (
+          await db.execute<{ room_id: number; bed_id: number }>(sql`
           SELECT r.id room_id, MIN(b.id) bed_id FROM hostel_rooms r
           JOIN hostel_units u ON r.unit_id=u.id JOIN bed_spaces b ON b.room_id=r.id
-          WHERE lower(u.unit_code || '-' || r.room_label)=? OR lower(b.legacy_code)=?
-        `,
-          )
-          .bind(code, code)
-          .first<{ room_id: number; bed_id: number }>();
+          WHERE lower(u.unit_code || '-' || r.room_label)=${code} OR lower(b.legacy_code)=${code}
+          GROUP BY r.id
+        `)
+        )[0];
         if (!match) continue;
         await db.insert(meterReadings).values({
           roomId: match.room_id,
