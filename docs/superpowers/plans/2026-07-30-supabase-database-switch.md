@@ -3747,6 +3747,149 @@ git commit -m "db: convert billing-cycle and billing-adjustment handlers to Post
 
 ---
 
+### Task 13b: Fix per-iteration connection overhead in `billing-cycle` (added during execution)
+
+> **Why this task exists:** Task 13's live test only completed 42 of 486
+> active assignments before the client-side timeout, taking long enough to
+> project a full run at ~20+ minutes. The 42 that did complete were
+> financially correct — this is a performance problem, not a correctness
+> bug. Root cause: Task 5 fixed a real Workers bug by making `getClient()`
+> open a fresh Postgres connection on every `getDb()` call rather than
+> caching one across HTTP requests (correct — sockets can't outlive their
+> originating *request*). But two spots inside `billing-cycle`'s per-assignment
+> loop call `getDb()` again *within the same request*, each opening one more
+> physical TCP+TLS connection to Supabase per iteration on top of the `db`
+> already obtained once at the top of `POST`: (1) `electricityShareForAssignment`
+> (defined in Task 8) does `const db = getDb();` internally, and (2) the
+> billing_items insert uses `runBatches(items, ...)`, which also does
+> `const db = getDb();` internally. Across up to 486 iterations, that's up
+> to ~972 extra connection handshakes for one billing run. Reusing the
+> `db` already in scope for the whole request removes them — this is safe
+> because the Workers restriction is about sharing I/O objects *across
+> requests*, not across function calls *within* one request.
+
+**Files:**
+- Modify: `app/api/system/route.ts` — `electricityShareForAssignment`'s
+  signature (defined ~line 1549, from Task 8) and its one call site inside
+  `billing-cycle` (from Task 13); `billing-cycle`'s billing_items insert
+  (replace the `runBatches(...)` call with a direct `db.transaction(...)`
+  using the already-in-scope `db`).
+
+- [ ] **Step 1: Give `electricityShareForAssignment` the request's `db` instead of fetching its own**
+
+```ts
+// Before
+async function electricityShareForAssignment(
+  assignmentId: number,
+  roomId: number,
+  cutoffDate: string,
+  electricityRate: number,
+) {
+  const db = getDb();
+  const readings = await db.execute<{ reading_value: number }>(sql`
+```
+
+```ts
+// After
+async function electricityShareForAssignment(
+  db: ReturnType<typeof getDb>,
+  assignmentId: number,
+  roomId: number,
+  cutoffDate: string,
+  electricityRate: number,
+) {
+  const readings = await db.execute<{ reading_value: number }>(sql`
+```
+
+The rest of the function body is unchanged — it already only referenced the
+local `db` variable, which now comes from the parameter instead of a fresh
+`getDb()` call.
+
+- [ ] **Step 2: Update the one call site inside `billing-cycle`**
+
+```ts
+// Before
+        const electricity = await electricityShareForAssignment(
+          assignment.assignment_id,
+          assignment.room_id,
+          asText(body.cutoffDate),
+          Number(assignment.electricity_rate || 0),
+        );
+```
+
+```ts
+// After
+        const electricity = await electricityShareForAssignment(
+          db,
+          assignment.assignment_id,
+          assignment.room_id,
+          asText(body.cutoffDate),
+          Number(assignment.electricity_rate || 0),
+        );
+```
+
+(`db` here is the same `const db = getDb();` already declared once at the
+top of the `POST` handler and used throughout every other query in this
+loop — nothing new to declare.)
+
+- [ ] **Step 3: Replace the billing_items `runBatches` call with a direct transaction on the existing `db`**
+
+```ts
+// Before
+          await runBatches(
+            items,
+            ([itemType, description, quantity, rate, amount], tx) =>
+              tx.execute(
+                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoice.id}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+              ),
+          );
+```
+
+```ts
+// After
+          await db.transaction(async (tx) => {
+            for (const [itemType, description, quantity, rate, amount] of items)
+              await tx.execute(
+                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoice.id}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+              );
+          });
+```
+
+This is a one-off inline transaction instead of going through the shared
+`runBatches` helper, specifically to reuse the request's existing `db`
+rather than opening a new connection — `runBatches`'s own signature is
+unchanged and every one of its other 8 call sites (Tasks 6, 7, 9, 11)
+is unaffected.
+
+- [ ] **Step 4: Typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: zero errors. `electricityShareForAssignment` has exactly one call
+site (confirmed via `grep -n "electricityShareForAssignment(" app/api/system/route.ts`
+returning exactly 2 matches: the definition and this one call), so changing
+its signature cannot break anything else.
+
+- [ ] **Step 5: Live test — prove the speedup, not just correctness**
+
+Using the same test director account as Task 13, time a full `billing-cycle`
+run for the real active-assignment count (currently 486 in this database) —
+either let a single request run to completion and note the wall-clock time,
+or, if a full run is still impractically slow for a live-test loop, at least
+confirm a batch of 100+ assignments completes well within what 42 took
+before (i.e., meaningfully faster per-assignment, not just "didn't time out
+this time"). Spot-check a handful of the resulting invoices for correct
+totals exactly as Task 13's live test did. Clean up all test billing data
+created and restore original row counts, exactly as Task 13's cleanup did.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/api/system/route.ts
+git commit -m "perf: reuse request-scoped db connection in billing-cycle's assignment loop"
+```
+
+---
+
 ### Task 14: Migration baseline for future schema changes
 
 **Files:**
