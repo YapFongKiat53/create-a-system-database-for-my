@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { getD1, getDb, type PgTx } from "../../../db";
+import { getDb, type PgTx } from "../../../db";
 import {
   getSessionUser,
   hashPassword,
@@ -2705,44 +2705,44 @@ export async function POST(request: Request) {
         throw new Error(
           "Billing month, cut-off date and due date are required",
         );
-      const cycle = await d1
-        .prepare(
-          "INSERT INTO billing_cycles (period_label, cutoff_date, due_date, status) VALUES (?, ?, ?, 'draft') ON CONFLICT(period_label) DO UPDATE SET cutoff_date=excluded.cutoff_date, due_date=excluded.due_date RETURNING id",
-        )
-        .bind(
-          asText(body.periodLabel),
-          asText(body.cutoffDate),
-          asText(body.dueDate),
-        )
-        .first<{ id: number }>();
+      const cycle = (
+        await db.execute<{ id: number }>(sql`
+          INSERT INTO billing_cycles (period_label, cutoff_date, due_date, status)
+          VALUES (${asText(body.periodLabel)}, ${asText(body.cutoffDate)}, ${asText(body.dueDate)}, 'draft')
+          ON CONFLICT(period_label) DO UPDATE SET cutoff_date=excluded.cutoff_date, due_date=excluded.due_date
+          RETURNING id
+        `)
+      )[0];
       if (!cycle) throw new Error("Unable to create billing cycle");
       createdId = cycle.id;
-      const active = await d1
-        .prepare(
-          "SELECT a.id assignment_id, a.student_id, a.monthly_rental, a.bed_space_id, r.id room_id, h.electricity_rate FROM accommodation_assignments a JOIN bed_spaces b ON a.bed_space_id=b.id JOIN hostel_rooms r ON b.room_id=r.id JOIN hostel_units u ON r.unit_id=u.id JOIN hostel_properties h ON u.hostel_id=h.id WHERE a.status='active'",
-        )
-        .all<{
-          assignment_id: number;
-          student_id: number;
-          monthly_rental: number | null;
-          bed_space_id: number;
-          room_id: number;
-          electricity_rate: number;
-        }>();
-      for (const assignment of active.results) {
-        const existing = await d1
-          .prepare(
-            "SELECT id FROM billing_invoices WHERE cycle_id=? AND student_id=?",
+      const active = await db.execute<{
+        assignment_id: number;
+        student_id: number;
+        monthly_rental: number | null;
+        bed_space_id: number;
+        room_id: number;
+        electricity_rate: number;
+      }>(sql`
+        SELECT a.id assignment_id, a.student_id, a.monthly_rental, a.bed_space_id, r.id room_id, h.electricity_rate
+        FROM accommodation_assignments a
+        JOIN bed_spaces b ON a.bed_space_id=b.id
+        JOIN hostel_rooms r ON b.room_id=r.id
+        JOIN hostel_units u ON r.unit_id=u.id
+        JOIN hostel_properties h ON u.hostel_id=h.id
+        WHERE a.status='active'
+      `);
+      for (const assignment of active) {
+        const existing = (
+          await db.execute<{ id: number }>(
+            sql`SELECT id FROM billing_invoices WHERE cycle_id=${cycle.id} AND student_id=${assignment.student_id}`,
           )
-          .bind(cycle.id, assignment.student_id)
-          .first<{ id: number }>();
+        )[0];
         if (existing) continue;
-        const rateChange = await d1
-          .prepare(
-            "SELECT monthly_rental FROM student_rate_changes WHERE assignment_id=? AND effective_date<=? ORDER BY effective_date DESC LIMIT 1",
+        const rateChange = (
+          await db.execute<{ monthly_rental: number | null }>(
+            sql`SELECT monthly_rental FROM student_rate_changes WHERE assignment_id=${assignment.assignment_id} AND effective_date<=${asText(body.cutoffDate)} ORDER BY effective_date DESC LIMIT 1`,
           )
-          .bind(assignment.assignment_id, asText(body.cutoffDate))
-          .first<{ monthly_rental: number | null }>();
+        )[0];
         const rent = Number(
           rateChange?.monthly_rental ?? assignment.monthly_rental ?? 0,
         );
@@ -2752,27 +2752,21 @@ export async function POST(request: Request) {
           asText(body.cutoffDate),
           Number(assignment.electricity_rate || 0),
         );
-        const parking = await d1
-          .prepare(
-            "SELECT COALESCE(SUM(monthly_rental),0) amount FROM parking_rentals WHERE student_id=? AND status='active'",
+        const parking = (
+          await db.execute<{ amount: number }>(
+            sql`SELECT COALESCE(SUM(monthly_rental),0) amount FROM parking_rentals WHERE student_id=${assignment.student_id} AND status='active'`,
           )
-          .bind(assignment.student_id)
-          .first<{ amount: number }>();
-        const extra = await d1
-          .prepare(
-            "SELECT COALESCE(SUM(student_charge),0) amount FROM maintenance_tickets WHERE student_id=? AND student_charge>0 AND status IN ('completed','closed')",
+        )[0];
+        const extra = (
+          await db.execute<{ amount: number }>(
+            sql`SELECT COALESCE(SUM(student_charge),0) amount FROM maintenance_tickets WHERE student_id=${assignment.student_id} AND student_charge>0 AND status IN ('completed','closed')`,
           )
-          .bind(assignment.student_id)
-          .first<{ amount: number }>();
-        const previousInvoice = await d1
-          .prepare(
-            `
-          SELECT total_amount, amount_paid FROM billing_invoices
-          WHERE student_id=? ORDER BY id DESC LIMIT 1
-        `,
+        )[0];
+        const previousInvoice = (
+          await db.execute<{ total_amount: number; amount_paid: number }>(
+            sql`SELECT total_amount, amount_paid FROM billing_invoices WHERE student_id=${assignment.student_id} ORDER BY id DESC LIMIT 1`,
           )
-          .bind(assignment.student_id)
-          .first<{ total_amount: number; amount_paid: number }>();
+        )[0];
         const carryForward = previousInvoice
           ? Math.min(
               0,
@@ -2786,60 +2780,53 @@ export async function POST(request: Request) {
           Number(parking?.amount || 0) +
           Number(extra?.amount || 0) +
           carryForward;
-        const invoice = await d1
-          .prepare(
-            "INSERT INTO billing_invoices (invoice_no, cycle_id, student_id, assignment_id, due_date, status, total_amount, amount_paid, invoice_frequency) VALUES (?, ?, ?, ?, ?, 'unpaid', ?, 0, ?) RETURNING id",
-          )
-          .bind(
-            `INV-${cycle.id}-${assignment.student_id}`,
-            cycle.id,
-            assignment.student_id,
-            assignment.assignment_id,
-            asText(body.dueDate),
-            total,
-            asText(body.invoiceFrequency, "on-request"),
-          )
-          .first<{ id: number }>();
+        const invoice = (
+          await db.execute<{ id: number }>(sql`
+            INSERT INTO billing_invoices (invoice_no, cycle_id, student_id, assignment_id, due_date, status, total_amount, amount_paid, invoice_frequency)
+            VALUES (${`INV-${cycle.id}-${assignment.student_id}`}, ${cycle.id}, ${assignment.student_id}, ${assignment.assignment_id}, ${asText(body.dueDate)}, 'unpaid', ${total}, 0, ${asText(body.invoiceFrequency, "on-request")})
+            RETURNING id
+          `)
+        )[0];
         if (invoice) {
-          const items = [
-            ["room-rental", "Room rental", 1, rent, rent],
+          const items = (
             [
-              "electricity",
-              `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
-              electricity.usage,
-              Number(assignment.electricity_rate || 0),
-              electricity.amount,
-            ],
-            [
-              "parking",
-              "Parking rental",
-              1,
-              Number(parking?.amount || 0),
-              Number(parking?.amount || 0),
-            ],
-            [
-              "other",
-              "Additional / penalty charges",
-              1,
-              Number(extra?.amount || 0),
-              Number(extra?.amount || 0),
-            ],
-            [
-              "carry-forward",
-              "Previous excess payment carried forward",
-              1,
-              carryForward,
-              carryForward,
-            ],
-          ].filter((item) => Number(item[4]) !== 0);
+              ["room-rental", "Room rental", 1, rent, rent],
+              [
+                "electricity",
+                `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
+                electricity.usage,
+                Number(assignment.electricity_rate || 0),
+                electricity.amount,
+              ],
+              [
+                "parking",
+                "Parking rental",
+                1,
+                Number(parking?.amount || 0),
+                Number(parking?.amount || 0),
+              ],
+              [
+                "other",
+                "Additional / penalty charges",
+                1,
+                Number(extra?.amount || 0),
+                Number(extra?.amount || 0),
+              ],
+              [
+                "carry-forward",
+                "Previous excess payment carried forward",
+                1,
+                carryForward,
+                carryForward,
+              ],
+            ] as [string, string, number, number, number][]
+          ).filter((item) => Number(item[4]) !== 0);
           await runBatches(
-            items.map((item) =>
-              d1
-                .prepare(
-                  "INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(invoice.id, ...item),
-            ),
+            items,
+            ([itemType, description, quantity, rate, amount], tx) =>
+              tx.execute(
+                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoice.id}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+              ),
           );
         }
       }
@@ -2905,11 +2892,9 @@ export async function POST(request: Request) {
         .where(eq(billingInvoices.id, payment.invoiceId));
     } else if (action === "billing-item-adjust") {
       const itemId = asNumber(body.itemId);
-      const item = await db
-        .select()
-        .from(billingItems)
-        .where(eq(billingItems.id, itemId))
-        .get();
+      const item = (
+        await db.select().from(billingItems).where(eq(billingItems.id, itemId))
+      )[0];
       if (!item || !asText(body.reason))
         throw new Error("Billing item and adjustment reason are required");
       // Electricity fees always carry up to the next whole ringgit.
@@ -2938,26 +2923,25 @@ export async function POST(request: Request) {
           .update(billingItems)
           .set({ amount: newAmount, rate: newAmount })
           .where(eq(billingItems.id, itemId));
-        await d1
-          .prepare(
-            "UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=?) WHERE id=?",
-          )
-          .bind(item.invoiceId, item.invoiceId)
-          .run();
+        await db.execute(
+          sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${item.invoiceId}) WHERE id=${item.invoiceId}`,
+        );
       }
     } else if (action === "billing-adjust-approve") {
       const adjustmentId = asNumber(body.adjustmentId);
-      const adjustment = await db
-        .select()
-        .from(billingItemAdjustments)
-        .where(eq(billingItemAdjustments.id, adjustmentId))
-        .get();
+      const adjustment = (
+        await db
+          .select()
+          .from(billingItemAdjustments)
+          .where(eq(billingItemAdjustments.id, adjustmentId))
+      )[0];
       if (!adjustment) throw new Error("Adjustment request not found");
-      const item = await db
-        .select()
-        .from(billingItems)
-        .where(eq(billingItems.id, adjustment.billingItemId))
-        .get();
+      const item = (
+        await db
+          .select()
+          .from(billingItems)
+          .where(eq(billingItems.id, adjustment.billingItemId))
+      )[0];
       if (!item) throw new Error("Billing item not found");
       // Electricity fees always carry up to the next whole ringgit.
       const appliedAmount =
@@ -2976,12 +2960,9 @@ export async function POST(request: Request) {
           approvedAt: nowIso(),
         })
         .where(eq(billingItemAdjustments.id, adjustmentId));
-      await d1
-        .prepare(
-          "UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=?) WHERE id=?",
-        )
-        .bind(item.invoiceId, item.invoiceId)
-        .run();
+      await db.execute(
+        sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${item.invoiceId}) WHERE id=${item.invoiceId}`,
+      );
     } else if (action === "announcement") {
       if (!asText(body.title) || !asText(body.body))
         throw new Error("Announcement title and message are required");
