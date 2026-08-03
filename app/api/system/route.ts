@@ -1547,12 +1547,12 @@ export async function GET(request: Request) {
 }
 
 async function electricityShareForAssignment(
+  db: ReturnType<typeof getDb>,
   assignmentId: number,
   roomId: number,
   cutoffDate: string,
   electricityRate: number,
 ) {
-  const db = getDb();
   const readings = await db.execute<{ reading_value: number }>(sql`
     SELECT reading_value FROM meter_readings
     WHERE COALESCE(room_id, (SELECT room_id FROM bed_spaces WHERE id=bed_space_id))=${roomId}
@@ -2747,6 +2747,7 @@ export async function POST(request: Request) {
           rateChange?.monthly_rental ?? assignment.monthly_rental ?? 0,
         );
         const electricity = await electricityShareForAssignment(
+          db,
           assignment.assignment_id,
           assignment.room_id,
           asText(body.cutoffDate),
@@ -2821,13 +2822,12 @@ export async function POST(request: Request) {
               ],
             ] as [string, string, number, number, number][]
           ).filter((item) => Number(item[4]) !== 0);
-          await runBatches(
-            items,
-            ([itemType, description, quantity, rate, amount], tx) =>
-              tx.execute(
+          await db.transaction(async (tx) => {
+            for (const [itemType, description, quantity, rate, amount] of items)
+              await tx.execute(
                 sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoice.id}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
-              ),
-          );
+              );
+          });
         }
       }
     } else if (action === "billing-post") {
