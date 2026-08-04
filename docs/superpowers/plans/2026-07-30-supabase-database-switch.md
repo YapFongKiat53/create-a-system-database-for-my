@@ -3962,6 +3962,211 @@ git commit -m "db: complete Supabase database-layer switch, verified end-to-end"
 
 ---
 
+### Task 16: Fix findings from the final whole-branch review (added during execution)
+
+> **Why this task exists:** The final whole-branch review (dispatched after
+> Task 15) found the individual per-task reviews couldn't see: a half-landed
+> fix from Task 13b, a global-vs-one-handler pool-size mismatch, and a real
+> `tsc` regression every task's implementer waved off as "pre-existing"
+> without checking whether it predated this migration. Verdict was "Ready to
+> merge, with fixes" — these are those fixes.
+
+**Files:**
+- Modify: `app/api/system/route.ts` — `runBatches` signature, its ~14 call
+  sites, the 5 seed-helper functions that call `getDb()` internally
+  (`seedAdministration`, `seedInventory`, `seedKnownRoomFeatures`,
+  `seedStudentAssignments`, `applyLatePaymentCharges`), `resolveCurrentUser`,
+  `unit-create`/`room-add`/`billing-cycle`'s `createdId`/`invoice.id` reads,
+  the `meter-reading-bulk` lookup query, `role-delete`'s `inUse` check.
+- Modify: `db/index.ts` — `getDb()`/`getClient()` gain an optional pool-size
+  parameter.
+- Modify: `tsconfig.json` — exclude `examples/`.
+
+- [ ] **Step 1: Fix the `tsc` regression (Important #3) — exclude `examples/` from the typecheck**
+
+`examples/d1/app/api/notes/route.ts` imports this app's shared `getDb()`
+(now Postgres-typed, since Task 1) but keeps its own local `sqliteTable`
+schema — it type-checked before this migration only because `getDb()` used
+to be SQLite-typed too. It's a standalone two-file demo, not wired into
+`vite.config.ts`/`next.config.ts`/the route tree, so it has zero runtime
+impact — but it broke `npx tsc --noEmit` for the whole repo, and every task
+in this plan waved the resulting errors off as "pre-existing" without
+verifying that. Add `"examples"` to `tsconfig.json`'s `exclude` array (create
+the array if it doesn't exist). After this, `npx tsc --noEmit` must report
+**zero** errors, repo-wide — this is the bar every earlier task's Global
+Constraint was actually supposed to enforce.
+
+- [ ] **Step 2: Give `runBatches` and the seed helpers the request's `db` instead of fetching their own (Important #1)**
+
+```ts
+// Before
+async function runBatches<T>(
+  items: readonly T[],
+  build: (item: T, tx: PgTx) => Promise<unknown>,
+) {
+  if (!items.length) return;
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    for (const item of items) await build(item, tx);
+  });
+}
+```
+
+```ts
+// After
+async function runBatches<T>(
+  db: ReturnType<typeof getDb>,
+  items: readonly T[],
+  build: (item: T, tx: PgTx) => Promise<unknown>,
+) {
+  if (!items.length) return;
+  await db.transaction(async (tx) => {
+    for (const item of items) await build(item, tx);
+  });
+}
+```
+
+Update all ~14 call sites to pass `db` as the first argument — every one of
+them already has a `db` in scope (either the function's own
+`const db = getDb();`, or a `db` parameter threaded in by this same step).
+Then apply the identical treatment to the 5 seed-helper functions that
+currently call `getDb()` internally: give each an explicit `db` parameter,
+drop their internal `getDb()` call, and update their call sites (inside
+`GET`/`POST`, where `db` is already declared once at the top) to pass it.
+`resolveCurrentUser` gets the same treatment. `db/auth.ts`'s
+`getSessionUser`/`permissionsForRole` are OUT OF SCOPE for this step — they're
+cross-cutting auth utilities called from multiple route files, not just
+`system/route.ts`, and threading a request-scoped `db` through them would be
+a larger architectural change than this cleanup pass warrants; leave their
+own `getDb()` calls as-is.
+
+- [ ] **Step 3: Right-size the connection pool instead of applying `max: 20` everywhere (Important #2)**
+
+```ts
+// Before (db/index.ts)
+function getClient() {
+  const bindings = env as unknown as { DATABASE_URL?: string };
+  if (!bindings.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is unavailable. Add it to `.dev.vars` (local dev) or as a secret (deployed)."
+    );
+  }
+  return postgres(bindings.DATABASE_URL, { max: 20, prepare: false });
+}
+
+export function getDb() {
+  return drizzle(getClient(), { schema });
+}
+```
+
+```ts
+// After
+function getClient(max: number) {
+  const bindings = env as unknown as { DATABASE_URL?: string };
+  if (!bindings.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is unavailable. Add it to `.dev.vars` (local dev) or as a secret (deployed)."
+    );
+  }
+  return postgres(bindings.DATABASE_URL, { max, prepare: false });
+}
+
+export function getDb(options?: { max?: number }) {
+  return drizzle(getClient(options?.max ?? 5), { schema });
+}
+```
+
+`5` is a safe default for the majority of handlers (a handful of sequential
+queries per request, now further reduced by Step 2's `db`-threading). The
+`GET` handler's top-level `const db = getDb();` — the one that fires the
+~30-way `Promise.all` — becomes `const db = getDb({ max: 20 });`, matching
+what was empirically proven necessary in Task 15. Every other call site
+(including `POST`'s top-level `db`) uses the new default.
+
+Note: explicit connection teardown (`client.end()`) is intentionally NOT
+part of this step — Workers reclaims request-scoped sockets when the
+request's execution context ends, and implementing manual teardown
+correctly for this specific framework's request lifecycle carries more risk
+of introducing a new bug than the bounded, load-dependent risk it would
+close. Left as a documented follow-up, not fixed here.
+
+- [ ] **Step 4: Quick correctness fixes (Minor #4, #5, #6)**
+
+```ts
+// unit-create — Before
+      createdId = result?.id;
+// After
+      createdId = Number(result?.id);
+```
+Apply the same `Number(...)` wrapping to `room-add`'s and `billing-cycle`'s
+equivalent `RETURNING id` reads (`createdId`/`invoice.id`), matching what
+`student-create` already does — `bigint` (OID 20) columns come back from
+raw `db.execute()` as strings, not numbers, so every raw-SQL `RETURNING id`
+read needs this, not just the ones already covered.
+
+```ts
+// meter-reading-bulk — Before
+          SELECT r.id room_id, MIN(b.id) bed_id FROM hostel_rooms r
+          JOIN hostel_units u ON r.unit_id=u.id JOIN bed_spaces b ON b.room_id=r.id
+          WHERE lower(u.unit_code || '-' || r.room_label)=${code} OR lower(b.legacy_code)=${code}
+          GROUP BY r.id
+// After
+          SELECT r.id room_id, MIN(b.id) bed_id FROM hostel_rooms r
+          JOIN hostel_units u ON r.unit_id=u.id JOIN bed_spaces b ON b.room_id=r.id
+          WHERE lower(u.unit_code || '-' || r.room_label)=${code} OR lower(b.legacy_code)=${code}
+          GROUP BY r.id
+          ORDER BY r.id LIMIT 1
+```
+The `OR` condition can match rooms in more than one group; without an
+explicit order, `[0]` is nondeterministic under Postgres.
+
+```ts
+// role-delete's inUse check — Before
+      const inUse = (
+        await db
+          .select({ id: appUsers.id })
+          .from(appUsers)
+          .where(eq(appUsers.roleId, roleId))
+      )[0];
+// After
+      const inUse = (
+        await db
+          .select({ id: appUsers.id })
+          .from(appUsers)
+          .where(eq(appUsers.roleId, roleId))
+          .limit(1)
+      )[0];
+```
+This one matters beyond style: without `.limit(1)`, the query selects
+*every* user on the role just to test truthiness. Add `.limit(1)` here.
+
+- [ ] **Step 5: Typecheck, lint, build**
+
+Run: `npx tsc --noEmit && npm run lint && npm run build`
+Expected: all three succeed with **zero** errors — this is the first point
+in the whole migration where that's actually true, since Step 1 removed the
+one standing error source.
+
+- [ ] **Step 6: Live test**
+
+Using the test director account, re-run: a `GET /api/system` dashboard load
+(confirm it still succeeds — this is the exact endpoint the pool-size change
+touches), one `billing-cycle` run over a smaller subset if a fast way to
+scope it exists (otherwise confirm via code review that `db` threading
+didn't change `billing-cycle`'s behavior, since Task 13b's live test already
+proved the 486-assignment case), and `role-delete` on a role that has a user
+assigned (confirm the "reassign users before deleting" error still fires
+correctly with the added `.limit(1)`).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/api/system/route.ts db/index.ts tsconfig.json
+git commit -m "fix: address final-review findings (runBatches connection reuse, pool sizing, tsc regression)"
+```
+
+---
+
 ## Self-review
 
 **Spec coverage:** Every section of `docs/superpowers/specs/2026-07-30-supabase-connection-design.md` is covered — driver/connection (Task 1), schema (Task 3), query-site rewrite (Tasks 6-13), migration baseline (Task 14), verification plan (Task 15), rollback safety (Global Constraints — D1 untouched throughout).
