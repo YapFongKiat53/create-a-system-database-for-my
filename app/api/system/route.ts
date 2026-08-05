@@ -698,8 +698,11 @@ async function seedStudentAssignments(db: ReturnType<typeof getDb>) {
   );
 }
 
-async function replaceReservationCharges(reservationId: number, raw: unknown) {
-  const db = getDb();
+async function replaceReservationCharges(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+  raw: unknown,
+) {
   let values: Record<string, unknown> = {};
   if (typeof raw === "string" && raw) {
     try {
@@ -725,10 +728,10 @@ async function replaceReservationCharges(reservationId: number, raw: unknown) {
 }
 
 async function addReservationPayment(
+  db: ReturnType<typeof getDb>,
   reservationId: number,
   body: Record<string, unknown>,
 ) {
-  const db = getDb();
   const amount = asNumber(body.paymentAmount ?? body.amountPaid, 0);
   if (amount > 0 || asText(body.paymentReference)) {
     await db.insert(reservationPayments).values({
@@ -2041,12 +2044,13 @@ export async function POST(request: Request) {
         createdId = reservationId;
       }
       const totalPayable = await replaceReservationCharges(
+        db,
         reservationId,
         body.chargeBreakdown,
       );
       const amountPaid =
         action === "reservation"
-          ? await addReservationPayment(reservationId, body)
+          ? await addReservationPayment(db, reservationId, body)
           : Number(
               (
                 await db.execute<{ total: number }>(
@@ -2065,7 +2069,7 @@ export async function POST(request: Request) {
     } else if (action === "reservation-payment") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
-      const amountPaid = await addReservationPayment(reservationId, body);
+      const amountPaid = await addReservationPayment(db, reservationId, body);
       const paymentStatus = asText(
         body.paymentStatus,
         amountPaid > 0 ? "partial" : "unpaid",
