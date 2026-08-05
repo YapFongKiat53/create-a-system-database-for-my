@@ -3964,6 +3964,25 @@ git commit -m "db: complete Supabase database-layer switch, verified end-to-end"
 
 ### Task 16: Fix findings from the final whole-branch review (added during execution)
 
+> **Amended during execution:** Step 2 as originally written had the `GET`
+> handler thread ONE shared `db` (with `max: 20`) through both the
+> sequential seed helpers (which internally call `db.transaction()`) AND the
+> big ~30-way concurrent `Promise.all` further down. This reintroduced the
+> exact Supavisor transaction-mode deadlock Task 15 had just fixed — mixing
+> stateful `db.transaction()` calls with a large burst of concurrent
+> ad-hoc queries on the *same* client apparently confuses postgres-js's
+> connection-pool/transaction-mode interaction, even with `prepare: false`
+> already set. Confirmed by direct reproduction: `GET /api/system` hung
+> indefinitely (150s+, no response) with **zero** active or blocked queries
+> visible in `pg_stat_activity` on the Supabase side — proving the hang was
+> client-side, not a slow/stuck query. The fix: give the seed helpers their
+> own `getDb()` client (small default pool) and keep a *separate* fresh
+> `getDb({ max: 20 })` client dedicated to the `Promise.all` block only,
+> exactly restoring the shape that was already proven to work. Verified with
+> 4 consecutive successful `GET /api/system` calls (28-34s each — actually
+> faster than the ~45-49s pre-Task-16 baseline, since the seed helpers now
+> share one connection instead of five).
+
 > **Why this task exists:** The final whole-branch review (dispatched after
 > Task 15) found the individual per-task reviews couldn't see: a half-landed
 > fix from Task 13b, a global-vs-one-handler pool-size mismatch, and a real
