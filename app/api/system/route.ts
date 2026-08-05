@@ -115,11 +115,11 @@ function chunks<T>(values: T[], size: number) {
 }
 
 async function runBatches<T>(
+  db: ReturnType<typeof getDb>,
   items: readonly T[],
   build: (item: T, tx: PgTx) => Promise<unknown>,
 ) {
   if (!items.length) return;
-  const db = getDb();
   await db.transaction(async (tx) => {
     for (const item of items) await build(item, tx);
   });
@@ -320,9 +320,8 @@ function permissionFor(role: string, moduleKey: string) {
   };
 }
 
-async function seedAdministration() {
-  const db = getDb();
-  await runBatches(roleBlueprints, (role, tx) =>
+async function seedAdministration(db: ReturnType<typeof getDb>) {
+  await runBatches(db, roleBlueprints, (role, tx) =>
     tx.execute(
       sql`INSERT INTO app_roles (role_key, name, description, is_system) VALUES (${role.key}, ${role.name}, ${role.description}, true) ON CONFLICT DO NOTHING`,
     ),
@@ -331,7 +330,7 @@ async function seedAdministration() {
   const permissionRows = roles.flatMap((role) =>
     permissionModules.map((moduleKey) => ({ role, moduleKey })),
   );
-  await runBatches(permissionRows, ({ role, moduleKey }, tx) => {
+  await runBatches(db, permissionRows, ({ role, moduleKey }, tx) => {
     const p = permissionFor(role.roleKey, moduleKey);
     return tx.execute(sql`
       INSERT INTO role_permissions
@@ -355,6 +354,7 @@ async function seedAdministration() {
     ["Other", "General issue"],
   ];
   await runBatches(
+    db,
     categories.map(([category, subcategory], index) => ({
       category,
       subcategory,
@@ -392,6 +392,7 @@ async function seedAdministration() {
     ],
   ];
   await runBatches(
+    db,
     reminders.map(([key, day, subject, message]) => ({
       key,
       day,
@@ -405,8 +406,7 @@ async function seedAdministration() {
   );
 }
 
-async function applyLatePaymentCharges() {
-  const db = getDb();
+async function applyLatePaymentCharges(db: ReturnType<typeof getDb>) {
   const today = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
@@ -458,7 +458,10 @@ async function applyLatePaymentCharges() {
   }
 }
 
-async function resolveCurrentUser(request: Request) {
+async function resolveCurrentUser(
+  request: Request,
+  db: ReturnType<typeof getDb>,
+) {
   // A signed-in session always wins over the platform SSO headers.
   const sessionUser = await getSessionUser(request);
   if (sessionUser)
@@ -478,7 +481,6 @@ async function resolveCurrentUser(request: Request) {
     } catch {
       /* fall back to email */
     }
-  const db = getDb();
   let user = (
     await db
       .select({
@@ -525,8 +527,7 @@ async function resolveCurrentUser(request: Request) {
   return { ...user, permissions };
 }
 
-async function seedInventory() {
-  const db = getDb();
+async function seedInventory(db: ReturnType<typeof getDb>) {
   const propertyRows = await db.select().from(hostelProperties);
   const existingPropertyCodes = new Set(propertyRows.map((row) => row.code));
   const missingProperties = inventory
@@ -621,8 +622,7 @@ async function seedInventory() {
     await db.insert(bedSpaces).values(group).onConflictDoNothing();
 }
 
-async function seedKnownRoomFeatures() {
-  const db = getDb();
+async function seedKnownRoomFeatures(db: ReturnType<typeof getDb>) {
   const known: [string, string, string][] = [
     ["1201", "A", "non-attached"],
     ["1201", "B", "attached"],
@@ -630,7 +630,7 @@ async function seedKnownRoomFeatures() {
     ["1201", "D", "non-attached"],
     ["1304", "A", "non-attached"],
   ];
-  await runBatches(known, ([unitCode, roomLabel, bathroomType], tx) =>
+  await runBatches(db, known, ([unitCode, roomLabel, bathroomType], tx) =>
     tx.execute(sql`
     UPDATE hostel_rooms SET bathroom_type = ${bathroomType}
     WHERE bathroom_type = 'unknown' AND id IN (
@@ -652,8 +652,7 @@ async function seedKnownRoomFeatures() {
   `);
 }
 
-async function seedStudentAssignments() {
-  const db = getDb();
+async function seedStudentAssignments(db: ReturnType<typeof getDb>) {
   const [profiles, assignments, beds] = await Promise.all([
     db.select({ sourceKey: studentProfiles.sourceKey }).from(studentProfiles),
     db
@@ -667,7 +666,7 @@ async function seedStudentAssignments() {
   const missingProfiles = importedAssignments.filter(
     (record) => !profileKeys.has(record.sourceKey),
   );
-  await runBatches(missingProfiles, (record, tx) =>
+  await runBatches(db, missingProfiles, (record, tx) =>
     tx.execute(sql`
     INSERT INTO student_profiles (source_key, student_code, full_name, nationality, hometown, course)
     VALUES (${record.sourceKey}, ${record.student.sourceCode}, ${record.student.fullName}, ${record.student.nationality}, ${record.student.hometown}, ${record.student.course})
@@ -687,7 +686,7 @@ async function seedStudentAssignments() {
       profileIds.has(record.sourceKey) &&
       bedIds.has(record.legacyCode),
   );
-  await runBatches(missingAssignments, (record, tx) =>
+  await runBatches(db, missingAssignments, (record, tx) =>
     tx.execute(sql`
     INSERT INTO accommodation_assignments
       (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit,
@@ -717,7 +716,7 @@ async function replaceReservationCharges(reservationId: number, raw: unknown) {
     .map((type) => ({ type, amount: asNumber(values[type], 0) }))
     .filter((row) => row.amount > 0);
   if (rows.length)
-    await runBatches(rows, (row, tx) =>
+    await runBatches(db, rows, (row, tx) =>
       tx.execute(
         sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount) VALUES (${reservationId}, ${row.type}, ${row.amount})`,
       ),
@@ -751,15 +750,21 @@ async function addReservationPayment(
 
 export async function GET(request: Request) {
   try {
-    await seedAdministration();
-    const currentUser = await resolveCurrentUser(request);
+    // Deliberately a separate client from the one below: mixing the
+    // sequential db.transaction() calls the seed helpers make with the big
+    // concurrent Promise.all further down (on the SAME client) reintroduces
+    // the Supavisor deadlock Task 15 fixed — confirmed by direct
+    // reproduction. Keeping them on separate clients avoids it.
+    const seedDb = getDb();
+    await seedAdministration(seedDb);
+    const currentUser = await resolveCurrentUser(request, seedDb);
     if (!currentUser)
       return Response.json({ error: "Not signed in" }, { status: 401 });
-    await seedInventory();
-    await seedKnownRoomFeatures();
-    await seedStudentAssignments();
-    await applyLatePaymentCharges();
-    const db = getDb();
+    await seedInventory(seedDb);
+    await seedKnownRoomFeatures(seedDb);
+    await seedStudentAssignments(seedDb);
+    await applyLatePaymentCharges(seedDb);
+    const db = getDb({ max: 20 });
     const [
       rawBeds,
       units,
@@ -1614,8 +1619,8 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = asText(body.action);
     let createdId: number | undefined;
-    await seedAdministration();
-    const currentUser = await resolveCurrentUser(request);
+    await seedAdministration(db);
+    const currentUser = await resolveCurrentUser(request, db);
     if (!currentUser || currentUser.status !== "active")
       throw new Error("Your user account is not active");
     const moduleKey = moduleForAction(action);
@@ -1728,7 +1733,7 @@ export async function POST(request: Request) {
           RETURNING id
         `)
       )[0];
-      createdId = result?.id;
+      createdId = Number(result?.id);
     } else if (action === "unit-update") {
       const gender = asText(body.gender, "unspecified");
       if (
@@ -1819,7 +1824,7 @@ export async function POST(request: Request) {
             throw new Error(
               "This room cannot become single until the extra bed assignment history is cleared",
             );
-          await runBatches(removable, (bed, tx) =>
+          await runBatches(db, removable, (bed, tx) =>
             tx.execute(sql`DELETE FROM bed_spaces WHERE id=${bed.id}`),
           );
         }
@@ -1881,6 +1886,7 @@ export async function POST(request: Request) {
         `${unit.unit_code}-${asText(body.roomLabel)}`,
       );
       await runBatches(
+        db,
         Array.from({ length: bedCount }, (_, index) => ({
           label: String(index + 1),
           code: `${prefix}${bedCount === 1 ? "1" : index + 1}`,
@@ -1890,7 +1896,7 @@ export async function POST(request: Request) {
             sql`INSERT INTO bed_spaces (room_id, bed_label, legacy_code, status, bed_type) VALUES (${room.id}, ${bed.label}, ${bed.code}, 'vacant', ${bedType})`,
           ),
       );
-      createdId = room.id;
+      createdId = Number(room.id);
     } else if (action === "bulk-room-price") {
       const roomIds = Array.isArray(body.roomIds)
         ? body.roomIds
@@ -1905,7 +1911,7 @@ export async function POST(request: Request) {
       const rate = asNullableNumber(body.salesRate);
       if (rate === null || rate < 0)
         throw new Error("Enter a valid sales rate");
-      await runBatches(roomIds, (roomId, tx) =>
+      await runBatches(db, roomIds, (roomId, tx) =>
         tx.execute(sql`
           UPDATE hostel_rooms
           SET ${sql.raw(field)} = ${rate},
@@ -2181,12 +2187,12 @@ export async function POST(request: Request) {
             body.checkOutDate,
             new Date().toISOString().slice(0, 10),
           );
-          await runBatches(activeParking, (rental, tx) =>
+          await runBatches(db, activeParking, (rental, tx) =>
             tx.execute(
               sql`UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ${checkOutDate}) WHERE id=${rental.id}`,
             ),
           );
-          await runBatches(activeParking, (rental, tx) =>
+          await runBatches(db, activeParking, (rental, tx) =>
             tx.execute(
               sql`UPDATE parking_lots SET status='available' WHERE id=${rental.parkingLotId}`,
             ),
@@ -2264,12 +2270,12 @@ export async function POST(request: Request) {
           ),
         );
       if (activeParking.length) {
-        await runBatches(activeParking, (rental, tx) =>
+        await runBatches(db, activeParking, (rental, tx) =>
           tx.execute(
             sql`UPDATE parking_rentals SET status='ended', end_date=COALESCE(end_date, ${checkOut}) WHERE id=${rental.id}`,
           ),
         );
-        await runBatches(activeParking, (rental, tx) =>
+        await runBatches(db, activeParking, (rental, tx) =>
           tx.execute(
             sql`UPDATE parking_lots SET status='available' WHERE id=${rental.parkingLotId}`,
           ),
@@ -2669,6 +2675,7 @@ export async function POST(request: Request) {
           JOIN hostel_units u ON r.unit_id=u.id JOIN bed_spaces b ON b.room_id=r.id
           WHERE lower(u.unit_code || '-' || r.room_label)=${code} OR lower(b.legacy_code)=${code}
           GROUP BY r.id
+          ORDER BY r.id LIMIT 1
         `)
         )[0];
         if (!match) continue;
@@ -2714,7 +2721,7 @@ export async function POST(request: Request) {
         `)
       )[0];
       if (!cycle) throw new Error("Unable to create billing cycle");
-      createdId = cycle.id;
+      createdId = Number(cycle.id);
       const active = await db.execute<{
         assignment_id: number;
         student_id: number;
@@ -2789,6 +2796,7 @@ export async function POST(request: Request) {
           `)
         )[0];
         if (invoice) {
+          const invoiceId = Number(invoice.id);
           const items = (
             [
               ["room-rental", "Room rental", 1, rent, rent],
@@ -2825,7 +2833,7 @@ export async function POST(request: Request) {
           await db.transaction(async (tx) => {
             for (const [itemType, description, quantity, rate, amount] of items)
               await tx.execute(
-                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoice.id}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoiceId}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
               );
           });
         }
@@ -3085,6 +3093,7 @@ export async function POST(request: Request) {
           .select({ id: appUsers.id })
           .from(appUsers)
           .where(eq(appUsers.roleId, roleId))
+          .limit(1)
       )[0];
       if (inUse)
         throw new Error("Reassign users on this role before deleting it");

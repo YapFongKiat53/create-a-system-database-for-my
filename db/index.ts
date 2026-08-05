@@ -10,7 +10,7 @@ export type PgTx = PostgresJsTransaction<
   ExtractTablesWithRelations<typeof schema>
 >;
 
-function getClient() {
+function getClient(max: number) {
   const bindings = env as unknown as { DATABASE_URL?: string };
   if (!bindings.DATABASE_URL) {
     throw new Error(
@@ -28,19 +28,21 @@ function getClient() {
   // postgres-js's default prepared-statement caching deadlocks as soon as
   // more than a couple of queries run concurrently on the same client.
   //
-  // `max: 20` (rather than 1) is required for the same reason: call sites
-  // such as the dashboard's GET /api/system handler fire ~30 reads via
-  // `Promise.all([...])` against a single `getDb()` client. With too small a
-  // pool, postgres-js has to multiplex all of those over too few physical
-  // connections through the transaction-mode pooler, and the excess queries
-  // stall until Postgres's statement_timeout kills them — even though every
-  // individual query runs in milliseconds in isolation. Both the
-  // prepared-statement deadlock and the undersized-pool stall were confirmed
-  // via direct reproduction (including replaying the exact query set from
-  // GET /api/system) during Task 15 verification.
-  return postgres(bindings.DATABASE_URL, { max: 20, prepare: false });
+  // `max` is call-site tunable for the same reason: most handlers only run a
+  // handful of sequential queries per request, so the small default below is
+  // plenty. A handler such as the dashboard's GET /api/system, which fires
+  // ~30 reads via `Promise.all([...])` against a single `getDb()` client,
+  // needs a much larger pool — with too few connections, postgres-js has to
+  // multiplex all of those over too few physical connections through the
+  // transaction-mode pooler, and the excess queries stall until Postgres's
+  // statement_timeout kills them — even though every individual query runs
+  // in milliseconds in isolation. Both the prepared-statement deadlock and
+  // the undersized-pool stall were confirmed via direct reproduction
+  // (including replaying the exact query set from GET /api/system) during
+  // Task 15 verification.
+  return postgres(bindings.DATABASE_URL, { max, prepare: false });
 }
 
-export function getDb() {
-  return drizzle(getClient(), { schema });
+export function getDb(options?: { max?: number }) {
+  return drizzle(getClient(options?.max ?? 5), { schema });
 }
