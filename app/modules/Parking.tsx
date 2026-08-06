@@ -4,6 +4,7 @@
 import { useState } from "react";
 import {
   Modal,
+  ParkingRentalForm,
   SearchSelect,
   Stat,
   dateLabel,
@@ -24,10 +25,9 @@ export function ParkingModule({
 }) {
   const [modal, setModal] = useState("");
   const [hostelFilter, setHostelFilter] = useState("all");
-  const [tenantType, setTenantType] = useState("in-house");
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [billingFrequency, setBillingFrequency] = useState("monthly");
-  const [selectedLotId, setSelectedLotId] = useState("");
+  const [reservingLotId, setReservingLotId] = useState<
+    string | number | null
+  >(null);
   const [rentalSearch, setRentalSearch] = useState("");
   const [rentalTab, setRentalTab] = useState<"active" | "ended" | "outside">(
     "active",
@@ -36,9 +36,6 @@ export function ParkingModule({
   const [rentalSortDir, setRentalSortDir] = useState<"asc" | "desc">("asc");
   const [rental, setRental] = useState<Row | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const selectedStudent = data.students.find(
-    (student) => String(student.id) === selectedStudentId,
-  );
   const sortRentals = (key: string) => {
     if (rentalSort === key)
       setRentalSortDir((direction) => (direction === "asc" ? "desc" : "asc"));
@@ -111,7 +108,7 @@ export function ParkingModule({
           <button
             className="primary"
             onClick={() => {
-              setSelectedLotId("");
+              setReservingLotId(null);
               setModal("rental");
             }}
           >
@@ -362,7 +359,7 @@ export function ParkingModule({
                 <button
                   className="secondary compact"
                   onClick={() => {
-                    setSelectedLotId(String(l.id));
+                    setReservingLotId(l.id);
                     setModal("rental");
                   }}
                 >
@@ -661,193 +658,13 @@ export function ParkingModule({
           onClose={() => setModal("")}
           wide
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                { action: "parking-rental", ...formValues(e) },
-                "Parking rental created",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label>
-              Parking lot
-              <SearchSelect
-                name="parkingLotId"
-                required
-                defaultValue={selectedLotId}
-                // 1. 添加这一行，当改变车位时，实时更新 selectedLotId
-                onValueChange={(val) => {
-                  setSelectedLotId(val);
-                  setSelectedStudentId(""); // 切换车位时，清空之前选中的学生，防止跨小区绑定
-                }}
-                options={data.parkingLots
-                  .filter((lot) => lot.status === "available")
-                  .map((lot) => ({
-                    value: lot.id,
-                    label: `${lot.hostelName} · ${lot.lotNumber} · ${lot.unitCode || "Common"}`,
-                  }))}
-                placeholder="Type hostel, lot or unit"
-              />
-            </label>
-
-            <label>
-              Tenant type
-              <select
-                name="tenantType"
-                value={tenantType}
-                onChange={(event) => {
-                  setTenantType(event.target.value);
-                  setSelectedStudentId("");
-                  setBillingFrequency("monthly");
-                }}
-              >
-                <option value="in-house">In-house student</option>
-                <option value="outside">Outside tenant</option>
-              </select>
-            </label>
-
-            {tenantType === "in-house" && (
-              <label className="wide">
-                Link student
-                <SearchSelect
-                  name="studentId"
-                  required
-                  options={data.students
-                    .filter((student) => student.assignmentStatus === "active")
-                    // 2. 添加这一段过滤逻辑：只显示与选中车位同属一个 Hostel 的学生
-                    .filter((student) => {
-                      const selectedLot = data.parkingLots.find((lot) => String(lot.id) === selectedLotId);
-                      if (!selectedLot) return true; // 如果还没选车位，就显示所有人（或改成 return false 强制先选车位）
-                      return student.hostelName === selectedLot.hostelName;
-                    })
-                    .map((student) => ({
-                      value: student.id,
-                      label: `${student.fullName} · ${student.roomCode} · ${student.hostelName}/${student.unitCode}`,
-                    }))}
-                  onValueChange={setSelectedStudentId}
-                  placeholder="Type student name or room code"
-                />
-              </label>
-            )}
-            <label>
-              Tenant name
-              <input
-                name="tenantName"
-                required
-                value={
-                  tenantType === "in-house"
-                    ? selectedStudent?.fullName || ""
-                    : undefined
-                }
-                readOnly={tenantType === "in-house"}
-              />
-            </label>
-            <label>
-              Contact number
-              <input
-                name="contactNumber"
-                value={
-                  tenantType === "in-house"
-                    ? selectedStudent?.contactNumber || ""
-                    : undefined
-                }
-                readOnly={tenantType === "in-house"}
-              />
-            </label>
-            <label>
-              Unit number
-              <input
-                name="unitNumber"
-                value={
-                  tenantType === "in-house"
-                    ? selectedStudent?.unitCode || ""
-                    : undefined
-                }
-                readOnly={tenantType === "in-house"}
-              />
-            </label>
-            <label>
-              Car plate
-              <input name="carPlateNumber" required />
-            </label>
-            <label>
-              Car model
-              <input name="carModel" />
-            </label>
-            <label>
-              Monthly rental
-              <input name="monthlyRental" type="number" min="0" required />
-            </label>
-            <label>
-              Deposit
-              <input name="depositAmount" type="number" min="0" />
-            </label>
-            <label>
-              Start date
-              <input name="startDate" type="date" required />
-            </label>
-            <label>
-              End date
-              <input name="endDate" type="date" />
-            </label>
-            {tenantType === "outside" && (
-              <>
-                <label>
-                  Paid until
-                  <input name="paidUntil" type="date" />
-                </label>
-                <label>
-                  Billing frequency
-                  <select
-                    name="billingFrequency"
-                    value={billingFrequency}
-                    onChange={(event) =>
-                      setBillingFrequency(event.target.value)
-                    }
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="package">Package / several months</option>
-                  </select>
-                </label>
-                {billingFrequency === "package" && (
-                  <label>
-                    Package length (months)
-                    <input
-                      name="packageMonths"
-                      type="number"
-                      min="2"
-                      max="24"
-                      defaultValue="2"
-                    />
-                  </label>
-                )}
-                <label>
-                  Next payment due
-                  <input name="nextDueDate" type="date" />
-                </label>
-                <label>
-                  Payment status
-                  <select name="paymentStatus">
-                    <option value="current">Current</option>
-                    <option value="due">Due</option>
-                    <option value="advance">Paid in advance</option>
-                  </select>
-                </label>
-              </>
-            )}
-            <label className="wide">
-              Remarks
-              <input name="notes" />
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Create rental
-              </button>
-            </div>
-          </form>
+          <ParkingRentalForm
+            data={data}
+            save={save}
+            busy={busy}
+            lockedLotId={reservingLotId ?? undefined}
+            onDone={() => setModal("")}
+          />
         </Modal>
       )}
       {modal === "owner-payment" && (

@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import {
   Modal,
+  ParkingRentalForm,
   Stat,
   dateLabel,
   formValues,
@@ -51,6 +52,9 @@ export function UnitsModule({
   const [modal, setModal] = useState("");
   const [editingAsset, setEditingAsset] = useState<Row | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Row | null>(null);
+  const [recordingLotId, setRecordingLotId] = useState<
+    string | number | null
+  >(null);
 
   const ownerByUnit = useMemo(
     () =>
@@ -911,6 +915,12 @@ export function UnitsModule({
                         lots under this unit
                       </h3>
                     </div>
+                    <button
+                      className="secondary compact"
+                      onClick={() => setModal("add-parking-lot")}
+                    >
+                      + Add parking lot
+                    </button>
                   </div>
                   <div className="compact-list">
                     {data.parkingLots
@@ -922,16 +932,42 @@ export function UnitsModule({
                             item.status === "active",
                         );
                         return (
-                          <span key={lot.id}>
+                          <span
+                            key={lot.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
                             <code>{lot.lotNumber}</code>
                             <b>{rental?.tenantName || "Available"}</b>
                             <small>
                               {titleCase(rental ? "rented" : lot.status)}
                             </small>
+                            {!rental && lot.status === "available" && (
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                style={{ marginLeft: "auto" }}
+                                onClick={() => {
+                                  setRecordingLotId(lot.id);
+                                  setModal("parking");
+                                }}
+                              >
+                                Record parking
+                              </button>
+                            )}
                           </span>
                         );
                       })}
                   </div>
+                  {!data.parkingLots.filter((lot) => lot.unitId === unit.id)
+                    .length && (
+                    <p className="empty-copy">
+                      No parking lots registered for this unit yet.
+                    </p>
+                  )}
                 </section>
                 <section className="drawer-section">
                   <div className="section-title">
@@ -1172,7 +1208,8 @@ export function UnitsModule({
             </label>
             <label>
               Unit number
-              <input name="unitCode" required />
+              <input name="unitCode" required placeholder="e.g. NB-0801" />
+              
             </label>
             <label>
               Gender
@@ -1387,6 +1424,74 @@ export function UnitsModule({
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>
                 {editingAsset ? "Update Wi-Fi" : "Add Wi-Fi"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {modal === "parking" && recordingLotId !== null && (
+        <Modal
+          title="Record parking"
+          kicker={unit?.unitCode || ""}
+          onClose={() => {
+            setModal("");
+            setRecordingLotId(null);
+          }}
+          wide
+        >
+          <ParkingRentalForm
+            data={data}
+            save={save}
+            busy={busy}
+            lockedLotId={recordingLotId}
+            onDone={() => {
+              setModal("");
+              setRecordingLotId(null);
+            }}
+          />
+        </Modal>
+      )}
+      {modal === "add-parking-lot" && unit && (
+        <Modal
+          title="Add parking lot"
+          kicker={unit.unitCode}
+          onClose={() => setModal("")}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                {
+                  action: "parking-lot",
+                  hostelId: unit.hostelId,
+                  unitId: unit.id,
+                  ...formValues(e),
+                },
+                "Parking lot added",
+              );
+              if (ok) setModal("");
+            }}
+          >
+            <label>
+              Lot number
+              <input name="lotNumber" required placeholder="e.g. NB-0801"/>
+            </label>
+            <label>
+              Status
+              <select name="status" defaultValue="available">
+                <option value="available">Available</option>
+                <option value="reserved">Reserved</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
+            <label className="wide">
+              Notes
+              <input name="notes" />
+            </label>
+            <div className="form-actions wide">
+              <button className="primary" disabled={busy}>
+                Save lot
               </button>
             </div>
           </form>

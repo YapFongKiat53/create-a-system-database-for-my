@@ -255,6 +255,250 @@ export function SearchSelect({
   );
 }
 
+// Shared by the Parking module's "New parking rental" modal and Unit
+// Information's "Record parking" button, so a rental created from either
+// place uses the identical fields/logic and shows up correctly in both.
+// Pass `lockedLotId` to fix the lot (hides the lot picker) when the caller
+// already knows which lot the rental is for.
+export function ParkingRentalForm({
+  data,
+  save,
+  busy,
+  lockedLotId,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  lockedLotId?: string | number;
+  onDone: () => void;
+}) {
+  const [tenantType, setTenantType] = useState("in-house");
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [billingFrequency, setBillingFrequency] = useState("monthly");
+  const [selectedLotId, setSelectedLotId] = useState(
+    lockedLotId !== undefined ? String(lockedLotId) : "",
+  );
+  const selectedStudent = data.students.find(
+    (student) => String(student.id) === selectedStudentId,
+  );
+  const lockedLot =
+    lockedLotId !== undefined
+      ? data.parkingLots.find((lot) => String(lot.id) === String(lockedLotId))
+      : undefined;
+  const activeLot =
+    lockedLotId !== undefined
+      ? lockedLot
+      : data.parkingLots.find((lot) => String(lot.id) === selectedLotId);
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          { action: "parking-rental", ...formValues(e) },
+          "Parking rental created",
+        );
+        if (ok) onDone();
+      }}
+    >
+      {lockedLotId !== undefined ? (
+        <>
+          <input
+            type="hidden"
+            name="parkingLotId"
+            defaultValue={String(lockedLotId)}
+          />
+          <label className="wide">
+            Parking lot
+            <input
+              value={
+                lockedLot
+                  ? `${lockedLot.hostelName} · ${lockedLot.lotNumber} · ${lockedLot.unitCode || "Common"}`
+                  : ""
+              }
+              readOnly
+              disabled
+            />
+          </label>
+        </>
+      ) : (
+        <label>
+          Parking lot
+          <SearchSelect
+            name="parkingLotId"
+            required
+            defaultValue={selectedLotId}
+            onValueChange={(val) => {
+              setSelectedLotId(val);
+              setSelectedStudentId("");
+            }}
+            options={data.parkingLots
+              .filter((lot) => lot.status === "available")
+              .map((lot) => ({
+                value: lot.id,
+                label: `${lot.hostelName} · ${lot.lotNumber} · ${lot.unitCode || "Common"}`,
+              }))}
+            placeholder="Type hostel, lot or unit"
+          />
+        </label>
+      )}
+
+      <label>
+        Tenant type
+        <select
+          name="tenantType"
+          value={tenantType}
+          onChange={(event) => {
+            setTenantType(event.target.value);
+            setSelectedStudentId("");
+            setBillingFrequency("monthly");
+          }}
+        >
+          <option value="in-house">In-house student</option>
+          <option value="outside">Outside tenant</option>
+        </select>
+      </label>
+
+      {tenantType === "in-house" && (
+        <label className="wide">
+          Link student
+          <SearchSelect
+            name="studentId"
+            required
+            options={data.students
+              .filter((student) => student.assignmentStatus === "active")
+              .filter((student) => {
+                if (!activeLot) return true;
+                return student.hostelName === activeLot.hostelName;
+              })
+              .map((student) => ({
+                value: student.id,
+                label: `${student.fullName} · ${student.roomCode} · ${student.hostelName}/${student.unitCode}`,
+              }))}
+            onValueChange={setSelectedStudentId}
+            placeholder="Type student name or room code"
+          />
+        </label>
+      )}
+      <label>
+        Tenant name
+        <input
+          name="tenantName"
+          required
+          value={
+            tenantType === "in-house"
+              ? selectedStudent?.fullName || ""
+              : undefined
+          }
+          readOnly={tenantType === "in-house"}
+        />
+      </label>
+      <label>
+        Contact number
+        <input
+          name="contactNumber"
+          value={
+            tenantType === "in-house"
+              ? selectedStudent?.contactNumber || ""
+              : undefined
+          }
+          readOnly={tenantType === "in-house"}
+        />
+      </label>
+      <label>
+        Unit number
+        <input
+          name="unitNumber"
+          value={
+            tenantType === "in-house"
+              ? selectedStudent?.unitCode || ""
+              : undefined
+          }
+          readOnly={tenantType === "in-house"}
+        />
+      </label>
+      <label>
+        Car plate
+        <input name="carPlateNumber" required />
+      </label>
+      <label>
+        Car model
+        <input name="carModel" />
+      </label>
+      <label>
+        Monthly rental
+        <input name="monthlyRental" type="number" min="0" required />
+      </label>
+      <label>
+        Deposit
+        <input name="depositAmount" type="number" min="0" />
+      </label>
+      <label>
+        Start date
+        <input name="startDate" type="date" required />
+      </label>
+      <label>
+        End date
+        <input name="endDate" type="date" />
+      </label>
+      {tenantType === "outside" && (
+        <>
+          <label>
+            Paid until
+            <input name="paidUntil" type="date" />
+          </label>
+          <label>
+            Billing frequency
+            <select
+              name="billingFrequency"
+              value={billingFrequency}
+              onChange={(event) => setBillingFrequency(event.target.value)}
+            >
+              <option value="monthly">Monthly</option>
+              <option value="package">Package / several months</option>
+            </select>
+          </label>
+          {billingFrequency === "package" && (
+            <label>
+              Package length (months)
+              <input
+                name="packageMonths"
+                type="number"
+                min="2"
+                max="24"
+                defaultValue="2"
+              />
+            </label>
+          )}
+          <label>
+            Next payment due
+            <input name="nextDueDate" type="date" />
+          </label>
+          <label>
+            Payment status
+            <select name="paymentStatus">
+              <option value="current">Current</option>
+              <option value="due">Due</option>
+              <option value="advance">Paid in advance</option>
+            </select>
+          </label>
+        </>
+      )}
+      <label className="wide">
+        Remarks
+        <input name="notes" />
+      </label>
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy}>
+          Create rental
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function Metric({
   label,
   value,
