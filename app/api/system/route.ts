@@ -2122,6 +2122,68 @@ export async function POST(request: Request) {
           paymentUpdatedAt: nowIso(),
         })
         .where(eq(reservations.id, reservationId));
+    } else if (action === "payment-delete") {
+      const reservationId = asNumber(body.reservationId);
+      const paymentId = asNumber(body.paymentId);
+      if (!reservationId || !paymentId)
+        throw new Error("Reservation and payment are required");
+      await db
+        .delete(reservationPayments)
+        .where(
+          and(
+            eq(reservationPayments.id, paymentId),
+            eq(reservationPayments.reservationId, reservationId),
+          ),
+        );
+      const remaining = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+        )
+      )[0];
+      const amountPaid = Number(remaining?.total || 0);
+      const paymentStatus = amountPaid > 0 ? "partial" : "unpaid";
+      await db
+        .update(reservations)
+        .set({
+          paymentStatus,
+          amountPaid,
+          inventoryCommitted: paymentStatus !== "unpaid",
+          paymentUpdatedAt: nowIso(),
+        })
+        .where(eq(reservations.id, reservationId));
+    } else if (action === "payment-update") {
+      const reservationId = asNumber(body.reservationId);
+      const paymentId = asNumber(body.paymentId);
+      const amount = asNullableNumber(body.amount);
+      if (!reservationId || !paymentId || amount === null || amount < 0)
+        throw new Error(
+          "Reservation, payment and a valid amount are required",
+        );
+      await db
+        .update(reservationPayments)
+        .set({ amount })
+        .where(
+          and(
+            eq(reservationPayments.id, paymentId),
+            eq(reservationPayments.reservationId, reservationId),
+          ),
+        );
+      const remaining = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+        )
+      )[0];
+      const amountPaid = Number(remaining?.total || 0);
+      const paymentStatus = amountPaid > 0 ? "partial" : "unpaid";
+      await db
+        .update(reservations)
+        .set({
+          paymentStatus,
+          amountPaid,
+          inventoryCommitted: paymentStatus !== "unpaid",
+          paymentUpdatedAt: nowIso(),
+        })
+        .where(eq(reservations.id, reservationId));
     } else if (action === "reservation-delete") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");

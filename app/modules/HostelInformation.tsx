@@ -1135,13 +1135,13 @@ export function HostelModule({
                         </div>
 
                         {/* Payment summary */}
-                        <div 
+                        <div
                           className="reservation-money-summary"
-                          style={{ 
-                            display: 'grid', 
-                            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', 
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
                             gap: '4px',
-                            textAlign: 'center' 
+                            textAlign: 'center'
                           }}
                         >
                           <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
@@ -1168,7 +1168,6 @@ export function HostelModule({
                         </div>
 
                         {/* Payment history */}
-                        {/* 注意：因为外层卡片已经统一了 gap: 16px，这里去掉了原本的 marginTop */}
                         <section className="reservation-payment-history">
                           <div className="reservation-subheading" style={{ marginBottom: '8px' }}>
                             <span>Payment history</span>
@@ -1293,7 +1292,7 @@ export function HostelModule({
 
                         {/* Quick payment and actions */}
                         {r.status === "reserved" && (
-                          <div className="reservation-card-footer" style={{ marginTop: '0', paddingTop: '16px' }}>
+                          <div className="reservation-card-footer" style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             <form
                               className="reservation-quick-payment"
                               onSubmit={async (event) => {
@@ -1314,28 +1313,27 @@ export function HostelModule({
                                   form.reset();
                                 }
                               }}
+                              // 彻底采用安全的三层纵向结构，给每个输入框充足的宽度
+                              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
                             >
-                              <label>
-                                <span>Payment type</span>
-
+                              {/* 第一行：Payment Type */}
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment type</span>
                                 <select
                                   name="paymentStatus"
                                   defaultValue="partial"
                                   disabled={busy}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
                                 >
-                                  <option value="admin-fee">
-                                    Admin fee paid
-                                  </option>
-                                  <option value="partial">
-                                    Partial payment
-                                  </option>
+                                  <option value="admin-fee">Admin fee paid</option>
+                                  <option value="partial">Partial payment</option>
                                   <option value="full">Full payment</option>
                                 </select>
                               </label>
 
-                              <label>
-                                <span>Amount</span>
-
+                              {/* 第二行：Amount */}
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Amount</span>
                                 <input
                                   name="paymentAmount"
                                   type="number"
@@ -1345,28 +1343,33 @@ export function HostelModule({
                                   placeholder="RM 0.00"
                                   required
                                   disabled={busy}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
                                 />
                               </label>
 
-                              <label className="reservation-reference-field">
-                                <span>Payment reference</span>
-
+                              {/* 第三行：Payment Reference */}
+                              <label className="reservation-reference-field" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment reference</span>
                                 <input
                                   name="paymentReference"
                                   placeholder="Receipt number, bank reference..."
                                   disabled={busy}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
                                 />
                               </label>
 
+                              {/* 添加付款按钮：稍微控制高度，让它不那么巨型 */}
                               <button
                                 type="submit"
                                 className="reservation-btn reservation-btn-add-payment"
                                 disabled={busy}
+                                style={{ width: '100%', padding: '8px', fontSize: '12px', fontWeight: 600, justifyContent: 'center', marginTop: '2px' }}
                               >
                                 <svg
                                   viewBox="0 0 24 24"
                                   aria-hidden="true"
                                   className="reservation-button-icon"
+                                  style={{ width: '12px', height: '12px' }}
                                 >
                                   <path d="M12 5v14M5 12h14" />
                                 </svg>
@@ -1375,11 +1378,13 @@ export function HostelModule({
                               </button>
                             </form>
 
-                            <div className="reservation-card-actions">
-                              <div className="reservation-main-actions">
+                            {/* 底部操作按钮区域：恢复并排，释放纵向空间 */}
+                            <div className="reservation-card-actions" style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '2px' }}>
+                              <div className="reservation-main-actions" style={{ display: 'flex', gap: '6px', width: '100%' }}>
                                 <button
                                   type="button"
                                   className="reservation-btn reservation-btn-secondary"
+                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                   disabled={busy}
                                   onClick={() => openReservation(null, r)}
                                 >
@@ -1389,16 +1394,18 @@ export function HostelModule({
                                 <button
                                   type="button"
                                   className="reservation-btn reservation-btn-convert"
+                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                   disabled={busy}
                                   onClick={() => setConvertReservation(r)}
                                 >
-                                  Convert to assignment
+                                  Convert assignment
                                 </button>
                               </div>
 
                               <button
                                 type="button"
                                 className="reservation-btn reservation-btn-danger"
+                                style={{ width: '100%', padding: '5px', fontSize: '11px', justifyContent: 'center' }}
                                 disabled={busy}
                                 onClick={() => {
                                   const confirmed = confirm(
