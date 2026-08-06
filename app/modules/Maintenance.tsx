@@ -34,6 +34,8 @@ export function MaintenanceModule({
   const [ticketCategory, setTicketCategory] = useState("");
   const [ticketHostelId, setTicketHostelId] = useState("");
   const [ticketUnitId, setTicketUnitId] = useState("");
+  const [ticketStudentId, setTicketStudentId] = useState("");
+  const [ticketRoomId, setTicketRoomId] = useState("");
   const [meterQuery, setMeterQuery] = useState("");
   const [costFrom, setCostFrom] = useState("");
   const [costTo, setCostTo] = useState("");
@@ -1077,21 +1079,118 @@ export function MaintenanceModule({
                 }
               />
             </label>
+            <label>
+              1. Hostel
+              <select
+                name="hostelId"
+                required
+                value={ticketHostelId}
+                onChange={(event) => {
+                  setTicketHostelId(event.target.value);
+                  setTicketUnitId("");
+                  setTicketStudentId("");
+                  setTicketRoomId("");
+                }}
+              >
+                <option value="">Select hostel</option>
+                {data.hostels.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              2. Unit
+              <select
+                name="unitId"
+                required
+                value={ticketUnitId}
+                disabled={!ticketHostelId}
+                onChange={(event) => {
+                  setTicketUnitId(event.target.value);
+                  setTicketStudentId("");
+                  setTicketRoomId("");
+                }}
+              >
+                <option value="">
+                  {ticketHostelId ? "Select unit" : "Select a hostel first"}
+                </option>
+                {data.units
+                  .filter(
+                    (unit) =>
+                      !ticketHostelId ||
+                      String(unit.hostelId) === ticketHostelId,
+                  )
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.hostelName}/{u.unitCode}
+                    </option>
+                  ))}
+              </select>
+            </label>
             {data.currentUser?.roleKey !== "tenant" && (
               <label>
-                Student
-                <SearchSelect
+                3. Student
+                <select
                   name="studentId"
-                  options={data.students
-                    .filter((student) => student.assignmentStatus === "active")
-                    .map((student) => ({
-                      value: student.id,
-                      label: `${student.fullName} · ${student.roomCode}`,
-                    }))}
-                  placeholder="Type student name or room code"
-                />
+                  value={ticketStudentId}
+                  disabled={!ticketUnitId}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setTicketStudentId(value);
+                    // Pre-fill the room from the chosen student; staff can
+                    // still change it (e.g. a common-area complaint).
+                    const student = data.students.find(
+                      (item) => String(item.id) === value,
+                    );
+                    setTicketRoomId(student?.roomId ? String(student.roomId) : "");
+                  }}
+                >
+                  <option value="">
+                    {ticketUnitId
+                      ? "Select student (optional)"
+                      : "Select a unit first"}
+                  </option>
+                  {data.students
+                    .filter(
+                      (student) =>
+                        student.assignmentStatus === "active" &&
+                        String(student.unitId) === ticketUnitId,
+                    )
+                    .map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.fullName} · {student.roomCode}
+                      </option>
+                    ))}
+                </select>
               </label>
             )}
+            <label>
+              4. Room / complaint location
+              <select
+                name="roomId"
+                value={ticketRoomId}
+                disabled={!ticketUnitId}
+                onChange={(event) => setTicketRoomId(event.target.value)}
+              >
+                <option value="">
+                  {ticketUnitId
+                    ? "Common area / common toilet"
+                    : "Select a unit first"}
+                </option>
+                {[...new Map(data.bedSpaces.map((b) => [b.roomId, b])).values()]
+                  .filter(
+                    (room) =>
+                      !ticketUnitId || String(room.unitId) === ticketUnitId,
+                  )
+                  .map((b) => (
+                    <option key={b.roomId} value={b.roomId}>
+                      {b.hostelName}/{b.unitCode} · Room {b.roomLabel}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <label>
               Category
               <select
@@ -1127,63 +1226,6 @@ export function MaintenanceModule({
                   .map((item) => (
                     <option key={item.id} value={item.subcategory}>
                       {item.subcategory}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Hostel
-              <select
-                name="hostelId"
-                required
-                value={ticketHostelId}
-                onChange={(event) => {
-                  setTicketHostelId(event.target.value);
-                  setTicketUnitId("");
-                }}
-              >
-                <option value="">Select hostel</option>
-                {data.hostels.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Unit
-              <select
-                name="unitId"
-                required
-                value={ticketUnitId}
-                onChange={(event) => setTicketUnitId(event.target.value)}
-              >
-                <option value="">Select unit</option>
-                {data.units
-                  .filter(
-                    (unit) =>
-                      !ticketHostelId ||
-                      String(unit.hostelId) === ticketHostelId,
-                  )
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.hostelName}/{u.unitCode}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Room
-              <select name="roomId">
-                <option value="">Common area / common toilet</option>
-                {[...new Map(data.bedSpaces.map((b) => [b.roomId, b])).values()]
-                  .filter(
-                    (room) =>
-                      !ticketUnitId || String(room.unitId) === ticketUnitId,
-                  )
-                  .map((b) => (
-                    <option key={b.roomId} value={b.roomId}>
-                      {b.hostelName}/{b.unitCode} · Room {b.roomLabel}
                     </option>
                   ))}
               </select>

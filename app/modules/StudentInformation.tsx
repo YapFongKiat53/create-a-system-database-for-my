@@ -1009,13 +1009,22 @@ export function StudentsModule({
               <div className="drawer-subsection">
                 <div className="subsection-head">
                   <h4>Room details</h4>
-                  {student.assignmentId && (
+                  {student.assignmentId ? (
                     <button
                       type="button"
                       className="secondary compact"
                       onClick={() => setModal("moveout")}
                     >
                       Move out / deactivate
+                    </button>
+                  ) : (
+                    // 新增：如果还没有 assignmentId，则显示分配房间的按钮
+                    <button
+                      type="button"
+                      className="primary compact"
+                      onClick={() => setModal("assign")}
+                    >
+                      Assign a room
                     </button>
                   )}
                 </div>
@@ -1091,9 +1100,9 @@ export function StudentsModule({
                     </label>
                   </div>
                 ) : (
+                  // 更新提示文案
                   <p className="empty-copy">
-                    No active room assignment. Use &ldquo;Add student&rdquo; with
-                    a room, or convert a reservation, to assign a room.
+                    No active room assignment. Click &ldquo;Assign a room&rdquo; above to place this student in a vacant bed space.
                   </p>
                 )}
               </div>

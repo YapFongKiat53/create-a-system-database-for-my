@@ -678,6 +678,11 @@ export function ParkingModule({
                 name="parkingLotId"
                 required
                 defaultValue={selectedLotId}
+                // 1. 添加这一行，当改变车位时，实时更新 selectedLotId
+                onValueChange={(val) => {
+                  setSelectedLotId(val);
+                  setSelectedStudentId(""); // 切换车位时，清空之前选中的学生，防止跨小区绑定
+                }}
                 options={data.parkingLots
                   .filter((lot) => lot.status === "available")
                   .map((lot) => ({
@@ -687,6 +692,7 @@ export function ParkingModule({
                 placeholder="Type hostel, lot or unit"
               />
             </label>
+
             <label>
               Tenant type
               <select
@@ -702,6 +708,7 @@ export function ParkingModule({
                 <option value="outside">Outside tenant</option>
               </select>
             </label>
+
             {tenantType === "in-house" && (
               <label className="wide">
                 Link student
@@ -710,6 +717,12 @@ export function ParkingModule({
                   required
                   options={data.students
                     .filter((student) => student.assignmentStatus === "active")
+                    // 2. 添加这一段过滤逻辑：只显示与选中车位同属一个 Hostel 的学生
+                    .filter((student) => {
+                      const selectedLot = data.parkingLots.find((lot) => String(lot.id) === selectedLotId);
+                      if (!selectedLot) return true; // 如果还没选车位，就显示所有人（或改成 return false 强制先选车位）
+                      return student.hostelName === selectedLot.hostelName;
+                    })
                     .map((student) => ({
                       value: student.id,
                       label: `${student.fullName} · ${student.roomCode} · ${student.hostelName}/${student.unitCode}`,

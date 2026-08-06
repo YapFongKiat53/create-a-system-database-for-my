@@ -1,5 +1,5 @@
 id,room_id,bed_label,legacy_code,status,special_use,monthly_rental,legacy_access_card_deposit,updated_at,bed_type,meter_serial
-1,1,1,1201-A1,occupied,,399.0,0.0,2026-07-23 02:43:43,unknown,
+1,1,1,1201-A1,vacant,,399.0,0.0,2026-07-30T02:42:34.737Z,single,
 2,1,2,1201-A2,occupied,,399.0,0.0,2026-07-23 02:43:43,unknown,
 3,2,1,1201-B1,occupied,,700.0,0.0,2026-07-23 02:43:43,unknown,
 4,3,1,1201-C1,vacant,,,,2026-07-23T15:05:01.261Z,unknown,

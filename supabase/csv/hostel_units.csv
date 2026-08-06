@@ -1,7 +1,7 @@
 id,hostel_id,unit_code,address,gender,status,notes,owner_name,lease_end_date,surrender_date,surrender_notes
-1,1,1201,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",mixed,active,,,,,
-2,1,1304,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",mixed,active,,,,,
-3,1,1309,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",mixed,active,,,,,
+1,1,1201,"1-12-01, Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",male,active,,,,,
+2,1,1304,"1-13-04, Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",female,active,,,,,
+3,1,1309,"1-13-09, Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",female,active,,,,,
 4,1,1310,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",mixed,active,,,,,
 5,1,1312,"Jalan Nova U5/71A, Subang Bestari, 40150 Shah Alam, Selangor",mixed,active,,,,,
 6,2,D1-0113,"Jalan Tasik Raja Lumu U4/17, Taman Subang Delima, 40150 Shah Alam, Selangor",mixed,active,,,,,
@@ -124,3 +124,5 @@ id,hostel_id,unit_code,address,gender,status,notes,owner_name,lease_end_date,sur
 123,5,SR12,"12, Jalan Dalwu U5/98, 40150 Shah Alam, Selangor",mixed,active,,,,,
 124,5,SR23,"23, Jalan Dalwu U5/98, 40150 Shah Alam, Selangor",mixed,active,,,,,
 125,5,SR31,"31, Jalan Dalwu U5/98, 40150 Shah Alam, Selangor",mixed,active,,,,,
+126,3,444,"444, 1, Jalan Zuhrah U5/163, Subang Murni, Seksyen U5, 40150 Shah Alam, Selangor",male,active,,,,,
+127,2,0801,"0801, Jalan Tasik Raja Lumu U4/17, Taman Subang Delima, 40150 Shah Alam, Selangor",female,active,,,,,

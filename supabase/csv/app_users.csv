@@ -1,3 +1,3 @@
-id,email,display_name,role_id,student_id,status,last_login_at,created_at
-1,local-admin@hostelpro.internal,Irena,1,,active,,2026-07-23 02:43:43
-4,yapfongkiat53@gmail.com,Jack,6,,active,,2026-07-23 23:59:11
+id,email,display_name,role_id,student_id,status,last_login_at,created_at,password_hash
+1,local-admin@hostelpro.internal,HostelPro,1,,active,2026-07-30T02:51:35.747Z,2026-07-23 02:43:43,pbkdf2$120000$n2SBbPypBGtPcycg55MVug==$d4LfIk50ym5n/txxhcgd9u64fNMapkctuntdM1zo8ZI=
+4,yapfongkiat53@gmail.com,Jack,6,,active,,2026-07-23 23:59:11,pbkdf2$120000$VrB8Kg350PSSBuhuFtntow==$ohpub57lWzPZgKiPNXLv2j7K6G9Txx9p6JU8O9NTHk4=

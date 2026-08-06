@@ -80,6 +80,71 @@ const Metric = ({
   );
 };
 
+// Room-level availability, shared by the collapsed unit summary and the
+// expanded room list so the two always agree.
+const isRoomAvailable = (bed: Row) =>
+  bed.status === "vacant" || bed.availabilityState === "available-now";
+
+const roomStatus = (bed: Row): "available" | "occupied" | "unavailable" => {
+  if (isRoomAvailable(bed)) return "available";
+  if (bed.status === "occupied") return "occupied";
+  return "unavailable";
+};
+
+type UnitAvailability =
+  | "no-rooms"
+  | "available"
+  | "partial"
+  | "occupied"
+  | "unavailable";
+
+const UNIT_STATUS_LABEL: Record<UnitAvailability, string> = {
+  "no-rooms": "No Rooms",
+  available: "Fully Available",
+  partial: "Partially Available",
+  occupied: "Fully Occupied",
+  unavailable: "Unavailable",
+};
+
+// Reuses the existing .status-badge color language (green/gray/red);
+// "partial" is the one new amber variant.
+const UNIT_STATUS_BADGE_CLASS: Record<UnitAvailability, string> = {
+  "no-rooms": "occupied",
+  available: "available",
+  partial: "partial",
+  occupied: "occupied",
+  unavailable: "unavailable",
+};
+
+// Derives the unit's own availability from its rooms — never labels a unit
+// "Available" just because it has any vacant room.
+const unitAvailabilitySummary = (unit: Row, bedsInUnit: Row[]) => {
+  const totalRooms = bedsInUnit.length;
+  const availableBeds = bedsInUnit.filter(isRoomAvailable);
+  const occupiedCount = bedsInUnit.filter(
+    (bed) => roomStatus(bed) === "occupied",
+  ).length;
+  const unavailableCount = totalRooms - availableBeds.length - occupiedCount;
+
+  let status: UnitAvailability;
+  if (unit.status && unit.status !== "active") status = "unavailable";
+  else if (totalRooms === 0) status = "no-rooms";
+  else if (availableBeds.length === totalRooms) status = "available";
+  else if (availableBeds.length > 0) status = "partial";
+  else status = "occupied";
+
+  return {
+    totalRooms,
+    availableCount: availableBeds.length,
+    occupiedCount,
+    unavailableCount,
+    status,
+    availableCodes: availableBeds
+      .map((bed) => bed.legacyCode)
+      .filter(Boolean),
+  };
+};
+
 export function HostelModule({
   data,
   save,
@@ -519,14 +584,14 @@ export function HostelModule({
               {canUseSales ? "Room pricing & rates" : "Operational rates"}
             </button>
           )}
-          {(canUseSales || canUseOccupancy) && (
+          {/* {(canUseSales || canUseOccupancy) && (
             <button
               className={currentHostelTab === "occupancy" ? "active" : ""}
               onClick={() => setTab("occupancy")}
             >
               Occupant & vacancy register
             </button>
-          )}
+          )} */}
         </div>
         {currentHostelTab === "availability" && (
           <>
@@ -575,9 +640,10 @@ export function HostelModule({
 
                   // 1. 提前处理好【过滤后的 Unit 数组】
                   const filteredUnits = unitsInHostel.filter((unit) => {
-                    // 计算该 unit 是否 available (是否有空床位)
+                    // 该 unit 是否至少有一个可预订的房间 (Fully/Partially Available)
                     const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
-                    const unitVacant = bedsInUnit.some(b => b.status === "vacant");
+                    const hasAvailableRoom =
+                      unitAvailabilitySummary(unit, bedsInUnit).availableCount > 0;
 
                     // 文本搜索逻辑 (搜 Unit 编号或性别)
                     const query = unitSearchQuery.toLowerCase().trim();
@@ -587,8 +653,8 @@ export function HostelModule({
 
                     // 状态筛选逻辑
                     const matchesStatus = unitStatusFilter === "all" ||
-                      (unitStatusFilter === "available" && unitVacant) ||
-                      (unitStatusFilter === "unavailable" && !unitVacant);
+                      (unitStatusFilter === "available" && hasAvailableRoom) ||
+                      (unitStatusFilter === "unavailable" && !hasAvailableRoom);
 
                     return matchesSearch && matchesStatus;
                   });
@@ -651,15 +717,16 @@ export function HostelModule({
                       {/* 第二层：Unit 级别 (使用过滤后的 filteredUnits 进行映射) */}
                       {isHostelExpanded && filteredUnits.map((unit) => {
                         const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
-                        const unitVacant = bedsInUnit.some(b => b.status === "vacant");
+                        const summary = unitAvailabilitySummary(unit, bedsInUnit);
                         const isUnitExpanded = expandedUnit === unit.id;
+                        const handleUnitToggle = (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          toggleUnit(unit.id);
+                        };
 
                         return (
                           <React.Fragment key={unit.id}>
-                            <div className="mpt-row unit-row" onClick={(e) => {
-                              e.stopPropagation();
-                              toggleUnit(unit.id);
-                            }}>
+                            <div className="mpt-row unit-row" onClick={handleUnitToggle}>
                               <div className="mpt-property">
                                 <div className="info">
                                   <strong style={{ color: '#4b5563' }}>Unit {unit.unitCode}</strong>
@@ -668,17 +735,62 @@ export function HostelModule({
                               <div className="mpt-cell">Apartment</div>
                               <div className="mpt-cell">{genderLabel(unit.gender)}</div>
                               <div className="mpt-cell">
-                                <span className={`status-badge ${unitVacant ? 'available' : 'unavailable'}`}>
-                                  {unitVacant ? 'Available' : 'Unavailable'}
+                                <span className={`status-badge ${UNIT_STATUS_BADGE_CLASS[summary.status]}`}>
+                                  {UNIT_STATUS_LABEL[summary.status]}
                                 </span>
                               </div>
                               <div className="mpt-cell">-</div>
-                              <div className="mpt-cell rate-cell">{bedsInUnit.filter(b => b.status === "vacant").length} vacant</div>
+                              <div className="mpt-cell rate-cell">
+                                {summary.totalRooms === 0
+                                  ? "0 rooms"
+                                  : `${summary.availableCount}/${summary.totalRooms} available`}
+                              </div>
+                            </div>
+
+                            {/* Unit-level availability summary — visible without expanding the unit. */}
+                            <div className="mpt-row unit-summary-row" onClick={handleUnitToggle}>
+                              <div className="unit-summary-content">
+                                <span className="unit-summary-count">
+                                  {summary.totalRooms} Room{summary.totalRooms === 1 ? "" : "s"}
+                                </span>
+                                {summary.totalRooms > 0 && (
+                                  <>
+                                    <span className="unit-summary-chip available">
+                                      {summary.availableCount} Available
+                                    </span>
+                                    <span className="unit-summary-chip occupied">
+                                      {summary.occupiedCount} Occupied
+                                    </span>
+                                    {summary.unavailableCount > 0 && (
+                                      <span className="unit-summary-chip unavailable">
+                                        {summary.unavailableCount} Unavailable
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                              {summary.availableCodes.length > 0 && (
+                                <div className="unit-summary-available-rooms">
+                                  <span className="unit-summary-label">Available:</span>
+                                  {summary.availableCodes.map((code: string) => (
+                                    <span className="room-chip" key={code}>
+                                      {code}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
 
                             {/* 第三层：Room 级别 (不带过滤，直接显示该 Unit 下的所有房间) */}
                             {isUnitExpanded && bedsInUnit.map((bed) => {
-                              const isAvailable = bed.status === "vacant" || bed.availabilityState === "available-now";
+                              const isAvailable = isRoomAvailable(bed);
+                              const status = roomStatus(bed);
+                              const statusLabel =
+                                status === "available"
+                                  ? "Available"
+                                  : status === "occupied"
+                                    ? "Occupied"
+                                    : "Unavailable";
 
                               return (
                                 <div className="mpt-row room-row" key={bed.id}>
@@ -691,8 +803,8 @@ export function HostelModule({
                                   <div className="mpt-cell">{titleCase(bed.roomType)}</div>
                                   <div className="mpt-cell">{genderLabel(bed.gender)}</div>
                                   <div className="mpt-cell">
-                                    <span className={`status-badge ${isAvailable ? 'available' : 'occupied'}`}>
-                                      {isAvailable ? 'Available' : 'Occupied'}
+                                    <span className={`status-badge ${status}`}>
+                                      {statusLabel}
                                     </span>
                                   </div>
                                   <div className="mpt-cell occupant-cell">
@@ -919,11 +1031,17 @@ export function HostelModule({
                     return (
                       <article
                         key={r.id}
-                        className={`reservation-card ${isConverted ? "is-converted" : ""
-                          }`}
+                        className={`reservation-card ${isConverted ? "is-converted" : ""}`}
+                        // 1. 核心调整：让最外层大卡片的内边距变小，并统一缩减内部区块的垂直间距
+                        style={{
+                          padding: '16px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '16px'
+                        }}
                       >
                         {/* Card header */}
-                        <header className="reservation-card-header">
+                        <header className="reservation-card-header" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div className="reservation-badges">
                             <code className="reservation-reference">
                               {r.referenceNo}
@@ -936,8 +1054,9 @@ export function HostelModule({
                             </span>
                           </div>
 
-                          <div className="reservation-card-title">
-                            <h4>{r.studentName}</h4>
+                          <div className="reservation-card-title" style={{ margin: '4px 0' }}>
+                            {/* 2. 稍微调小一点学生名字的字号和上下边距 */}
+                            <h4 style={{ margin: 0, fontSize: '1.25rem' }}>{r.studentName}</h4>
 
                             {isConverted && (
                               <span className="reservation-converted-label">
@@ -946,7 +1065,7 @@ export function HostelModule({
                             )}
                           </div>
 
-                          <p className="reservation-main-meta">
+                          <p className="reservation-main-meta" style={{ margin: 0 }}>
                             <span>{titleCase(r.reservationType)}</span>
                             <i />
                             <span>
@@ -962,7 +1081,7 @@ export function HostelModule({
                         </header>
 
                         {/* Preferences */}
-                        <div className="reservation-preferences">
+                        <div className="reservation-preferences" style={{ gap: '6px' }}>
                           <span className="reservation-chip">
                             {r.preferredHostelName || "Hostel not selected"}
                           </span>
@@ -993,6 +1112,8 @@ export function HostelModule({
                         {/* Reservation state */}
                         <div
                           className={`reservation-commitment ${commitmentClass}`}
+                          // 3. 缩小状态框（绿框/灰框）的内部留白
+                          style={{ padding: '12px 16px', gap: '12px' }}
                         >
                           <div className="reservation-commitment-icon">
                             {isConverted || r.inventoryCommitted ? (
@@ -1008,26 +1129,35 @@ export function HostelModule({
                           </div>
 
                           <div>
-                            <strong>{commitmentTitle}</strong>
-                            <span>{commitmentDescription}</span>
+                            <strong style={{ fontSize: '14px' }}>{commitmentTitle}</strong>
+                            <span style={{ fontSize: '13px' }}>{commitmentDescription}</span>
                           </div>
                         </div>
 
                         {/* Payment summary */}
-                        <div className="reservation-money-summary">
-                          <div>
-                            <span>Total payable</span>
-                            <strong>{money(totalPayable)}</strong>
+                        <div 
+                          className="reservation-money-summary"
+                          style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', 
+                            gap: '4px',
+                            textAlign: 'center' 
+                          }}
+                        >
+                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total payable</span>
+                            <strong style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPayable)}</strong>
                           </div>
 
-                          <div>
-                            <span>Total paid</span>
-                            <strong className="paid">{money(totalPaid)}</strong>
+                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total paid</span>
+                            <strong className="paid" style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPaid)}</strong>
                           </div>
 
-                          <div>
-                            <span>Balance required</span>
+                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Balance required</span>
                             <strong
+                              style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}
                               className={
                                 balanceRequired > 0 ? "outstanding" : "settled"
                               }
@@ -1038,8 +1168,9 @@ export function HostelModule({
                         </div>
 
                         {/* Payment history */}
+                        {/* 注意：因为外层卡片已经统一了 gap: 16px，这里去掉了原本的 marginTop */}
                         <section className="reservation-payment-history">
-                          <div className="reservation-subheading">
+                          <div className="reservation-subheading" style={{ marginBottom: '8px' }}>
                             <span>Payment history</span>
 
                             <span>
@@ -1051,32 +1182,105 @@ export function HostelModule({
                           </div>
 
                           {(r.payments || []).length > 0 ? (
-                            <div className="reservation-payment-list">
+                            <div
+                              className="reservation-payment-list"
+                              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+                            >
                               {(r.payments || []).map((payment: Row) => (
                                 <div
                                   key={payment.id}
                                   className="reservation-payment-item"
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px',
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #e5e7eb',
+                                    backgroundColor: '#fafafa'
+                                  }}
                                 >
-                                  <div className="reservation-payment-date-icon">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                                      <rect
-                                        x="4"
-                                        y="5"
-                                        width="16"
-                                        height="15"
-                                        rx="2"
-                                      />
-                                      <path d="M8 3v4M16 3v4M4 10h16" />
-                                    </svg>
+                                  {/* 上半部分：付款详情 */}
+                                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div className="reservation-payment-date-icon">
+                                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <rect x="4" y="5" width="16" height="15" rx="2" />
+                                        <path d="M8 3v4M16 3v4M4 10h16" />
+                                      </svg>
+                                    </div>
+
+                                    <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{dateLabel(payment.paidAt)}</span>
+                                    <i />
+                                    <strong style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{money(payment.amount)}</strong>
+
+                                    {payment.reference && (
+                                      <>
+                                        <i />
+                                        <span style={{ color: '#6b7280', fontSize: '12px', wordBreak: 'break-word' }}>
+                                          {payment.reference}
+                                        </span>
+                                      </>
+                                    )}
                                   </div>
 
-                                  <span>{dateLabel(payment.paidAt)}</span>
-                                  <i />
-                                  <strong>{money(payment.amount)}</strong>
-                                  <i />
-                                  <span>
-                                    {payment.reference || "No reference"}
-                                  </span>
+                                  {/* 下半部分：操作按钮 */}
+                                  <div
+                                    className="reservation-payment-actions"
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'flex-end',
+                                      gap: '8px',
+                                      borderTop: '1px dashed #e5e7eb',
+                                      paddingTop: '8px'
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="reservation-btn reservation-btn-secondary"
+                                      style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
+                                      disabled={busy}
+                                      onClick={() => {
+                                        const newAmount = prompt("Enter new amount (RM) for this payment:", payment.amount);
+
+                                        if (newAmount !== null && newAmount.trim() !== "" && !isNaN(Number(newAmount))) {
+                                          save(
+                                            {
+                                              action: "payment-update",
+                                              reservationId: r.id,
+                                              paymentId: payment.id,
+                                              amount: Number(newAmount),
+                                            },
+                                            "Payment amount updated"
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      className="reservation-btn reservation-btn-danger"
+                                      style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
+                                      disabled={busy}
+                                      onClick={() => {
+                                        const confirmed = confirm(`Are you sure you want to delete this payment of ${money(payment.amount)}?`);
+
+                                        if (confirmed) {
+                                          save(
+                                            {
+                                              action: "payment-delete",
+                                              reservationId: r.id,
+                                              paymentId: payment.id,
+                                            },
+                                            "Payment deleted"
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1089,7 +1293,7 @@ export function HostelModule({
 
                         {/* Quick payment and actions */}
                         {r.status === "reserved" && (
-                          <div className="reservation-card-footer">
+                          <div className="reservation-card-footer" style={{ marginTop: '0', paddingTop: '16px' }}>
                             <form
                               className="reservation-quick-payment"
                               onSubmit={async (event) => {

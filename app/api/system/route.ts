@@ -166,6 +166,30 @@ function boolValue(value: unknown) {
 function nowIso() {
   return new Date().toISOString();
 }
+function todayInKL() {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Kuala_Lumpur",
+  }).format(new Date());
+}
+
+// seedAdministration/seedInventory/seedKnownRoomFeatures/seedStudentAssignments
+// are one-time idempotent data loads (INSERT ... ON CONFLICT DO NOTHING /
+// UPDATE ... WHERE still-default) that were re-running on every single
+// request to app/api/system, each costing several DB round trips for work
+// that only ever needs to happen once the data already exists. Caching
+// "already done" per isolate (reset on cold start, harmless since re-running
+// is a no-op) skips that cost on every request after the first.
+// applyLatePaymentCharges is genuinely date-driven — it needs to reflect
+// "today," but only once per calendar day, not once per request — cached by
+// the KL calendar date it last ran on.
+let administrationSeeded = false;
+let inventorySeeded = false;
+let knownRoomFeaturesSeeded = false;
+let studentAssignmentsSeeded = false;
+let lateChargesAppliedOn: string | null = null;
 
 function fullUnitAddress(
   unitCode: string,
@@ -407,12 +431,7 @@ async function seedAdministration(db: ReturnType<typeof getDb>) {
 }
 
 async function applyLatePaymentCharges(db: ReturnType<typeof getDb>) {
-  const today = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: "Asia/Kuala_Lumpur",
-  }).format(new Date());
+  const today = todayInKL();
   const rows = await db.execute<{
     id: number;
     due_date: string;
@@ -759,14 +778,30 @@ export async function GET(request: Request) {
     // the Supavisor deadlock Task 15 fixed — confirmed by direct
     // reproduction. Keeping them on separate clients avoids it.
     const seedDb = getDb();
-    await seedAdministration(seedDb);
+    if (!administrationSeeded) {
+      await seedAdministration(seedDb);
+      administrationSeeded = true;
+    }
     const currentUser = await resolveCurrentUser(request, seedDb);
     if (!currentUser)
       return Response.json({ error: "Not signed in" }, { status: 401 });
-    await seedInventory(seedDb);
-    await seedKnownRoomFeatures(seedDb);
-    await seedStudentAssignments(seedDb);
-    await applyLatePaymentCharges(seedDb);
+    if (!inventorySeeded) {
+      await seedInventory(seedDb);
+      inventorySeeded = true;
+    }
+    if (!knownRoomFeaturesSeeded) {
+      await seedKnownRoomFeatures(seedDb);
+      knownRoomFeaturesSeeded = true;
+    }
+    if (!studentAssignmentsSeeded) {
+      await seedStudentAssignments(seedDb);
+      studentAssignmentsSeeded = true;
+    }
+    const lateChargeDate = todayInKL();
+    if (lateChargesAppliedOn !== lateChargeDate) {
+      await applyLatePaymentCharges(seedDb);
+      lateChargesAppliedOn = lateChargeDate;
+    }
     const db = getDb({ max: 20 });
     const [
       rawBeds,
@@ -1622,7 +1657,10 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = asText(body.action);
     let createdId: number | undefined;
-    await seedAdministration(db);
+    if (!administrationSeeded) {
+      await seedAdministration(db);
+      administrationSeeded = true;
+    }
     const currentUser = await resolveCurrentUser(request, db);
     if (!currentUser || currentUser.status !== "active")
       throw new Error("Your user account is not active");

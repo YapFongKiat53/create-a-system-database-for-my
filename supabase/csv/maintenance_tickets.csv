@@ -1,4 +1,7 @@
 id,ticket_no,student_id,hostel_id,unit_id,room_id,category,subcategory,subject,description,priority,status,submitted_by_type,assigned_to,attended_at,completed_at,cost_responsibility,estimated_cost,actual_cost,student_charge,created_at,updated_at
 1,MT-76642965,424,5,120,490,Electrical,Light,Light,Light is not function,average,closed,staff,,,2026-07-24T08:17:19.212Z,owner,8.0,80.0,,2026-07-24 07:04:02,2026-07-24T08:17:19.212Z
-2,MT-77574968,,2,38,149,Air-conditioner,Not cooling,Not cooling,Aircond is not cold,average,closed,staff,,,2026-07-24T08:16:43.194Z,owner,50.0,150.0,,2026-07-24 07:19:34,2026-07-24T08:16:43.193Z
+2,MT-77574968,,2,38,149,Air-conditioner,Not cooling,Not cooling,Aircond is not cold,average,closed,staff,,,2026-07-30T01:55:51.010Z,owner,50.0,150.0,,2026-07-24 07:19:34,2026-07-30T01:55:51.003Z
 3,MT-77995436,164,3,61,243,Access card / key,Door unlocking,Door unlocking,LEFT THE KEY INSIDE THE ROOM,average,closed,staff,,,2026-07-24T08:13:20.201Z,student,,50.0,1.0,2026-07-24 07:26:35,2026-07-24T08:13:20.200Z
+5,MT-76096700,29,2,9,33,Other,General issue,General issue,The Light is off,average,completed,staff,Mark,,2026-07-30T01:48:59.293Z,management,10.0,2.0,0.0,2026-07-30 01:48:16,2026-07-30T01:48:59.293Z
+6,MT-76181540,,3,61,244,Other,General issue,General issue,Relocate the fan,average,submitted,staff,,,,management,,,,2026-07-30 01:49:41,2026-07-30 01:49:41
+7,MT-79538876,60,2,20,,Other,General issue,General issue,hjjh,average,submitted,staff,,,,management,20.0,,,2026-07-30 02:45:38,2026-07-30 02:45:38

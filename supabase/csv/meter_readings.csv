@@ -1,3 +1,4 @@
 id,bed_space_id,reading_date,reading_value,reading_type,submitted_by,notes,created_at,room_id
 4,10,2026-07-23,256.0,monthly,Irena,,2026-07-24 00:01:47,8
 5,9,2026-07-24,400.12,check-in,Irena,,2026-07-24 00:14:13,7
+6,21,2026-08-08,80.0,monthly,HostelPro,,2026-07-30 03:00:20,18

@@ -5,3 +5,8 @@ id,ticket_id,author_name,author_role,message,status_after,created_at
 4,3,Irena,staff,Done unlock,closed,2026-07-24 08:13:20
 5,2,Irena,staff,Do aircond service,closed,2026-07-24 08:16:43
 6,1,Irena,staff,Change the light,closed,2026-07-24 08:17:19
+8,5,HostelPro,staff,The Light is off,submitted,2026-07-30 01:48:16
+9,5,HostelPro,staff,Status updated to completed,completed,2026-07-30 01:48:59
+10,6,HostelPro,staff,Relocate the fan,submitted,2026-07-30 01:49:41
+11,2,HostelPro,staff,Status updated to closed,closed,2026-07-30 01:55:51
+12,7,HostelPro,staff,hjjh,submitted,2026-07-30 02:45:38

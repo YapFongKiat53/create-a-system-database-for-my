@@ -1,5 +1,5 @@
 id,source_key,student_code,full_name,nationality,hometown,course,status,created_at,identity_no,contact_number,email,date_of_birth,gender,race,religion,school,application_form_no,receipt_no,salesperson,agency,remarks
-1,ATR:1201-A1,B2500828,Oi Yee Sheng,Malaysia,Muar,F. in Arts,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
+1,ATR:1201-A1,B2500828,Oi Yee Sheng,Malaysia,Muar,F. in Arts,moved-out,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 2,ATR:1201-A2,B2500812,Lim En Jie,Malaysia,Muar,F. in Arts,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 3,ATR:1201-B1,B2500769,Cheng Wen Jie,Malaysia,Muar,F. in Science,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 4,ATR:1201-D1,B2500798,Lim Wei Jun,Malaysia,Muar,F. in Arts,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
@@ -406,7 +406,7 @@ id,source_key,student_code,full_name,nationality,hometown,course,status,created_
 405,NDY:NE-1911-D1,SRC-NDY-NE-1911-D1,Glorea Sunta Anak Roland Nyanggan,Malaysia,Sarawak,Certificate in Aircraft Maintenance Engineering - Avionics (CENTEX),active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 406,NDY:NE-1911-D2,SRC-NDY-NE-1911-D2,Fashihah Zakirah binti Ariffin,Malaysia,Sarawak,Certificate in Aircraft Maintenance Engineering - Aeroplane Turbine (CENTEX),active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 407,NDY:NE-1911-D3,SRC-NDY-NE-1911-D3,Iffah Afiqah binti Suhailee,Malaysia,Sarawak,Certificate in Aircraft Maintenance Engineering - Avionics (CENTEX),active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
-408,SHP:16-2-A2,B2400223,Chai Chen Si,Malaysia,Johor,D. in Education,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
+408,SHP:16-2-A2,B2400223,Chai Chen Si,Malaysia,Johor,D. in Education,active,2026-07-23 02:43:43,010101010101,0123456789,jack@gmail.com,,unspecified,Others,Christianity,HELP,,,,,
 409,SHP:16-2-D1,B2500121,Lai Jing Yie,Malaysia,Sabah,F. in Arts,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 410,SHP:16-2-G1,B2501113,Chew Zhou Wei,Malaysia,Penang,F. in Arts,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 411,SHP:16-2-H1,B2500127,Eve Son Yee Xin,Malaysia,Johor Bahru,B. in Early Childhood Education,active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
@@ -486,3 +486,6 @@ id,source_key,student_code,full_name,nationality,hometown,course,status,created_
 485,SR:SR31-F2,SRC-SR-SR31-F2,Andrian Joshua Anak Hadick,Malaysia,Sarawak,Certificate in Aerospace CNC Machining (CENTEX),active,2026-07-23 02:43:43,,,,,unspecified,,,,,,,,
 487,reservation:2,STU-2,Florence Tan,,,,active,2026-07-24 07:48:05,,,,,female,,,,,,Ohanna,,
 488,reservation:4,STU-4,Jack,,,,active,2026-07-28 01:56:06,,,,,male,,,,,,Peter,,
+489,manual:1785374282826,,hostelpro flo,,,,active,2026-07-30 01:18:02,,,hostelproflo@gmail.com,,unspecified,,,,,,,,
+490,manual:1785376383142,,Joash,Indonesian,Johor,,active,2026-07-30 01:53:03,010101010101,0127903684,haha@gmail.com,2000-01-02,female,Chinese,Hinduism,HELP,,,,,
+491,manual:1785379394749,,aa,,,,active,2026-07-30 02:43:14,,,,,unspecified,,,,,,,,
