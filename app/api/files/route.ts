@@ -30,6 +30,23 @@ export async function POST(request:Request) {
   }
 }
 
+export async function DELETE(request:Request) {
+  try {
+    const id = Number(new URL(request.url).searchParams.get("id") || 0);
+    if (!id) return Response.json({ error:"Missing attachment" }, { status:400 });
+    const db = getDb();
+    const row = (
+      await db.select().from(storedAttachments).where(eq(storedAttachments.id, id))
+    )[0];
+    if (!row) return Response.json({ error:"Attachment not found" }, { status:404 });
+    await getBucket().delete(row.objectKey);
+    await db.delete(storedAttachments).where(eq(storedAttachments.id, id));
+    return Response.json({ ok:true });
+  } catch (error) {
+    return Response.json({ error:error instanceof Error ? error.message : "Unable to delete file" }, { status:500 });
+  }
+}
+
 export async function GET(request:Request) {
   try {
     const id = Number(new URL(request.url).searchParams.get("id") || 0);

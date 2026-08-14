@@ -5,10 +5,11 @@ import { useMemo, useState } from "react";
 import {
   DemographicFields,
   Modal,
-  SearchSelect,
   Stat,
+  blockOf,
   dateLabel,
   formValues,
+  genderLabel,
   money,
   titleCase,
 } from "./shared";
@@ -114,6 +115,41 @@ function isUnassignedStudent(student: Row, hostels: Row[]) {
   return !hostels.some((hostel) => studentMatchesHostel(student, hostel));
 }
 
+const COURSE_LEVELS = ["foundation", "diploma", "degree", "other"] as const;
+const COURSE_LEVEL_LABELS: Record<string, string> = {
+  foundation: "Foundation",
+  diploma: "Diploma",
+  degree: "Degree",
+  other: "Other",
+};
+
+// Courses grouped by programme level so staff pick from a list instead of
+// retyping the full course name each time. Falls back to showing whatever
+// free-text value a student already has, in case it predates this list.
+function CourseOptions({ courses, current }: { courses: Row[]; current?: string }) {
+  return (
+    <>
+      <option value="">Not set</option>
+      {COURSE_LEVELS.map((level) => {
+        const levelCourses = courses.filter((c) => c.level === level);
+        if (!levelCourses.length) return null;
+        return (
+          <optgroup key={level} label={COURSE_LEVEL_LABELS[level]}>
+            {levelCourses.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+      {current && !courses.some((c) => c.name === current) && (
+        <option value={current}>{current}</option>
+      )}
+    </>
+  );
+}
+
 function paginationItems(currentPage: number, totalPages: number) {
   const pages: Array<number | "ellipsis"> = [];
 
@@ -134,6 +170,243 @@ function paginationItems(currentPage: number, totalPages: number) {
 
   pages.push(totalPages);
   return pages;
+}
+
+// Cascading hostel → unit → type/category/bathroom room picker for the
+// "Assign a room" flow. A fresh instance mounts every time the modal opens
+// (the caller only renders it while `modal === "assign"`), so its filter
+// state always starts empty without needing a reset effect.
+// Hostel -> room type -> block -> category -> room cascade, matching Hostel
+// Information's "Housing information" step exactly (no separate Unit
+// step, no Bathroom filter). Renders inline — no <form>/submit of its own —
+// so it can drop into any caller's form; only the final `bedSpaceId` select
+// carries a `name`, everything above it is a pure narrowing filter.
+function RoomPickerFields({
+  data,
+  gender,
+}: {
+  data: Data;
+  gender?: string;
+}) {
+  const [hostelId, setHostelId] = useState("");
+  const [roomType, setRoomType] = useState("any");
+  const [block, setBlock] = useState("");
+  const [category, setCategory] = useState("any");
+  const [bedSpaceId, setBedSpaceId] = useState("");
+
+  // Beds an active sales reservation already holds — never offer these.
+  const heldBedIds = new Set(
+    data.reservations
+      .filter((row) => row.status === "reserved")
+      .flatMap((row) => [row.provisionalBedSpaceId, row.assignedBedSpaceId])
+      .filter(Boolean)
+      .map(String),
+  );
+  const genderFits = (bedGender: string) =>
+    !gender ||
+    ["mixed", "unspecified"].includes(gender) ||
+    ["mixed", "unspecified"].includes(String(bedGender)) ||
+    bedGender === gender;
+  const isSelectable = (bed: Row) =>
+    bed.status === "vacant" &&
+    !heldBedIds.has(String(bed.id)) &&
+    genderFits(bed.gender);
+
+  // Each step only offers what the step before it allows.
+  const hostelBeds = data.bedSpaces.filter(
+    (bed) =>
+      isSelectable(bed) && (!hostelId || String(bed.hostelId) === hostelId),
+  );
+  const blockOptions = [
+    ...new Set(hostelBeds.map((bed) => blockOf(bed.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const blockedBeds = hostelBeds.filter(
+    (bed) => !block || blockOf(bed.unitCode) === block,
+  );
+  const categories = [
+    ...new Set(blockedBeds.map((bed) => String(bed.roomLabel))),
+  ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const options = blockedBeds.filter(
+    (bed) =>
+      (roomType === "any" || bed.roomType === roomType) &&
+      (category === "any" || bed.roomLabel === category),
+  );
+
+  return (
+    <>
+      <label>
+        1. Hostel
+        <select
+          required
+          value={hostelId}
+          onChange={(event) => {
+            setHostelId(event.target.value);
+            setBlock("");
+            setCategory("any");
+            setBedSpaceId("");
+          }}
+        >
+          <option value="">Select hostel</option>
+          {data.hostels.map((hostel) => (
+            <option key={hostel.id} value={hostel.id}>
+              {hostel.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Room type
+        <select
+          value={roomType}
+          disabled={!hostelId}
+          onChange={(event) => {
+            setRoomType(event.target.value);
+            setBedSpaceId("");
+          }}
+        >
+          <option value="any">Any room type</option>
+          <option value="single">Single</option>
+          <option value="sharing">Twin</option>
+        </select>
+      </label>
+      {blockOptions.length > 0 && (
+        <label>
+          2. Block
+          <select
+            value={block}
+            disabled={!hostelId}
+            onChange={(event) => {
+              setBlock(event.target.value);
+              setCategory("any");
+              setBedSpaceId("");
+            }}
+          >
+            <option value="">All blocks in this hostel</option>
+            {blockOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label>
+        Room category
+        <select
+          value={category}
+          disabled={!hostelId}
+          onChange={(event) => {
+            setCategory(event.target.value);
+            setBedSpaceId("");
+          }}
+        >
+          <option value="any">Any category</option>
+          {categories.map((value) => (
+            <option key={value} value={value}>
+              Room {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="wide">
+        3. Room available {hostelId && `— ${options.length} available`}
+        <select
+          name="bedSpaceId"
+          required
+          disabled={!hostelId}
+          value={bedSpaceId}
+          onChange={(event) => setBedSpaceId(event.target.value)}
+        >
+          <option value="">
+            {!hostelId
+              ? "Select a hostel first"
+              : options.length
+                ? "Select an available room"
+                : "No free rooms match these choices"}
+          </option>
+          {options.map((bed) => (
+            <option key={bed.id} value={bed.id}>
+              {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(bed.currentRental)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
+function AssignRoomForm({
+  data,
+  save,
+  busy,
+  studentId,
+  studentGender,
+  salesperson,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  studentId: string | number;
+  studentGender?: string;
+  salesperson?: string;
+  onDone: () => void;
+}) {
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "student-assign",
+            studentId,
+            salesperson,
+            ...formValues(e),
+          },
+          "Room assigned",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <RoomPickerFields data={data} gender={studentGender} />
+      <label>
+        Check-in date
+        <input name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
+      </label>
+      <label>
+        Monthly rental
+        <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
+      </label>
+      <label>
+        Security deposit
+        <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
+      </label>
+      <label>
+        Access card deposit
+        <input name="accessCardDeposit" type="number" min="0" placeholder="e.g. 1000" />
+      </label>
+      <label>
+        Parking deposit
+        <input name="parkingDeposit" type="number" min="0" placeholder="e.g. 1000" />
+      </label>
+      <label>
+        Lease start
+        <input name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01" />
+      </label>
+      <label>
+        Lease end
+        <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
+      </label>
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy}>
+          Confirm assignment
+        </button>
+      </div>
+    </form>
+  );
 }
 
 export function StudentsModule({
@@ -163,6 +436,17 @@ export function StudentsModule({
   const [page, setPage] = useState(1);
   const [addAssignRoom, setAddAssignRoom] = useState(false);
   const [editSchool, setEditSchool] = useState<Row | null>(null);
+  const [editCourse, setEditCourse] = useState<Row | null>(null);
+  const [drawerRecordsTab, setDrawerRecordsTab] = useState("login");
+  // Jump back to the first records tab whenever a different student's
+  // drawer opens, without the extra render a useEffect would cost here.
+  const [drawerRecordsStudentId, setDrawerRecordsStudentId] = useState(
+    selectedStudentRef?.studentId,
+  );
+  if (selectedStudentRef?.studentId !== drawerRecordsStudentId) {
+    setDrawerRecordsStudentId(selectedStudentRef?.studentId);
+    setDrawerRecordsTab("login");
+  }
 
   const tenantRole = data.roles.find((role) => role.roleKey === "tenant");
   const loginFor = (studentId: number | string) =>
@@ -337,35 +621,6 @@ export function StudentsModule({
     ? (currentPage - 1) * PAGE_SIZE + 1
     : 0;
   const rangeEnd = Math.min(currentPage * PAGE_SIZE, filteredStudents.length);
-
-  const allVacantBedOptions = useMemo(
-    () =>
-      data.bedSpaces
-        .filter((bed) => bed.status === "vacant")
-        .map((bed) => ({
-          value: bed.id,
-          label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode}`,
-        })),
-    [data.bedSpaces],
-  );
-
-  const addStudentBedOptions = useMemo(() => {
-    if (!selectedHostel) return allVacantBedOptions;
-
-    return data.bedSpaces
-      .filter(
-        (bed) =>
-          bed.status === "vacant" &&
-          (String(bed.hostelId || "") === String(selectedHostel.id) ||
-            (!bed.hostelId &&
-              String(bed.hostelName || "").toLowerCase() ===
-              String(selectedHostel.name || "").toLowerCase())),
-      )
-      .map((bed) => ({
-        value: bed.id,
-        label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode}`,
-      }));
-  }, [allVacantBedOptions, data.bedSpaces, selectedHostel]);
 
   const resetDirectoryFilters = (resetTab = false) => {
     setQuery("");
@@ -917,12 +1172,11 @@ export function StudentsModule({
                     />
                   </label>
                   <label>
-                    IC / passport
-                    <input
-                      name="identityNo"
-                      placeholder="e.g. 010101-01-0101"
-                      defaultValue={student.identityNo}
-                    />
+                    Gender
+                    <select name="gender" defaultValue={student.gender}>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                    </select>
                   </label>
                   <label>
                     Date of birth
@@ -932,17 +1186,12 @@ export function StudentsModule({
                       defaultValue={student.dateOfBirth || ""}
                     />
                   </label>
-                  <label>
-                    Gender
-                    <select name="gender" defaultValue={student.gender}>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                    </select>
-                  </label>
                   <DemographicFields
                     key={student.id}
+                    identityNo={student.identityNo || ""}
                     nationality={student.nationality || ""}
                     nationalityOther={student.nationalityOther || ""}
+                    state={student.state || ""}
                     hometown={student.hometown || ""}
                     race={student.race || ""}
                     raceOther={student.raceOther || ""}
@@ -997,76 +1246,84 @@ export function StudentsModule({
                   )}
                 </div>
                 {student.assignmentId ? (
-                  <div className="form-grid">
-                    <label>
-                      Room code
-                      <input value={student.roomCode || ""} readOnly />
-                    </label>
-                    <label>
-                      Monthly rental
-                      <input
-                        name="monthlyRental"
-                        type="number"
-                        defaultValue={student.monthlyRental ?? ""}
-                      />
-                    </label>
-                    <label>
-                      Security deposit
-                      <input
-                        name="securityDeposit"
-                        type="number"
-                        defaultValue={student.securityDeposit ?? ""}
-                      />
-                    </label>
-                    <label>
-                      Access card deposit
-                      <input
-                        name="accessCardDeposit"
-                        type="number"
-                        defaultValue={student.accessCardDeposit ?? ""}
-                      />
-                    </label>
-                    <label>
-                      Parking deposit
-                      <input
-                        name="parkingDeposit"
-                        type="number"
-                        defaultValue={student.parkingDeposit ?? ""}
-                      />
-                    </label>
-                    <label>
-                      Check-in
-                      <input
-                        name="checkInDate"
-                        type="date"
-                        defaultValue={student.checkInDate || ""}
-                      />
-                    </label>
-                    <label>
-                      Check-out
-                      <input
-                        name="checkOutDate"
-                        type="date"
-                        defaultValue={student.checkOutDate || ""}
-                      />
-                    </label>
-                    <label>
-                      Lease start
-                      <input
-                        name="leaseStartDate"
-                        type="date"
-                        defaultValue={student.leaseStartDate || ""}
-                      />
-                    </label>
-                    <label>
-                      Lease end
-                      <input
-                        name="leaseEndDate"
-                        type="date"
-                        defaultValue={student.leaseEndDate || ""}
-                      />
-                    </label>
-                  </div>
+                  <>
+                    <div className="form-grid">
+                      <label className="wide">
+                        Room code
+                        <input value={student.roomCode || ""} readOnly />
+                      </label>
+                    </div>
+                    <p className="section-kicker room-details-group">FINANCIAL</p>
+                    <div className="form-grid">
+                      <label>
+                        Monthly rental
+                        <input
+                          name="monthlyRental"
+                          type="number"
+                          defaultValue={student.monthlyRental ?? ""}
+                        />
+                      </label>
+                      <label>
+                        Security deposit
+                        <input
+                          name="securityDeposit"
+                          type="number"
+                          defaultValue={student.securityDeposit ?? ""}
+                        />
+                      </label>
+                      <label>
+                        Access card deposit
+                        <input
+                          name="accessCardDeposit"
+                          type="number"
+                          defaultValue={student.accessCardDeposit ?? ""}
+                        />
+                      </label>
+                      <label>
+                        Parking deposit
+                        <input
+                          name="parkingDeposit"
+                          type="number"
+                          defaultValue={student.parkingDeposit ?? ""}
+                        />
+                      </label>
+                    </div>
+                    <p className="section-kicker room-details-group">TENANCY DATES</p>
+                    <div className="form-grid">
+                      <label>
+                        Check-in
+                        <input
+                          name="checkInDate"
+                          type="date"
+                          defaultValue={student.checkInDate || ""}
+                        />
+                      </label>
+                      <label>
+                        Check-out
+                        <input
+                          name="checkOutDate"
+                          type="date"
+                          defaultValue={student.checkOutDate || ""}
+                        />
+                      </label>
+                      <label>
+                        Lease start
+                        <input
+                          name="leaseStartDate"
+                          type="date"
+                          defaultValue={student.leaseStartDate || ""}
+                        />
+                      </label>
+                      <label>
+                        Lease end
+                        <input
+                          name="leaseEndDate"
+                          type="date"
+                          defaultValue={student.leaseEndDate || ""}
+                        />
+                      </label>
+                    </div>
+                  </>
                 ) : (
                   // 更新提示文案
                   <p className="empty-copy">
@@ -1078,13 +1335,22 @@ export function StudentsModule({
               <div className="drawer-subsection">
                 <div className="subsection-head">
                   <h4>Academic information</h4>
-                  <button
-                    type="button"
-                    className="secondary compact"
-                    onClick={() => setModal("schools")}
-                  >
-                    Manage schools
-                  </button>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={() => setModal("schools")}
+                    >
+                      Manage schools
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={() => setModal("courses")}
+                    >
+                      Manage courses
+                    </button>
+                  </div>
                 </div>
                 <div className="form-grid">
                   <label>
@@ -1099,7 +1365,9 @@ export function StudentsModule({
                   </label>
                   <label>
                     Course enrolled
-                    <input name="course" defaultValue={student.course} />
+                    <select name="course" defaultValue={student.course || ""}>
+                      <CourseOptions courses={data.courses} current={student.course} />
+                    </select>
                   </label>
                   <label>
                     Application form no.
@@ -1116,16 +1384,14 @@ export function StudentsModule({
                 <div className="form-grid">
                   <label>
                     Sales person
-                    <input
-                      name="salesperson"
-                      placeholder="e.g. John Doe"
-                      defaultValue={student.salesperson}
-                    />
+                    <select name="salesperson" defaultValue={student.salesperson || ""}>
+                      <option value="">Select Sales Team</option>
+                      {data.salesPeople.map((name: string) => (
+                        <option key={name}>{name}</option>
+                      ))}
+                    </select>
                   </label>
-                  <label>
-                    Agency
-                    <input name="agency" placeholder="e.g. John Doe Agency" defaultValue={student.agency} />
-                  </label>
+                  <input type="hidden" name="agency" value={student.agency || ""} />
                   <label>
                     Receipt serial no.
                     <input name="receiptNo" placeholder="e.g. 1234567890" defaultValue={student.receiptNo} />
@@ -1149,145 +1415,215 @@ export function StudentsModule({
               </div>
             </form>
 
-            <section className="drawer-section">
-              <div className="section-title">
-                <div>
-                  <small>LOGIN ACCESS</small>
-                  <h3>Tenant login credentials</h3>
-                </div>
-              </div>
-              {loginFor(student.id) ? (
-                <div className="compact-list">
-                  <span>
-                    <b>{loginFor(student.id)?.email}</b>
-                    <small>
-                      Tenant login active ·{" "}
-                      {loginFor(student.id)?.lastLoginAt
-                        ? `Last login ${dateLabel(loginFor(student.id)?.lastLoginAt)}`
-                        : "Never signed in"}
-                    </small>
-                  </span>
-                </div>
-              ) : (
-                <form
-                  className="form-grid"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!tenantRole) return;
-                    await save(
-                      {
-                        action: "user-save",
-                        roleId: tenantRole.id,
-                        studentId: student.id,
-                        displayName: student.fullName,
-                        ...formValues(e),
-                      },
-                      "Tenant login enabled",
-                    );
-                  }}
-                >
-                  <label className="wide">
-                    Login email
-                    <input
-                      name="email"
-                      type="email"
-                      required
-                      defaultValue={student.email || ""}
-                      placeholder="student@email.com"
-                    />
-                  </label>
-                  <div className="form-actions wide">
-                    <button
-                      className="secondary compact"
-                      disabled={busy || !tenantRole}
-                    >
-                      Enable tenant login
-                    </button>
-                  </div>
-                  <p className="empty-copy wide">
-                    The student signs in with this email through the platform. No
-                    password is stored in this system.
-                  </p>
-                </form>
-              )}
-            </section>
+            <div className="workspace-tabs sticky-tabs drawer-records-tabs">
+              <button
+                type="button"
+                className={drawerRecordsTab === "login" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("login")}
+              >
+                Tenant login credentials
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "billing" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("billing")}
+              >
+                Billing information
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "rate" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("rate")}
+              >
+                Rate change
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "room" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("room")}
+              >
+                Change room
+              </button>
+            </div>
 
-            <section className="drawer-section">
-              <div className="section-title">
-                <div>
-                  <small>BILLING INFORMATION</small>
-                  <h3>Current outstanding and payment breakdown</h3>
-                </div>
-              </div>
-              <div className="compact-list">
-                {data.invoices
-                  .filter((invoice) => String(invoice.studentId) === String(student.id))
-                  .slice(0, 12)
-                  .map((invoice) => (
-                    <span key={invoice.id}>
-                      <code>{invoice.invoiceNo}</code>
-                      <b>
-                        {(invoice.items || [])
-                          .map((item: Row) => item.description)
-                          .join(", ") || "No items"}
-                      </b>
-                      <small>
-                        {money(
-                          Number(invoice.totalAmount) -
-                          Number(invoice.amountPaid),
-                          true,
-                        )}{" "}
-                        outstanding
-                      </small>
-                    </span>
-                  ))}
-                {!data.invoices.some(
-                  (invoice) => String(invoice.studentId) === String(student.id),
-                ) && (
-                    <p className="empty-copy">
-                      No billing records for this student yet.
-                    </p>
-                  )}
-              </div>
-            </section>
-            {student.assignmentId && (
+            {drawerRecordsTab === "login" && (
               <section className="drawer-section">
                 <div className="section-title">
                   <div>
-                    <small>RATE & ROOM HISTORY</small>
-                    <h3>Effective-dated changes</h3>
+                    <small>LOGIN ACCESS</small>
+                    <h3>Tenant login credentials</h3>
                   </div>
-                  <div className="button-row">
+                </div>
+                {loginFor(student.id) ? (
+                  <div className="compact-list">
+                    <span>
+                      <b>{loginFor(student.id)?.email}</b>
+                      <small>
+                        Tenant login active ·{" "}
+                        {loginFor(student.id)?.lastLoginAt
+                          ? `Last login ${dateLabel(loginFor(student.id)?.lastLoginAt)}`
+                          : "Never signed in"}
+                      </small>
+                    </span>
+                  </div>
+                ) : (
+                  <form
+                    className="form-grid"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!tenantRole) return;
+                      await save(
+                        {
+                          action: "user-save",
+                          roleId: tenantRole.id,
+                          studentId: student.id,
+                          displayName: student.fullName,
+                          ...formValues(e),
+                        },
+                        "Tenant login enabled",
+                      );
+                    }}
+                  >
+                    <label className="wide">
+                      Login email
+                      <input
+                        name="email"
+                        type="email"
+                        required
+                        defaultValue={student.email || ""}
+                        placeholder="student@email.com"
+                      />
+                    </label>
+                    <div className="form-actions wide">
+                      <button
+                        className="secondary compact"
+                        disabled={busy || !tenantRole}
+                      >
+                        Enable tenant login
+                      </button>
+                    </div>
+                    <p className="empty-copy wide">
+                      The student signs in with this email through the platform. No
+                      password is stored in this system.
+                    </p>
+                  </form>
+                )}
+              </section>
+            )}
+
+            {drawerRecordsTab === "billing" && (
+              <section className="drawer-section">
+                <div className="section-title">
+                  <div>
+                    <small>BILLING INFORMATION</small>
+                    <h3>Current outstanding and payment breakdown</h3>
+                  </div>
+                </div>
+                <div className="compact-list">
+                  {data.invoices
+                    .filter((invoice) => String(invoice.studentId) === String(student.id))
+                    .slice(0, 12)
+                    .map((invoice) => (
+                      <span key={invoice.id}>
+                        <code>{invoice.invoiceNo}</code>
+                        <b>
+                          {(invoice.items || [])
+                            .map((item: Row) => item.description)
+                            .join(", ") || "No items"}
+                        </b>
+                        <small>
+                          {money(
+                            Number(invoice.totalAmount) -
+                            Number(invoice.amountPaid),
+                            true,
+                          )}{" "}
+                          outstanding
+                        </small>
+                      </span>
+                    ))}
+                  {!data.invoices.some(
+                    (invoice) => String(invoice.studentId) === String(student.id),
+                  ) && (
+                      <p className="empty-copy">
+                        No billing records for this student yet.
+                      </p>
+                    )}
+                </div>
+              </section>
+            )}
+
+            {drawerRecordsTab === "rate" && (
+              <section className="drawer-section">
+                <div className="section-title">
+                  <div>
+                    <small>RATE CHANGE</small>
+                    <h3>Effective-dated rental adjustments</h3>
+                  </div>
+                  {student.assignmentId && (
                     <button
                       className="secondary compact"
                       onClick={() => setModal("rate")}
                     >
                       + Rate change
                     </button>
+                  )}
+                </div>
+                {student.assignmentId ? (
+                  <div className="compact-list">
+                    {data.studentRateChanges
+                      .filter((r) => r.assignmentId === student.assignmentId)
+                      .map((r) => (
+                        <span key={r.id}>
+                          <b>Effective {dateLabel(r.effectiveDate)}</b>
+                          <small>
+                            Rental {money(r.monthlyRental)} · Deposit{" "}
+                            {money(r.securityDeposit)} · {r.reason}
+                          </small>
+                        </span>
+                      ))}
+                    {!data.studentRateChanges.some(
+                      (r) => r.assignmentId === student.assignmentId,
+                    ) && <p className="empty-copy">No scheduled rate changes.</p>}
+                  </div>
+                ) : (
+                  <p className="empty-copy">
+                    No active room assignment yet — assign a room first.
+                  </p>
+                )}
+              </section>
+            )}
+
+            {drawerRecordsTab === "room" && (
+              <section className="drawer-section">
+                <div className="section-title">
+                  <div>
+                    <small>CHANGE ROOM</small>
+                    <h3>Move to a different room</h3>
+                  </div>
+                  {student.assignmentId && (
                     <button
                       className="secondary compact"
                       onClick={() => setModal("move")}
                     >
                       Change room
                     </button>
+                  )}
+                </div>
+                {student.assignmentId ? (
+                  <div className="compact-list">
+                    <span>
+                      <b>{student.roomCode || "-"}</b>
+                      <small>
+                        {student.hostelName} · Since{" "}
+                        {dateLabel(student.checkInDate)}
+                      </small>
+                    </span>
                   </div>
-                </div>
-                <div className="compact-list">
-                  {data.studentRateChanges
-                    .filter((r) => r.assignmentId === student.assignmentId)
-                    .map((r) => (
-                      <span key={r.id}>
-                        <b>Effective {dateLabel(r.effectiveDate)}</b>
-                        <small>
-                          Rental {money(r.monthlyRental)} · Deposit{" "}
-                          {money(r.securityDeposit)} · {r.reason}
-                        </small>
-                      </span>
-                    ))}
-                  {!data.studentRateChanges.some(
-                    (r) => r.assignmentId === student.assignmentId,
-                  ) && <p className="empty-copy">No scheduled rate changes.</p>}
-                </div>
+                ) : (
+                  <p className="empty-copy">
+                    No active room assignment yet — assign a room first.
+                  </p>
+                )}
               </section>
             )}
           </aside>
@@ -1305,10 +1641,23 @@ export function StudentsModule({
             className="form-grid"
             onSubmit={async (e) => {
               e.preventDefault();
+              const { loginEmail, ...values } = formValues(e);
               const ok = await save(
-                { action: "student-create", ...formValues(e) },
+                { action: "student-create", ...values },
                 "Student added",
               );
+              if (ok && loginEmail && tenantRole) {
+                await save(
+                  {
+                    action: "user-save",
+                    roleId: tenantRole.id,
+                    studentId: ok.id,
+                    displayName: String(values.fullName || ""),
+                    email: loginEmail,
+                  },
+                  "Student added and tenant login enabled",
+                );
+              }
               if (ok) closeAddStudentModal();
             }}
           >
@@ -1327,19 +1676,15 @@ export function StudentsModule({
                   />
                 </label>
                 <label>
-                  IC / passport
-                  <input name="identityNo" placeholder="e.g. 010101-01-0101" />
-                </label>
-                <label>
-                  Date of birth
-                  <input name="dateOfBirth" type="date" />
-                </label>
-                <label>
                   Gender
                   <select name="gender" defaultValue="unspecified">
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </select>
+                </label>
+                <label>
+                  Date of birth
+                  <input name="dateOfBirth" type="date" />
                 </label>
                 <DemographicFields />
               </div>
@@ -1358,7 +1703,16 @@ export function StudentsModule({
               </div>
             </div>
             <div className="drawer-subsection wide">
-              <h4>Academic information</h4>
+              <div className="subsection-head">
+                <h4>Academic information</h4>
+                <button
+                  type="button"
+                  className="secondary compact"
+                  onClick={() => setModal("courses")}
+                >
+                  Manage courses
+                </button>
+              </div>
               <div className="form-grid">
                 <label>
                   School
@@ -1372,7 +1726,9 @@ export function StudentsModule({
                 </label>
                 <label>
                   Course enrolled
-                  <input name="course" placeholder="e.g. Bachelor of Science" />
+                  <select name="course" defaultValue="">
+                    <CourseOptions courses={data.courses} />
+                  </select>
                 </label>
                 <label>
                   Application form no.
@@ -1385,11 +1741,12 @@ export function StudentsModule({
               <div className="form-grid">
                 <label>
                   Sales person
-                  <input name="salesperson" placeholder="e.g. John Doe" />
-                </label>
-                <label>
-                  Agency
-                  <input name="agency" placeholder="e.g. John Doe Agency" />
+                  <select name="salesperson" defaultValue="">
+                    <option value="">Select Sales Team</option>
+                    {data.salesPeople.map((name: string) => (
+                      <option key={name}>{name}</option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   Receipt serial no.
@@ -1400,6 +1757,24 @@ export function StudentsModule({
                   <input name="remarks" placeholder="e.g. Student is relocating to a different unit" />
                 </label>
               </div>
+            </div>
+            <div className="drawer-subsection wide">
+              <h4>Tenant login credentials</h4>
+              <div className="form-grid">
+                <label className="wide">
+                  Login email
+                  <input
+                    name="loginEmail"
+                    type="email"
+                    placeholder="student@email.com"
+                  />
+                </label>
+              </div>
+              <p className="auto-address-note">
+                Optional — if filled in, a tenant login is created for this
+                email once the profile is saved. No password is stored in
+                this system.
+              </p>
             </div>
             <div className="drawer-subsection wide">
               <div className="subsection-head">
@@ -1415,15 +1790,7 @@ export function StudentsModule({
               </div>
               {addAssignRoom && (
                 <div className="form-grid">
-                  <label className="wide">
-                    Room code
-                    <SearchSelect
-                      name="bedSpaceId"
-                      required
-                      options={addStudentBedOptions}
-                      placeholder="Type room code, unit or hostel"
-                    />
-                  </label>
+                  <RoomPickerFields data={data} />
                   <label>
                     Monthly rental
                     <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
@@ -1599,6 +1966,106 @@ export function StudentsModule({
         </Modal>
       )}
 
+      {modal === "courses" && (
+        <Modal
+          title="Manage courses"
+          kicker="ACADEMIC LIST"
+          onClose={() => {
+            setModal("");
+            setEditCourse(null);
+          }}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                editCourse
+                  ? {
+                    action: "course-update",
+                    courseId: editCourse.id,
+                    ...formValues(e),
+                  }
+                  : { action: "course-create", ...formValues(e) },
+                editCourse ? "Course updated" : "Course added",
+              );
+              if (ok) {
+                setEditCourse(null);
+                (e.target as HTMLFormElement).reset();
+              }
+            }}
+          >
+            <label className="wide">
+              {editCourse ? "Rename course" : "New course name"}
+              <input
+                name="name"
+                required
+                key={editCourse?.id || "new"}
+                defaultValue={editCourse?.name || ""}
+              />
+            </label>
+            <label>
+              Level
+              <select
+                name="level"
+                key={editCourse?.id || "new-level"}
+                defaultValue={editCourse?.level || "other"}
+              >
+                {COURSE_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {COURSE_LEVEL_LABELS[level]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="form-actions wide">
+              {editCourse && (
+                <button
+                  type="button"
+                  className="secondary compact"
+                  onClick={() => setEditCourse(null)}
+                >
+                  Cancel edit
+                </button>
+              )}
+              <button className="primary compact" disabled={busy}>
+                {editCourse ? "Save course" : "Add course"}
+              </button>
+            </div>
+          </form>
+          <div className="compact-list">
+            {data.courses.map((course) => (
+              <span key={course.id}>
+                <b>{course.name}</b>
+                <small>{COURSE_LEVEL_LABELS[course.level] || course.level}</small>
+                <div className="button-row">
+                  <button
+                    className="secondary compact"
+                    onClick={() => setEditCourse(course)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="secondary compact"
+                    onClick={() =>
+                      save(
+                        { action: "course-delete", courseId: course.id },
+                        "Course removed",
+                      )
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              </span>
+            ))}
+            {data.courses.length === 0 && (
+              <p className="empty-copy">No courses yet. Add one above.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {modal === "rate" && student && (
         <Modal
           title="Effective-dated rate change"
@@ -1647,12 +2114,32 @@ export function StudentsModule({
           </form>
         </Modal>
       )}
+      {modal === "assign" && student && (
+        <Modal
+          title="Assign a room"
+          kicker={student.fullName}
+          description="Narrow down by hostel, block and category to find a currently vacant room."
+          onClose={() => setModal("")}
+          wide
+        >
+          <AssignRoomForm
+            data={data}
+            save={save}
+            busy={busy}
+            studentId={student.id}
+            studentGender={student.gender}
+            salesperson={student.salesperson}
+            onDone={() => setModal("")}
+          />
+        </Modal>
+      )}
       {modal === "move" && student && (
         <Modal
           title="Manual room change"
           kicker={student.fullName}
-          description="The old room becomes vacant and the selected room becomes occupied from the effective date."
+          description="Narrow down by hostel, block and category to find a currently vacant room. The old room becomes vacant and the selected room becomes occupied from the effective date."
           onClose={() => setModal("")}
+          wide
         >
           <form
             className="form-grid"
@@ -1674,15 +2161,7 @@ export function StudentsModule({
               }
             }}
           >
-            <label className="wide">
-              New room code
-              <SearchSelect
-                name="bedSpaceId"
-                required
-                options={allVacantBedOptions}
-                placeholder="Type room code, unit or hostel"
-              />
-            </label>
+            <RoomPickerFields data={data} gender={student.gender} />
             <label>
               Effective date
               <input name="effectiveDate" type="date" required placeholder="e.g. 2026-01-01" />

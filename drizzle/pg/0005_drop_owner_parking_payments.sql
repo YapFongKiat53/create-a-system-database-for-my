@@ -1,0 +1,1 @@
+DROP TABLE "owner_parking_payments" CASCADE;

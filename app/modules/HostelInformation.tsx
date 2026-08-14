@@ -3,12 +3,16 @@
 
 import { useMemo, useState } from "react";
 import {
-  DemographicFields,
   Empty,
+  MALAYSIAN_STATES,
   Modal,
+  NATIONALITIES,
+  RACES,
+  RELIGIONS,
   SearchSelect,
   bedTypeLabel,
   blankCharges,
+  blockOf,
   chargeLabels,
   commitsInventory,
   dateLabel,
@@ -2472,19 +2476,37 @@ function ReservationEditor({
   cancel: () => void;
   complete: () => void;
 }) {
+  const [step, setStep] = useState(1);
   const [kind, setKind] = useState(
     editingReservation?.reservationType || "individual",
+  );
+  const [studentName, setStudentName] = useState(
+    editingReservation?.studentName || "",
+  );
+  const [salesPerson, setSalesPerson] = useState(
+    editingReservation?.salesPerson || "",
+  );
+  const [gender, setGender] = useState(
+    editingReservation?.preferredGender || reservationBed?.gender || "male",
+  );
+  const [nationality, setNationality] = useState(
+    editingReservation?.nationality || "",
+  );
+  const [race, setRace] = useState(editingReservation?.race || "");
+  const [religion, setReligion] = useState(editingReservation?.religion || "");
+  const [date, setDate] = useState(
+    editingReservation?.targetMoveInDate || availableDate,
   );
   const [hostelId, setHostelId] = useState(
     String(
       editingReservation?.preferredHostelId || reservationBed?.hostelId || "",
     ),
   );
-  const [gender, setGender] = useState(
-    editingReservation?.preferredGender || reservationBed?.gender || "male",
+  const [block, setBlock] = useState(() =>
+    blockOf(reservationBed?.unitCode),
   );
-  const [date, setDate] = useState(
-    editingReservation?.targetMoveInDate || availableDate,
+  const [unitId, setUnitId] = useState(
+    String(editingReservation?.preferredUnitId || reservationBed?.unitId || ""),
   );
   const [roomType, setRoomType] = useState(
     editingReservation?.roomType || reservationBed?.roomType || "any",
@@ -2492,11 +2514,10 @@ function ReservationEditor({
   const [category, setCategory] = useState(
     editingReservation?.roomCategory || reservationBed?.roomLabel || "any",
   );
-  const [bathroom, setBathroom] = useState(
-    editingReservation?.bathroomType || reservationBed?.bathroomType || "any",
-  );
-  const [unitId, setUnitId] = useState(
-    String(editingReservation?.preferredUnitId || reservationBed?.unitId || ""),
+  const [bedSpaceId, setBedSpaceId] = useState(
+    String(
+      editingReservation?.provisionalBedSpaceId || reservationBed?.id || "",
+    ),
   );
   // Beds another live reservation already holds — never offer these again.
   const reservedBedIds = new Set(
@@ -2523,30 +2544,62 @@ function ReservationEditor({
     ["mixed", "unspecified"].includes(String(bedGender)) ||
     bedGender === gender;
 
-  // Each step only offers what the step before it allows.
+  // Each step only offers what the step before it allows. Gender is applied
+  // as early as possible so block/category/room options never show a choice
+  // that has nothing available for this student.
   const hostelBeds = data.bedSpaces.filter(
-    (bed) => isSelectable(bed) && (!hostelId || String(bed.hostelId) === hostelId),
+    (bed) =>
+      isSelectable(bed) &&
+      genderFits(bed.gender) &&
+      (!hostelId || String(bed.hostelId) === hostelId),
+  );
+  const blockOptions = [
+    ...new Set(hostelBeds.map((bed) => blockOf(bed.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const blockedBeds = hostelBeds.filter(
+    (bed) => !block || blockOf(bed.unitCode) === block,
   );
   const unitOptions = [
     ...new Map(
-      hostelBeds
-        .filter((bed) => genderFits(bed.gender))
-        .map((bed) => [String(bed.unitId), String(bed.unitCode)]),
+      blockedBeds.map((bed) => [String(bed.unitId), String(bed.unitCode)]),
     ).entries(),
   ].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
-  const scopedBeds = hostelBeds.filter(
-    (bed) => !unitId || String(bed.unitId) === unitId,
-  );
   const categories = [
-    ...new Set(scopedBeds.map((bed) => String(bed.roomLabel))),
+    ...new Set(blockedBeds.map((bed) => String(bed.roomLabel))),
   ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const options = scopedBeds.filter(
+  const options = blockedBeds.filter(
     (bed) =>
-      genderFits(bed.gender) &&
       (roomType === "any" || bed.roomType === roomType) &&
-      (category === "any" || bed.roomLabel === category) &&
-      (bathroom === "any" || bed.bathroomType === bathroom),
+      (category === "any" || bed.roomLabel === category),
   );
+
+  const goToHousing = () => {
+    if (!salesPerson || !studentName.trim()) {
+      window.alert(
+        "Sales person and student / representative name are required.",
+      );
+      return;
+    }
+    setStep(2);
+  };
+  const goToPayment = () => {
+    if (!hostelId) {
+      window.alert("Select a hostel first.");
+      return;
+    }
+    if (kind === "group" && !unitId) {
+      window.alert("Select the unit to reserve for this group.");
+      return;
+    }
+    if (kind !== "group" && !bedSpaceId) {
+      window.alert("Select an available room.");
+      return;
+    }
+    setStep(3);
+  };
+
   return (
     <form
       className="form-grid reservation-editor"
@@ -2564,263 +2617,408 @@ function ReservationEditor({
         if (ok) complete();
       }}
     >
-      <label>
-        Reservation type
-        <select
-          name="reservationType"
-          value={kind}
-          onChange={(event) => setKind(event.target.value)}
-        >
-          <option value="individual">Individual</option>
-          <option value="group">Whole unit</option>
-        </select>
-      </label>
-      <label>
-        Sales person-in-charge
-        <select
-          name="salesPerson"
-          required
-          defaultValue={editingReservation?.salesPerson || ""}
-        >
-          <option value="">Select Sales Team</option>
-          {data.salesPeople.map((name) => (
-            <option key={name}>{name}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        {kind === "group" ? "Representative / organisation" : "Student name"}
-        <input
-          name="studentName"
-          required
-          placeholder="e.g. John Doe"
-          defaultValue={editingReservation?.studentName || ""}
-        />
-      </label>
-      <label>
-        Student gender
-        <select
-          name="preferredGender"
-          value={gender}
-          onChange={(event) => setGender(event.target.value)}
-        >
-          <option value="male">Male student</option>
-          <option value="female">Female student</option>
-        </select>
-      </label>
-      <DemographicFields
-        key={editingReservation?.id || "new"}
-        nationality={editingReservation?.nationality || ""}
-        nationalityOther={editingReservation?.nationalityOther || ""}
-        hometown={editingReservation?.hometown || ""}
-        race={editingReservation?.race || ""}
-        raceOther={editingReservation?.raceOther || ""}
-        religion={editingReservation?.religion || ""}
-        religionOther={editingReservation?.religionOther || ""}
-      />
-      {kind === "group" && (
-        <>
+      <div className="wide reservation-steps">
+        <span className={step === 1 ? "active" : step > 1 ? "done" : ""}>
+          1. Personal information
+        </span>
+        <span className={step === 2 ? "active" : step > 2 ? "done" : ""}>
+          2. Housing information
+        </span>
+        <span className={step === 3 ? "active" : ""}>3. Payment</span>
+      </div>
+
+      <div style={{ display: step === 1 ? "contents" : "none" }}>
+        <label>
+          Reservation type
+          <select
+            name="reservationType"
+            value={kind}
+            onChange={(event) => setKind(event.target.value)}
+          >
+            <option value="individual">Individual</option>
+            <option value="group">Whole unit</option>
+          </select>
+        </label>
+        <label>
+          Sales person-in-charge
+          <select
+            name="salesPerson"
+            required
+            value={salesPerson}
+            onChange={(event) => setSalesPerson(event.target.value)}
+          >
+            <option value="">Select Sales Team</option>
+            {data.salesPeople.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {kind === "group" ? "Representative / organisation" : "Student name"}
+          <input
+            name="studentName"
+            required
+            placeholder="e.g. John Doe"
+            value={studentName}
+            onChange={(event) => setStudentName(event.target.value)}
+          />
+        </label>
+        <label>
+          Student gender
+          <select
+            name="preferredGender"
+            value={gender}
+            onChange={(event) => setGender(event.target.value)}
+          >
+            <option value="male">Male student</option>
+            <option value="female">Female student</option>
+          </select>
+        </label>
+        <label>
+          Phone number
+          <input
+            name="contactNumber"
+            placeholder="e.g. 0123456789"
+            defaultValue={editingReservation?.contactNumber || ""}
+          />
+        </label>
+        <label>
+          Email
+          <input
+            name="email"
+            type="email"
+            placeholder="e.g. john.doe@example.com"
+            defaultValue={editingReservation?.email || ""}
+          />
+        </label>
+        <label>
+          Nationality
+          <select
+            name="nationality"
+            value={nationality}
+            onChange={(event) => setNationality(event.target.value)}
+          >
+            <option value="">Not set</option>
+            {NATIONALITIES.map((n) => (
+              <option key={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        {nationality === "Malaysian" && (
           <label>
-            Representative type
+            State
             <select
-              name="representativeType"
-              defaultValue={editingReservation?.representativeType || "person"}
+              name="state"
+              defaultValue={editingReservation?.state || ""}
             >
-              <option value="person">Person</option>
-              <option value="company">Company</option>
-              <option value="institute">Institute</option>
+              <option value="">Select state</option>
+              {MALAYSIAN_STATES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
             </select>
           </label>
+        )}
+        {nationality === "International" && (
+          <>
+            <label>
+              Specify country
+              <input
+                name="nationalityOther"
+                placeholder="e.g. Indonesia"
+                defaultValue={editingReservation?.nationalityOther || ""}
+              />
+            </label>
+            <label>
+              Hometown
+              <input
+                name="hometown"
+                placeholder="e.g. Jakarta"
+                defaultValue={editingReservation?.hometown || ""}
+              />
+            </label>
+          </>
+        )}
+        <label>
+          Race
+          <select
+            name="race"
+            value={race}
+            onChange={(event) => setRace(event.target.value)}
+          >
+            <option value="">Select race</option>
+            {RACES.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
+        </label>
+        {race === "Others" && (
           <label>
-            Estimated group size
+            Specify race
             <input
-              name="groupSize"
-              type="number"
-              min="1"
-              max="99"
-              defaultValue={editingReservation?.groupSize || 1}
+              name="raceOther"
+              placeholder="e.g. Eurasian"
+              defaultValue={editingReservation?.raceOther || ""}
             />
           </label>
-        </>
-      )}
-      <label className="wide">
-        Check-in date
-        <input
-          name="targetMoveInDate"
-          type="date"
-          required
-          value={date}
-          onChange={(event) => setDate(event.target.value)}
-        />
-      </label>
-      <label>
-        1. Hostel
-        <select
-          name="preferredHostelId"
-          required
-          value={hostelId}
-          onChange={(event) => {
-            setHostelId(event.target.value);
-            setUnitId("");
-            setCategory("any");
-          }}
-        >
-          <option value="">Select hostel</option>
-          {data.hostels.map((hostel) => (
-            <option key={hostel.id} value={hostel.id}>
-              {hostel.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        2. Unit
-        <select
-          name={kind === "group" ? "preferredUnitId" : "unitFilter"}
-          value={unitId}
-          disabled={!hostelId}
-          required={kind === "group"}
-          onChange={(event) => {
-            setUnitId(event.target.value);
-            setCategory("any");
-          }}
-        >
-          <option value="">
-            {hostelId ? "All units in this hostel" : "Select a hostel first"}
-          </option>
-          {unitOptions.map(([id, code]) => (
-            <option key={id} value={id}>
-              {code}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Room type
-        <select
-          name="roomType"
-          value={roomType}
-          disabled={!hostelId}
-          onChange={(event) => setRoomType(event.target.value)}
-        >
-          <option value="any">Any room type</option>
-          <option value="single">Single</option>
-          <option value="sharing">Sharing</option>
-        </select>
-      </label>
-      {kind === "group" ? (
-        <label className="wide">
-          Whole unit / house
-          <small className="field-note">
-            The unit chosen in step 2 is reserved as a whole for this group.
-          </small>
+        )}
+        <label>
+          Religion
+          <select
+            name="religion"
+            value={religion}
+            onChange={(event) => setReligion(event.target.value)}
+          >
+            <option value="">Select religion</option>
+            {RELIGIONS.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
         </label>
-      ) : (
-        <>
+        {religion === "Others" && (
           <label>
-            Room category
+            Specify religion
+            <input
+              name="religionOther"
+              placeholder="e.g. Sikhism"
+              defaultValue={editingReservation?.religionOther || ""}
+            />
+          </label>
+        )}
+        {kind === "group" && (
+          <>
+            <label>
+              Representative type
+              <select
+                name="representativeType"
+                defaultValue={editingReservation?.representativeType || "person"}
+              >
+                <option value="person">Person</option>
+                <option value="company">Company</option>
+                <option value="institute">Institute</option>
+              </select>
+            </label>
+            <label>
+              Estimated group size
+              <input
+                name="groupSize"
+                type="number"
+                min="1"
+                max="99"
+                defaultValue={editingReservation?.groupSize || 1}
+              />
+            </label>
+          </>
+        )}
+        <div className="form-actions wide">
+          <button type="button" className="secondary" onClick={cancel}>
+            Cancel
+          </button>
+          <button type="button" className="primary" onClick={goToHousing}>
+            Next: Housing information
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: step === 2 ? "contents" : "none" }}>
+        <label className="wide">
+          Check-in date
+          <input
+            name="targetMoveInDate"
+            type="date"
+            required
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+        </label>
+        <label>
+          1. Hostel
+          <select
+            name="preferredHostelId"
+            required
+            value={hostelId}
+            onChange={(event) => {
+              setHostelId(event.target.value);
+              setBlock("");
+              setUnitId("");
+              setCategory("any");
+              setBedSpaceId("");
+            }}
+          >
+            <option value="">Select hostel</option>
+            {data.hostels.map((hostel) => (
+              <option key={hostel.id} value={hostel.id}>
+                {hostel.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Room type
+          <select
+            name="roomType"
+            value={roomType}
+            disabled={!hostelId}
+            onChange={(event) => {
+              setRoomType(event.target.value);
+              setBedSpaceId("");
+            }}
+          >
+            <option value="any">Any room type</option>
+            <option value="single">Single</option>
+            <option value="sharing">Twin</option>
+          </select>
+        </label>
+        {blockOptions.length > 0 && (
+          <label>
+            2. Block
             <select
-              name="roomCategory"
-              value={category}
+              value={block}
               disabled={!hostelId}
-              onChange={(event) => setCategory(event.target.value)}
+              onChange={(event) => {
+                setBlock(event.target.value);
+                setUnitId("");
+                setCategory("any");
+                setBedSpaceId("");
+              }}
             >
-              <option value="any">Any category</option>
-              {categories.map((value) => (
+              <option value="">All blocks in this hostel</option>
+              {blockOptions.map((value) => (
                 <option key={value} value={value}>
-                  Room {value}
+                  {value}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            Bathroom
-            <select
-              name="bathroomType"
-              value={bathroom}
-              disabled={!hostelId}
-              onChange={(event) => setBathroom(event.target.value)}
-            >
-              <option value="any">Any bathroom</option>
-              <option value="attached">Attached</option>
-              <option value="non-attached">Non-attached</option>
-              <option value="unknown">Not set</option>
-            </select>
-          </label>
+        )}
+        {kind === "group" ? (
           <label className="wide">
-            3. Room {hostelId && `— ${options.length} available`}
+            Unit / house to reserve
             <select
-              name="provisionalBedSpaceId"
+              name="preferredUnitId"
+              required
+              value={unitId}
               disabled={!hostelId}
-              defaultValue={
-                editingReservation?.provisionalBedSpaceId ||
-                reservationBed?.id ||
-                ""
-              }
+              onChange={(event) => setUnitId(event.target.value)}
             >
               <option value="">
-                {!hostelId
-                  ? "Select a hostel first"
-                  : options.length
-                    ? "Select an available room"
-                    : "No free rooms match these choices"}
+                {hostelId ? "Select a unit" : "Select a hostel first"}
               </option>
-              {options.map((bed) => (
-                <option key={bed.id} value={bed.id}>
-                  {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(effectiveRate(bed))}`}
+              {unitOptions.map(([id, code]) => (
+                <option key={id} value={id}>
+                  {code}
                 </option>
               ))}
             </select>
             <small className="field-note">
-              Only empty rooms that no other reservation is holding. Reference
-              only; this is not the actual room assignment.
+              The whole unit is reserved for this group.
             </small>
           </label>
-        </>
-      )}
-      <div className="wide total-payable">
-        <div>
-          <small>TOTAL PAYABLE</small>
-          <strong>{money(totalCharges)}</strong>
-          <p>Calculated from the payment breakdown.</p>
+        ) : (
+          <>
+            <label>
+              Room category
+              <select
+                name="roomCategory"
+                value={category}
+                disabled={!hostelId}
+                onChange={(event) => {
+                  setCategory(event.target.value);
+                  setBedSpaceId("");
+                }}
+              >
+                <option value="any">Any category</option>
+                {categories.map((value) => (
+                  <option key={value} value={value}>
+                    Room {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="wide">
+              3. Room available {hostelId && `— ${options.length} available`}
+              <select
+                name="provisionalBedSpaceId"
+                required
+                disabled={!hostelId}
+                value={bedSpaceId}
+                onChange={(event) => setBedSpaceId(event.target.value)}
+              >
+                <option value="">
+                  {!hostelId
+                    ? "Select a hostel first"
+                    : options.length
+                      ? "Select an available room"
+                      : "No free rooms match these choices"}
+                </option>
+                {options.map((bed) => (
+                  <option key={bed.id} value={bed.id}>
+                    {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(effectiveRate(bed))}`}
+                  </option>
+                ))}
+              </select>
+              <small className="field-note">
+                Only shows rooms matching the student&apos;s gender that no
+                other reservation is holding. Reference only; this is not the
+                actual room assignment.
+              </small>
+            </label>
+          </>
+        )}
+        <div className="form-actions wide">
+          <button type="button" className="secondary" onClick={() => setStep(1)}>
+            Back
+          </button>
+          <button type="button" className="primary" onClick={goToPayment}>
+            Next: Payment
+          </button>
         </div>
-        <button type="button" className="secondary" onClick={openCharges}>
-          Edit payment breakdown
-        </button>
       </div>
-      <label>
-        Payment status
-        <select
-          name="paymentStatus"
-          defaultValue={editingReservation?.paymentStatus || "unpaid"}
-        >
-          <option value="unpaid">Unpaid enquiry</option>
-          <option value="admin-fee">Admin fee paid</option>
-          <option value="partial">Partial payment</option>
-          <option value="full">Full payment</option>
-        </select>
-      </label>
-      {!editingReservation && (
+
+      <div style={{ display: step === 3 ? "contents" : "none" }}>
+        <div className="wide total-payable">
+          <div>
+            <small>TOTAL PAYABLE</small>
+            <strong>{money(totalCharges)}</strong>
+            <p>Calculated from the payment breakdown.</p>
+          </div>
+          <button type="button" className="secondary" onClick={openCharges}>
+            Edit payment breakdown
+          </button>
+        </div>
         <label>
-          Initial payment amount
-          <input name="paymentAmount" type="number" min="0" defaultValue="0" />
+          Payment status
+          <select
+            name="paymentStatus"
+            defaultValue={editingReservation?.paymentStatus || "unpaid"}
+          >
+            <option value="unpaid">Unpaid enquiry</option>
+            <option value="admin-fee">Admin fee paid</option>
+            <option value="partial">Partial payment</option>
+            <option value="full">Full payment</option>
+          </select>
         </label>
-      )}
-      <label className="wide">
-        Sales notes
-        <input
-          name="notes"
-          defaultValue={editingReservation?.notes || ""}
-          placeholder="Preferences, special terms or enquiry notes"
-        />
-      </label>
-      <div className="form-actions wide">
-        <button type="button" className="secondary" onClick={cancel}>
-          Cancel
-        </button>
-        <button className="primary" disabled={busy}>
-          {busy ? "Saving..." : "Save reservation"}
-        </button>
+        {!editingReservation && (
+          <label>
+            Initial payment amount
+            <input name="paymentAmount" type="number" min="0" defaultValue="0" />
+          </label>
+        )}
+        <label className="wide">
+          Sales notes
+          <input
+            name="notes"
+            defaultValue={editingReservation?.notes || ""}
+            placeholder="Preferences, special terms or enquiry notes"
+          />
+        </label>
+        <div className="form-actions wide">
+          <button type="button" className="secondary" onClick={() => setStep(2)}>
+            Back
+          </button>
+          <button className="primary" disabled={busy}>
+            {busy ? "Saving..." : "Save reservation"}
+          </button>
+        </div>
       </div>
     </form>
   );

@@ -18,8 +18,8 @@ export type Data = {
   salesPeople: string[];
   parkingLots: Row[];
   parkingRentals: Row[];
-  ownerParkingPayments: Row[];
   schools: Row[];
+  courses: Row[];
   tickets: Row[];
   ticketMessages: Row[];
   meterReadings: Row[];
@@ -37,17 +37,6 @@ export type Data = {
   currentUser: Row;
   importProgress: { assignments: number; expected: number };
 };
-export type View =
-  | "dashboard"
-  | "hostels"
-  | "units"
-  | "students"
-  | "parking"
-  | "maintenance"
-  | "finance"
-  | "announcements"
-  | "reports"
-  | "users";
 export type HostelTab = "availability" | "reservations" | "pricing" | "occupancy";
 
 export const today = new Date().toISOString().slice(0, 10);
@@ -77,6 +66,24 @@ export const RELIGIONS = [
   "Islam",
   "Christianity",
   "Others",
+];
+export const MALAYSIAN_STATES = [
+  "Johor",
+  "Kedah",
+  "Kelantan",
+  "Kuala Lumpur",
+  "Labuan",
+  "Malacca",
+  "Negeri Sembilan",
+  "Pahang",
+  "Penang",
+  "Perak",
+  "Perlis",
+  "Putrajaya",
+  "Sabah",
+  "Sarawak",
+  "Selangor",
+  "Terengganu",
 ];
 export const money = (value: number | null | undefined, cents = false) =>
   value === null || value === undefined || Number.isNaN(Number(value))
@@ -112,6 +119,12 @@ export const bedTypeLabel = (value: string) =>
     : value === "two-single"
       ? "2 single beds"
       : titleCase(value);
+/** "D1-0614" -> "D1"; "16-3" -> "16"; "1201" / "SR23" (no dash) -> "" (no block). */
+export const blockOf = (unitCode: unknown) => {
+  const code = String(unitCode || "");
+  const lastDash = code.lastIndexOf("-");
+  return lastDash > 0 ? code.slice(0, lastDash) : "";
+};
 export const commitsInventory = (row: Row) =>
   row.status === "reserved" && row.inventoryCommitted;
 export const reservationWeight = (row: Row, data: Data) =>
@@ -126,14 +139,46 @@ export const reservationWeight = (row: Row, data: Data) =>
     : 1;
 export const formValues = (event: FormEvent<HTMLFormElement>) =>
   Object.fromEntries(new FormData(event.currentTarget).entries());
+// Shrinks a photo to a max 1600px edge and re-encodes it as JPEG at 75%
+// quality before it ever reaches the network — most phone photos land at
+// a fraction of their original size. Animated GIFs are left untouched
+// (re-encoding would collapse them to a single frame), and any decode
+// failure (e.g. an unsupported format) just falls back to the original
+// file rather than blocking the upload.
+async function compressImageFile(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif")
+    return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxEdge = 1600;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.75),
+    );
+    if (!blob || blob.size >= file.size) return file;
+    const compressedName = file.name.replace(/\.[^./]+$/, "") + ".jpg";
+    return new File([blob], compressedName, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
 export const uploadAttachment = async (
   file: File,
   contextType: string,
   recordId: number,
   uploadedBy = "Administrator",
 ) => {
+  const upload = await compressImageFile(file);
   const form = new FormData();
-  form.set("file", file);
+  form.set("file", upload);
   form.set("contextType", contextType);
   form.set("recordId", String(recordId));
   form.set("uploadedBy", uploadedBy);
@@ -240,26 +285,40 @@ export function SearchSelect({
   );
 }
 
-// Nationality / hometown / race / religion fields shared by the reservation
-// form and both student create/edit forms. Renders inline inside the
-// caller's own <form> (it has no <form> or submit of its own) — the extra
-// "specify" inputs only exist in the DOM while International/Others is
-// selected, so `formValues()` naturally omits them otherwise. Pass a `key`
-// that changes with the record being edited (e.g. `key={student.id}`) so
-// the internal show/hide state resets when switching records; a
-// freshly-mounted create form needs no key since mounting already starts
-// state fresh.
+// Digits typed into an IC field auto-format as 010101-01-0101 (YYMMDD-PB-NNNN)
+// as the user types; passport numbers are left as free text since they have
+// no fixed shape.
+const formatIC = (raw: string) => {
+  const digits = raw.replace(/\D/g, "").slice(0, 12);
+  return [digits.slice(0, 6), digits.slice(6, 8), digits.slice(8, 12)]
+    .filter(Boolean)
+    .join("-");
+};
+
+// Identity number / nationality / hometown / race / religion fields shared
+// by the reservation form and both student create/edit forms. Renders
+// inline inside the caller's own <form> (it has no <form> or submit of its
+// own) — the extra "specify" inputs only exist in the DOM while
+// International/Others/Malaysian is selected, so `formValues()` naturally
+// omits them otherwise. Pass a `key` that changes with the record being
+// edited (e.g. `key={student.id}`) so the internal show/hide state resets
+// when switching records; a freshly-mounted create form needs no key since
+// mounting already starts state fresh.
 export function DemographicFields({
+  identityNo: initialIdentityNo = "",
   nationality: initialNationality = "",
   nationalityOther: initialNationalityOther = "",
+  state: initialState = "",
   hometown: initialHometown = "",
   race: initialRace = "",
   raceOther: initialRaceOther = "",
   religion: initialReligion = "",
   religionOther: initialReligionOther = "",
 }: {
+  identityNo?: string;
   nationality?: string;
   nationalityOther?: string;
+  state?: string;
   hometown?: string;
   race?: string;
   raceOther?: string;
@@ -269,6 +328,10 @@ export function DemographicFields({
   const [nationality, setNationality] = useState(initialNationality);
   const [race, setRace] = useState(initialRace);
   const [religion, setReligion] = useState(initialReligion);
+  const [identityNo, setIdentityNo] = useState(
+    nationality === "International" ? initialIdentityNo : formatIC(initialIdentityNo),
+  );
+  const isInternational = nationality === "International";
   return (
     <>
       <label>
@@ -284,24 +347,52 @@ export function DemographicFields({
           ))}
         </select>
       </label>
-      {nationality === "International" && (
-        <label>
-          Specify country
-          <input
-            name="nationalityOther"
-            placeholder="e.g. Indonesia"
-            defaultValue={initialNationalityOther}
-          />
-        </label>
-      )}
       <label>
-        Hometown
+        {isInternational ? "Passport" : "IC"}
         <input
-          name="hometown"
-          placeholder="e.g. Kuala Lumpur"
-          defaultValue={initialHometown}
+          name="identityNo"
+          placeholder={isInternational ? "e.g. A1234567" : "e.g. 010101-01-0101"}
+          value={identityNo}
+          onChange={(event) =>
+            setIdentityNo(
+              isInternational
+                ? event.target.value
+                : formatIC(event.target.value),
+            )
+          }
         />
       </label>
+      {nationality === "Malaysian" && (
+        <label>
+          State
+          <select name="state" defaultValue={initialState}>
+            <option value="">Select state</option>
+            {MALAYSIAN_STATES.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {isInternational && (
+        <>
+          <label>
+            Specify country
+            <input
+              name="nationalityOther"
+              placeholder="e.g. Indonesia"
+              defaultValue={initialNationalityOther}
+            />
+          </label>
+          <label>
+            Hometown
+            <input
+              name="hometown"
+              placeholder="e.g. Jakarta"
+              defaultValue={initialHometown}
+            />
+          </label>
+        </>
+      )}
       <label>
         Race
         <select
@@ -525,20 +616,27 @@ export function ParkingRentalForm({
         <input name="carModel" />
       </label>
       <label>
-        Monthly rental
-        <input name="monthlyRental" type="number" min="0" required />
+        Rental frequency
+        <select
+          name="billingFrequency"
+          value={billingFrequency}
+          onChange={(event) => setBillingFrequency(event.target.value)}
+        >
+          <option value="monthly">Monthly</option>
+          <option value="annually">Annually</option>
+        </select>
       </label>
       <label>
         Deposit
         <input name="depositAmount" type="number" min="0" />
       </label>
       <label>
-        Start date
-        <input name="startDate" type="date" required />
+        {billingFrequency === "annually" ? "Annual rental" : "Monthly rental"}
+        <input name="monthlyRental" type="number" min="0" required />
       </label>
       <label>
-        End date
-        <input name="endDate" type="date" />
+        Start date
+        <input name="startDate" type="date" required />
       </label>
       {tenantType === "outside" && (
         <>
@@ -546,29 +644,6 @@ export function ParkingRentalForm({
             Paid until
             <input name="paidUntil" type="date" />
           </label>
-          <label>
-            Billing frequency
-            <select
-              name="billingFrequency"
-              value={billingFrequency}
-              onChange={(event) => setBillingFrequency(event.target.value)}
-            >
-              <option value="monthly">Monthly</option>
-              <option value="package">Package / several months</option>
-            </select>
-          </label>
-          {billingFrequency === "package" && (
-            <label>
-              Package length (months)
-              <input
-                name="packageMonths"
-                type="number"
-                min="2"
-                max="24"
-                defaultValue="2"
-              />
-            </label>
-          )}
           <label>
             Next payment due
             <input name="nextDueDate" type="date" />

@@ -120,6 +120,7 @@ export const studentProfiles = pgTable("student_profiles", {
   religionOther: text("religion_other").notNull().default(""),
   nationality: text("nationality").notNull().default(""),
   nationalityOther: text("nationality_other").notNull().default(""),
+  state: text("state").notNull().default(""),
   hometown: text("hometown").notNull().default(""),
   course: text("course").notNull().default(""),
   school: text("school").notNull().default(""),
@@ -181,8 +182,11 @@ export const reservations = pgTable("reservations", {
   roomCategory: text("room_category").notNull().default("any"),
   roomType: text("room_type").notNull().default("any"),
   bathroomType: text("bathroom_type").notNull().default("any"),
+  contactNumber: text("contact_number").notNull().default(""),
+  email: text("email").notNull().default(""),
   nationality: text("nationality").notNull().default(""),
   nationalityOther: text("nationality_other").notNull().default(""),
+  state: text("state").notNull().default(""),
   hometown: text("hometown").notNull().default(""),
   race: text("race").notNull().default(""),
   raceOther: text("race_other").notNull().default(""),
@@ -358,29 +362,21 @@ export const parkingRentals = pgTable("parking_rentals", {
   notes: text("notes").notNull().default(""),
 });
 
-export const ownerParkingPayments = pgTable("owner_parking_payments", {
+export const schools = pgTable("schools", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
-  unitId: bigint("unit_id", { mode: "number" })
-    .notNull()
-    .references(() => hostelUnits.id),
-  parkingLotId: bigint("parking_lot_id", { mode: "number" }).references(
-    () => parkingLots.id,
-  ),
-  period: text("period").notNull().default(""),
-  amount: doublePrecision("amount").notNull().default(0),
-  paymentDate: text("payment_date").notNull(),
-  method: text("method").notNull().default("bank-transfer"),
-  reference: text("reference").notNull().default(""),
-  status: text("status").notNull().default("paid"),
-  remarks: text("remarks").notNull().default(""),
+  name: text("name").notNull().unique(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
 });
 
-export const schools = pgTable("schools", {
+// `level` is one of: diploma | degree | foundation | other — grouping the
+// course picker so staff can find a course by programme level instead of
+// typing the full name from memory.
+export const courses = pgTable("courses", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   name: text("name").notNull().unique(),
+  level: text("level").notNull().default("other"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

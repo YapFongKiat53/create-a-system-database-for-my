@@ -17,13 +17,13 @@ import {
   billingInvoices,
   billingItems,
   billingPaymentRecords,
+  courses,
   generalCosts,
   hostelProperties,
   hostelRooms,
   hostelUnits,
   maintenanceTickets,
   meterReadings,
-  ownerParkingPayments,
   parkingLots,
   parkingRentals,
   reservationCharges,
@@ -204,6 +204,298 @@ function fullUnitAddress(
   return [number, hostelAddress].filter(Boolean).join(", ");
 }
 
+// Narrow refresh scopes for GET /api/system?modules=... — used after a save()
+// that only touches these tables, so the client doesn't have to re-run the
+// full ~30-query load (see db/index.ts's getClient() comment for why that
+// full load is expensive). Each scope is self-contained: verified against
+// every action handler that can trigger it that it never writes outside the
+// tables it queries here. Deliberately NOT covering units/students/finance/
+// reservations/hostel-rates/meter-readings — those actions can ripple into
+// bedSpaces occupancy or other fields (e.g. a meter reading updates
+// hostelRooms.meterSerial, which is embedded in the bedSpaces payload) that
+// this scoped path doesn't refresh, so they keep using the full,
+// already-correct reload rather than risk a stale-data bug for speed.
+// Tenant-role requests always fall through to the full load instead (see
+// call site) since the tenant-scoped row filtering below is not replicated
+// here.
+const SCOPED_MODULE_KEYS = [
+  "parking",
+  "maintenance-tickets",
+  "announcements",
+  "users",
+  "schools-courses",
+  "attachments",
+] as const;
+type ScopedModuleKey = (typeof SCOPED_MODULE_KEYS)[number];
+
+async function loadScopedModules(
+  db: ReturnType<typeof getDb>,
+  scopes: Set<ScopedModuleKey>,
+) {
+  const result: Record<string, unknown> = {};
+  const tasks: Promise<void>[] = [];
+
+  if (scopes.has("parking")) {
+    tasks.push(
+      (async () => {
+        const [lots, rentals] = await Promise.all([
+          db
+            .select({
+              id: parkingLots.id,
+              hostelId: parkingLots.hostelId,
+              hostelName: hostelProperties.name,
+              unitId: parkingLots.unitId,
+              unitCode: hostelUnits.unitCode,
+              lotNumber: parkingLots.lotNumber,
+              status: parkingLots.status,
+              notes: parkingLots.notes,
+            })
+            .from(parkingLots)
+            .innerJoin(
+              hostelProperties,
+              eq(parkingLots.hostelId, hostelProperties.id),
+            )
+            .leftJoin(hostelUnits, eq(parkingLots.unitId, hostelUnits.id))
+            .orderBy(asc(hostelProperties.name), asc(parkingLots.lotNumber)),
+          db
+            .select({
+              id: parkingRentals.id,
+              parkingLotId: parkingRentals.parkingLotId,
+              studentId: parkingRentals.studentId,
+              tenantType: parkingRentals.tenantType,
+              tenantName: parkingRentals.tenantName,
+              contactNumber: parkingRentals.contactNumber,
+              unitNumber: parkingRentals.unitNumber,
+              carPlateNumber: parkingRentals.carPlateNumber,
+              carModel: parkingRentals.carModel,
+              monthlyRental: parkingRentals.monthlyRental,
+              depositAmount: parkingRentals.depositAmount,
+              startDate: parkingRentals.startDate,
+              endDate: parkingRentals.endDate,
+              paidUntil: parkingRentals.paidUntil,
+              billingFrequency: parkingRentals.billingFrequency,
+              packageMonths: parkingRentals.packageMonths,
+              nextDueDate: parkingRentals.nextDueDate,
+              paymentStatus: parkingRentals.paymentStatus,
+              status: parkingRentals.status,
+              notes: parkingRentals.notes,
+              lotNumber: parkingLots.lotNumber,
+              hostelName: hostelProperties.name,
+            })
+            .from(parkingRentals)
+            .innerJoin(
+              parkingLots,
+              eq(parkingRentals.parkingLotId, parkingLots.id),
+            )
+            .innerJoin(
+              hostelProperties,
+              eq(parkingLots.hostelId, hostelProperties.id),
+            )
+            .orderBy(desc(parkingRentals.id)),
+        ]);
+        result.parkingLots = lots;
+        result.parkingRentals = rentals;
+      })(),
+    );
+  }
+
+  if (scopes.has("maintenance-tickets")) {
+    tasks.push(
+      (async () => {
+        const [tickets, messages, categories, costs] = await Promise.all([
+          db
+            .select({
+              id: maintenanceTickets.id,
+              ticketNo: maintenanceTickets.ticketNo,
+              studentId: maintenanceTickets.studentId,
+              studentName: studentProfiles.fullName,
+              hostelId: maintenanceTickets.hostelId,
+              hostelName: hostelProperties.name,
+              unitId: maintenanceTickets.unitId,
+              unitCode: hostelUnits.unitCode,
+              roomId: maintenanceTickets.roomId,
+              roomLabel: hostelRooms.roomLabel,
+              category: maintenanceTickets.category,
+              subcategory: maintenanceTickets.subcategory,
+              subject: maintenanceTickets.subject,
+              description: maintenanceTickets.description,
+              priority: maintenanceTickets.priority,
+              status: maintenanceTickets.status,
+              submittedByType: maintenanceTickets.submittedByType,
+              assignedTo: maintenanceTickets.assignedTo,
+              attendedAt: maintenanceTickets.attendedAt,
+              completedAt: maintenanceTickets.completedAt,
+              costResponsibility: maintenanceTickets.costResponsibility,
+              estimatedCost: maintenanceTickets.estimatedCost,
+              actualCost: maintenanceTickets.actualCost,
+              studentCharge: maintenanceTickets.studentCharge,
+              createdAt: maintenanceTickets.createdAt,
+              updatedAt: maintenanceTickets.updatedAt,
+            })
+            .from(maintenanceTickets)
+            .leftJoin(
+              studentProfiles,
+              eq(maintenanceTickets.studentId, studentProfiles.id),
+            )
+            .leftJoin(
+              hostelProperties,
+              eq(maintenanceTickets.hostelId, hostelProperties.id),
+            )
+            .leftJoin(
+              hostelUnits,
+              eq(maintenanceTickets.unitId, hostelUnits.id),
+            )
+            .leftJoin(
+              hostelRooms,
+              eq(maintenanceTickets.roomId, hostelRooms.id),
+            )
+            .orderBy(desc(maintenanceTickets.id)),
+          db.select().from(ticketMessages).orderBy(asc(ticketMessages.createdAt)),
+          db
+            .select()
+            .from(ticketCategories)
+            .orderBy(
+              asc(ticketCategories.sortOrder),
+              asc(ticketCategories.category),
+            ),
+          db
+            .select({
+              id: generalCosts.id,
+              costDate: generalCosts.costDate,
+              hostelId: generalCosts.hostelId,
+              hostelName: hostelProperties.name,
+              unitId: generalCosts.unitId,
+              unitCode: hostelUnits.unitCode,
+              ticketId: generalCosts.ticketId,
+              costType: generalCosts.costType,
+              description: generalCosts.description,
+              responsibility: generalCosts.responsibility,
+              amount: generalCosts.amount,
+              studentCharge: generalCosts.studentCharge,
+              notes: generalCosts.notes,
+              createdBy: generalCosts.createdBy,
+              createdAt: generalCosts.createdAt,
+            })
+            .from(generalCosts)
+            .leftJoin(
+              hostelProperties,
+              eq(generalCosts.hostelId, hostelProperties.id),
+            )
+            .leftJoin(hostelUnits, eq(generalCosts.unitId, hostelUnits.id))
+            .orderBy(desc(generalCosts.costDate), desc(generalCosts.id)),
+        ]);
+        result.tickets = tickets;
+        result.ticketMessages = messages;
+        result.ticketCategories = categories;
+        result.generalCosts = costs;
+      })(),
+    );
+  }
+
+  if (scopes.has("announcements")) {
+    tasks.push(
+      (async () => {
+        result.announcements = await db
+          .select({
+            id: announcements.id,
+            title: announcements.title,
+            body: announcements.body,
+            audienceType: announcements.audienceType,
+            hostelId: announcements.hostelId,
+            hostelName: hostelProperties.name,
+            blockCode: announcements.blockCode,
+            unitId: announcements.unitId,
+            unitCode: hostelUnits.unitCode,
+            priority: announcements.priority,
+            status: announcements.status,
+            pinned: announcements.pinned,
+            publishAt: announcements.publishAt,
+            expiresAt: announcements.expiresAt,
+            createdBy: announcements.createdBy,
+            createdAt: announcements.createdAt,
+          })
+          .from(announcements)
+          .leftJoin(
+            hostelProperties,
+            eq(announcements.hostelId, hostelProperties.id),
+          )
+          .leftJoin(hostelUnits, eq(announcements.unitId, hostelUnits.id))
+          .orderBy(desc(announcements.pinned), desc(announcements.id));
+      })(),
+    );
+  }
+
+  if (scopes.has("users")) {
+    tasks.push(
+      (async () => {
+        const [roles, users, permissions, reminders] = await Promise.all([
+          db.select().from(appRoles).orderBy(asc(appRoles.id)),
+          db
+            .select({
+              id: appUsers.id,
+              email: appUsers.email,
+              displayName: appUsers.displayName,
+              roleId: appUsers.roleId,
+              roleKey: appRoles.roleKey,
+              roleName: appRoles.name,
+              studentId: appUsers.studentId,
+              studentName: studentProfiles.fullName,
+              status: appUsers.status,
+              lastLoginAt: appUsers.lastLoginAt,
+              createdAt: appUsers.createdAt,
+            })
+            .from(appUsers)
+            .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+            .leftJoin(
+              studentProfiles,
+              eq(appUsers.studentId, studentProfiles.id),
+            )
+            .orderBy(asc(appUsers.displayName)),
+          db
+            .select()
+            .from(rolePermissions)
+            .orderBy(asc(rolePermissions.roleId), asc(rolePermissions.moduleKey)),
+          db
+            .select()
+            .from(reminderTemplates)
+            .orderBy(asc(reminderTemplates.dayOfMonth)),
+        ]);
+        result.roles = roles;
+        result.users = users;
+        result.rolePermissions = permissions;
+        result.reminderTemplates = reminders;
+      })(),
+    );
+  }
+
+  if (scopes.has("schools-courses")) {
+    tasks.push(
+      (async () => {
+        const [schoolRows, courseRows] = await Promise.all([
+          db.select().from(schools).orderBy(asc(schools.name)),
+          db.select().from(courses).orderBy(asc(courses.name)),
+        ]);
+        result.schools = schoolRows;
+        result.courses = courseRows;
+      })(),
+    );
+  }
+
+  if (scopes.has("attachments")) {
+    tasks.push(
+      (async () => {
+        result.attachments = await db
+          .select()
+          .from(storedAttachments)
+          .orderBy(desc(storedAttachments.id));
+      })(),
+    );
+  }
+
+  await Promise.all(tasks);
+  return result;
+}
+
 function moduleForAction(action: string) {
   if (/^(reservation|bulk-room-price|promotion-end)/.test(action))
     return "hostels-sales";
@@ -211,7 +503,7 @@ function moduleForAction(action: string) {
   if (/^bed-/.test(action)) return "units-general";
   if (/^(unit-|access-card|room-|service-)/.test(action))
     return action === "unit-owner" ? "units-owner" : "units-general";
-  if (/^(student-|school-)/.test(action)) return "students";
+  if (/^(student-|school-|course-)/.test(action)) return "students";
   if (/^parking-/.test(action)) return "parking";
   if (/^(ticket-|meter-|general-cost)/.test(action)) return "maintenance";
   if (/^billing-/.test(action)) return "finance";
@@ -802,6 +1094,27 @@ export async function GET(request: Request) {
       await applyLatePaymentCharges(seedDb);
       lateChargesAppliedOn = lateChargeDate;
     }
+    // Scoped refresh: after a save() that only touched a few tables, the
+    // client asks for just those via ?modules=a,b instead of the full
+    // ~30-query load below. Tenants always fall through to the full load
+    // since the row-level filtering further down isn't replicated for the
+    // scoped path. See loadScopedModules()'s comment for what's covered.
+    const requestedModules = new URL(request.url).searchParams.get("modules");
+    if (requestedModules && currentUser.roleKey !== "tenant") {
+      const scopes = new Set(
+        requestedModules
+          .split(",")
+          .map((key) => key.trim())
+          .filter((key): key is ScopedModuleKey =>
+            (SCOPED_MODULE_KEYS as readonly string[]).includes(key),
+          ),
+      );
+      if (scopes.size > 0) {
+        const scopedDb = getDb();
+        const scopedResult = await loadScopedModules(scopedDb, scopes);
+        return Response.json(scopedResult);
+      }
+    }
     const db = getDb({ max: 20 });
     const [
       rawBeds,
@@ -833,8 +1146,8 @@ export async function GET(request: Request) {
       userRows,
       permissionRows,
       reminderRows,
-      ownerParkingPaymentRows,
       schoolRows,
+      courseRows,
     ] = await Promise.all([
       db
         .select({
@@ -985,6 +1298,7 @@ export async function GET(request: Request) {
           religionOther: studentProfiles.religionOther,
           nationality: studentProfiles.nationality,
           nationalityOther: studentProfiles.nationalityOther,
+          state: studentProfiles.state,
           hometown: studentProfiles.hometown,
           course: studentProfiles.course,
           school: studentProfiles.school,
@@ -1318,37 +1632,8 @@ export async function GET(request: Request) {
         .select()
         .from(reminderTemplates)
         .orderBy(asc(reminderTemplates.dayOfMonth)),
-      db
-        .select({
-          id: ownerParkingPayments.id,
-          unitId: ownerParkingPayments.unitId,
-          parkingLotId: ownerParkingPayments.parkingLotId,
-          period: ownerParkingPayments.period,
-          amount: ownerParkingPayments.amount,
-          paymentDate: ownerParkingPayments.paymentDate,
-          method: ownerParkingPayments.method,
-          reference: ownerParkingPayments.reference,
-          status: ownerParkingPayments.status,
-          remarks: ownerParkingPayments.remarks,
-          createdAt: ownerParkingPayments.createdAt,
-          unitCode: hostelUnits.unitCode,
-          ownerName: hostelUnits.ownerName,
-          hostelId: hostelProperties.id,
-          hostelName: hostelProperties.name,
-          lotNumber: parkingLots.lotNumber,
-        })
-        .from(ownerParkingPayments)
-        .innerJoin(hostelUnits, eq(ownerParkingPayments.unitId, hostelUnits.id))
-        .innerJoin(
-          hostelProperties,
-          eq(hostelUnits.hostelId, hostelProperties.id),
-        )
-        .leftJoin(
-          parkingLots,
-          eq(ownerParkingPayments.parkingLotId, parkingLots.id),
-        )
-        .orderBy(desc(ownerParkingPayments.id)),
       db.select().from(schools).orderBy(asc(schools.name)),
+      db.select().from(courses).orderBy(asc(courses.name)),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1465,8 +1750,8 @@ export async function GET(request: Request) {
       salesPeople,
       parkingLots: parkingLotRows,
       parkingRentals: parkingRentalRows,
-      ownerParkingPayments: ownerParkingPaymentRows,
       schools: schoolRows,
+      courses: courseRows,
       tickets: ticketRows,
       ticketMessages: messageRows,
       meterReadings: readingRows,
@@ -1676,7 +1961,7 @@ export async function POST(request: Request) {
         ? "canDelete"
         : /verify|approve/.test(action)
           ? "canApprove"
-          : /create|add|^reservation$|parking-lot|parking-rental|parking-owner-payment|announcement$|meter-reading|general-cost|billing-payment/.test(
+          : /create|add|^reservation$|parking-lot|parking-rental|announcement$|meter-reading|general-cost|billing-payment/.test(
                 action,
               )
             ? "canCreate"
@@ -2087,8 +2372,11 @@ export async function POST(request: Request) {
         roomCategory: asText(body.roomCategory, "any"),
         roomType: asText(body.roomType, "any"),
         bathroomType: asText(body.bathroomType, "any"),
+        contactNumber: asText(body.contactNumber),
+        email: asText(body.email),
         nationality: asText(body.nationality),
         nationalityOther: asText(body.nationalityOther),
+        state: asText(body.state),
         hometown: asText(body.hometown),
         race: asText(body.race),
         raceOther: asText(body.raceOther),
@@ -2266,8 +2554,8 @@ export async function POST(request: Request) {
         if (!bedId) throw new Error("Select the actual room code manually");
         const key = `reservation:${reservationId}`;
         await db.execute(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, gender, nationality, nationality_other, hometown, race, race_other, religion, religion_other, salesperson, status)
-          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
+          INSERT INTO student_profiles (source_key, student_code, full_name, gender, contact_number, email, nationality, nationality_other, hometown, race, race_other, religion, religion_other, salesperson, status)
+          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.contactNumber}, ${reservation.email}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
           ON CONFLICT DO NOTHING
         `);
         const student = (
@@ -2310,6 +2598,7 @@ export async function POST(request: Request) {
           religionOther: asText(body.religionOther),
           nationality: asText(body.nationality),
           nationalityOther: asText(body.nationalityOther),
+          state: asText(body.state),
           hometown: asText(body.hometown),
           course: asText(body.course),
           school: asText(body.school),
@@ -2366,8 +2655,8 @@ export async function POST(request: Request) {
       if (!asText(body.fullName)) throw new Error("Full name is required");
       const result = (
         await db.execute<{ id: number }>(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, race_other, religion, religion_other, nationality, nationality_other, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status)
-          VALUES (${`manual:${Date.now()}`}, ${asText(body.studentCode)}, ${asText(body.fullName)}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asNullableText(body.dateOfBirth)}, ${asText(body.gender, "unspecified")}, ${asText(body.race)}, ${asText(body.raceOther)}, ${asText(body.religion)}, ${asText(body.religionOther)}, ${asText(body.nationality)}, ${asText(body.nationalityOther)}, ${asText(body.hometown)}, ${asText(body.course)}, ${asText(body.school)}, ${asText(body.applicationFormNo)}, ${asText(body.receiptNo)}, ${asText(body.salesperson)}, ${asText(body.agency)}, ${asText(body.remarks)}, ${asText(body.profileStatus, "active")})
+          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, race_other, religion, religion_other, nationality, nationality_other, state, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status)
+          VALUES (${`manual:${Date.now()}`}, ${asText(body.studentCode)}, ${asText(body.fullName)}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asNullableText(body.dateOfBirth)}, ${asText(body.gender, "unspecified")}, ${asText(body.race)}, ${asText(body.raceOther)}, ${asText(body.religion)}, ${asText(body.religionOther)}, ${asText(body.nationality)}, ${asText(body.nationalityOther)}, ${asText(body.state)}, ${asText(body.hometown)}, ${asText(body.course)}, ${asText(body.school)}, ${asText(body.applicationFormNo)}, ${asText(body.receiptNo)}, ${asText(body.salesperson)}, ${asText(body.agency)}, ${asText(body.remarks)}, ${asText(body.profileStatus, "active")})
           RETURNING id
         `)
       )[0];
@@ -2383,6 +2672,28 @@ export async function POST(request: Request) {
           sql`UPDATE bed_spaces SET status='occupied', updated_at=${nowIso()} WHERE id=${bedId}`,
         );
       }
+    } else if (action === "student-assign") {
+      const studentId = asNumber(body.studentId);
+      const bedId = asNumber(body.bedSpaceId);
+      if (!studentId || !bedId)
+        throw new Error("Student and room are required");
+      const bed = (
+        await db.select().from(bedSpaces).where(eq(bedSpaces.id, bedId))
+      )[0];
+      if (!bed) throw new Error("Room not found");
+      if (bed.status !== "vacant")
+        throw new Error("Selected room is no longer vacant");
+      const key = `assign:${studentId}:${Date.now()}`;
+      const now = nowIso();
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, parking_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, status)
+          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asNullableNumber(body.parkingDeposit)}, ${asText(body.salesperson)}, ${asNullableText(body.checkInDate)}, ${asNullableText(body.leaseStartDate)}, ${asNullableText(body.leaseEndDate)}, 'active')
+        `);
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status='occupied', updated_at=${now} WHERE id=${bedId}`,
+        );
+      });
     } else if (action === "student-move-out") {
       const studentId = asNumber(body.studentId);
       if (!studentId) throw new Error("Student is required");
@@ -2446,6 +2757,22 @@ export async function POST(request: Request) {
     } else if (action === "school-delete") {
       if (!body.schoolId) throw new Error("School is required");
       await db.delete(schools).where(eq(schools.id, asNumber(body.schoolId)));
+    } else if (action === "course-create") {
+      if (!asText(body.name)) throw new Error("Course name is required");
+      await db
+        .insert(courses)
+        .values({ name: asText(body.name), level: asText(body.level, "other") })
+        .onConflictDoNothing();
+    } else if (action === "course-update") {
+      if (!body.courseId || !asText(body.name))
+        throw new Error("Course and name are required");
+      await db
+        .update(courses)
+        .set({ name: asText(body.name), level: asText(body.level, "other") })
+        .where(eq(courses.id, asNumber(body.courseId)));
+    } else if (action === "course-delete") {
+      if (!body.courseId) throw new Error("Course is required");
+      await db.delete(courses).where(eq(courses.id, asNumber(body.courseId)));
     } else if (action === "student-rate-change") {
       if (!body.assignmentId || !body.effectiveDate)
         throw new Error("Assignment and effective date are required");
@@ -2613,20 +2940,6 @@ export async function POST(request: Request) {
           .update(parkingLots)
           .set({ status: "available" })
           .where(eq(parkingLots.id, rental.parkingLotId));
-    } else if (action === "parking-owner-payment") {
-      if (!body.unitId || !asText(body.paymentDate))
-        throw new Error("Owner unit and payment date are required");
-      await db.insert(ownerParkingPayments).values({
-        unitId: asNumber(body.unitId),
-        parkingLotId: asNullableNumber(body.parkingLotId),
-        period: asText(body.period),
-        amount: asNumber(body.amount),
-        paymentDate: asText(body.paymentDate),
-        method: asText(body.method, "bank-transfer"),
-        reference: asText(body.reference),
-        status: asText(body.status, "paid"),
-        remarks: asText(body.remarks),
-      });
     } else if (action === "ticket-create") {
       if (currentUser.roleKey === "tenant") {
         if (!currentUser.studentId)
@@ -2909,9 +3222,16 @@ export async function POST(request: Request) {
           asText(body.cutoffDate),
           Number(assignment.electricity_rate || 0),
         );
+        // Monthly rentals bill every cycle; annual ones only bill the cycle
+        // whose month matches the anniversary of their start date.
         const parking = (
           await db.execute<{ amount: number }>(
-            sql`SELECT COALESCE(SUM(monthly_rental),0) amount FROM parking_rentals WHERE student_id=${assignment.student_id} AND status='active'`,
+            sql`SELECT COALESCE(SUM(monthly_rental),0) amount FROM parking_rentals
+                WHERE student_id=${assignment.student_id} AND status='active'
+                AND (
+                  billing_frequency='monthly'
+                  OR (billing_frequency IN ('annually','package') AND EXTRACT(MONTH FROM start_date::date)=EXTRACT(MONTH FROM ${asText(body.cutoffDate)}::date))
+                )`,
           )
         )[0];
         const extra = (

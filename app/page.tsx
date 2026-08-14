@@ -1,11 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import SystemApp from "./SystemApp";
+import { useEffect } from "react";
 
 export default function Home() {
-  const [allowed, setAllowed] = useState(false);
-
   useEffect(() => {
     let cancelled = false;
     fetch("/api/auth", { cache: "no-store" })
@@ -17,7 +14,7 @@ export default function Home() {
         if (!result.user) window.location.replace("/login");
         else if (result.user.roleKey === "tenant")
           window.location.replace("/student");
-        else setAllowed(true);
+        else window.location.replace("/dashboard");
       })
       .catch(() => !cancelled && window.location.replace("/login"));
     return () => {
@@ -25,13 +22,11 @@ export default function Home() {
     };
   }, []);
 
-  if (!allowed)
-    return (
-      <div className="login-shell">
-        <div className="login-card">
-          <p className="login-checking">Checking your session...</p>
-        </div>
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <p className="login-checking">Checking your session...</p>
       </div>
-    );
-  return <SystemApp />;
+    </div>
+  );
 }

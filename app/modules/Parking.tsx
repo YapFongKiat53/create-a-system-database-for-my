@@ -5,14 +5,147 @@ import { useState } from "react";
 import {
   Modal,
   ParkingRentalForm,
-  SearchSelect,
   Stat,
+  blockOf,
   dateLabel,
   formValues,
   money,
   titleCase,
 } from "./shared";
 import type { Data, Row } from "./shared";
+
+// Lot-number formats differ per hostel (Damai: "Parking 248", Nadayu:
+// "Parking L3-427"), so we hint via a per-hostel example instead of forcing
+// a rigid pattern.
+const LOT_NUMBER_HINTS: Record<string, string> = {
+  DAM: "e.g. Parking 248",
+  NDY: "e.g. Parking L3-427",
+};
+
+function AddParkingLotForm({
+  data,
+  save,
+  busy,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  const [hostelId, setHostelId] = useState("");
+  const [block, setBlock] = useState("");
+  const [unitId, setUnitId] = useState("");
+
+  const hostel = data.hostels.find((h) => String(h.id) === hostelId);
+  const hostelUnits = data.units.filter(
+    (u) => !hostelId || String(u.hostelId) === hostelId,
+  );
+  const blockOptions = [
+    ...new Set(hostelUnits.map((u) => blockOf(u.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const blockedUnits = hostelUnits.filter(
+    (u) => !block || blockOf(u.unitCode) === block,
+  );
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          { action: "parking-lot", ...formValues(e) },
+          "Parking lot added",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <label>
+        Hostel
+        <select
+          name="hostelId"
+          required
+          value={hostelId}
+          onChange={(event) => {
+            setHostelId(event.target.value);
+            setBlock("");
+            setUnitId("");
+          }}
+        >
+          <option value="">Select hostel</option>
+          {data.hostels.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Lot number
+        <input
+          name="lotNumber"
+          required
+          placeholder={LOT_NUMBER_HINTS[String(hostel?.code || "")] || "e.g. Parking 101"}
+        />
+      </label>
+      {blockOptions.length > 0 && (
+        <label>
+          Block
+          <select
+            value={block}
+            disabled={!hostelId}
+            onChange={(event) => {
+              setBlock(event.target.value);
+              setUnitId("");
+            }}
+          >
+            <option value="">All blocks in this hostel</option>
+            {blockOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label>
+        Unit
+        <select
+          name="unitId"
+          value={unitId}
+          disabled={!hostelId}
+          onChange={(event) => setUnitId(event.target.value)}
+        >
+          <option value="">Common / hostel lot</option>
+          {blockedUnits.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.unitCode}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Status
+        <select name="status">
+          <option value="available">Available</option>
+          <option value="reserved">Reserved</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </label>
+      <label className="wide">
+        Notes
+        <input name="notes" placeholder="e.g. Notes about the lot" />
+      </label>
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy}>
+          Add lot
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export function ParkingModule({
   data,
@@ -80,10 +213,6 @@ export function ParkingModule({
       });
       return rentalSortDir === "asc" ? result : -result;
     });
-  const filteredOwnerPayments = data.ownerParkingPayments.filter(
-    (payment) =>
-      hostelFilter === "all" || String(payment.hostelId || "") === hostelFilter,
-  );
   return (
     <>
       <section className="intro compact-intro">
@@ -98,21 +227,6 @@ export function ParkingModule({
         <div className="button-row">
           <button className="secondary" onClick={() => setModal("lot")}>
             + Add parking lot
-          </button>
-          <button
-            className="secondary"
-            onClick={() => setModal("owner-payment")}
-          >
-            + Owner payment
-          </button>
-          <button
-            className="primary"
-            onClick={() => {
-              setReservingLotId(null);
-              setModal("rental");
-            }}
-          >
-            + New rental
           </button>
         </div>
       </section>
@@ -235,8 +349,9 @@ export function ParkingModule({
                     <small>{money(r.depositAmount)} deposit</small>
                   </td>
                   <td>
-                    {r.billingFrequency === "package"
-                      ? `${r.packageMonths || 2}-month package`
+                    {r.billingFrequency === "package" ||
+                    r.billingFrequency === "annually"
+                      ? "Annually"
                       : "Monthly"}
                     <small>
                       {r.tenantType === "outside"
@@ -272,62 +387,6 @@ export function ParkingModule({
                 <tr>
                   <td colSpan={8}>
                     <em>No parking rentals match this view.</em>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <small>OWNER PARKING PAYMENTS</small>
-            <h3>Payments recorded for owners</h3>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Owner / Unit</th>
-                <th>Lot</th>
-                <th>Period</th>
-                <th>Amount</th>
-                <th>Payment date</th>
-                <th>Method</th>
-                <th>Reference</th>
-                <th>Status</th>
-                <th>Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredOwnerPayments.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <strong>{p.ownerName || "Owner not set"}</strong>
-                    <small>
-                      {p.hostelName} / {p.unitCode}
-                    </small>
-                  </td>
-                  <td>{p.lotNumber || "-"}</td>
-                  <td>{p.period || "-"}</td>
-                  <td>{money(p.amount)}</td>
-                  <td>{dateLabel(p.paymentDate)}</td>
-                  <td>{titleCase(p.method)}</td>
-                  <td>{p.reference || "-"}</td>
-                  <td>
-                    <span className={`unit-status ${p.status}`}>
-                      {titleCase(p.status)}
-                    </span>
-                  </td>
-                  <td>{p.remarks || "-"}</td>
-                </tr>
-              ))}
-              {filteredOwnerPayments.length === 0 && (
-                <tr>
-                  <td colSpan={9}>
-                    <em>No owner parking payments recorded yet.</em>
                   </td>
                 </tr>
               )}
@@ -476,15 +535,6 @@ export function ParkingModule({
                   />
                 </label>
                 <label>
-                  End date
-                  <input
-                    name="endDate"
-                    type="date"
-                    placeholder="e.g. 2026-01-01"
-                    defaultValue={rental.endDate || ""}
-                  />
-                </label>
-                <label>
                   Paid until
                   <input
                     name="paidUntil"
@@ -500,18 +550,8 @@ export function ParkingModule({
                     defaultValue={rental.billingFrequency || "monthly"}
                   >
                     <option value="monthly">Monthly</option>
-                    <option value="package">Package / several months</option>
+                    <option value="annually">Annually</option>
                   </select>
-                </label>
-                <label>
-                  Package length (months)
-                  <input
-                    name="packageMonths"
-                    type="number"
-                    min="1"
-                    max="24"
-                    defaultValue={rental.packageMonths ?? 1}
-                  />
                 </label>
                 <label>
                   Next payment due
@@ -602,61 +642,12 @@ export function ParkingModule({
           kicker="PARKING INVENTORY"
           onClose={() => setModal("")}
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                { action: "parking-lot", ...formValues(e) },
-                "Parking lot added",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label>
-              Hostel
-              <select name="hostelId" required>
-                <option value="">Select hostel</option>
-                {data.hostels.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lot number
-              <input name="lotNumber" required placeholder="e.g. NB-0801" />
-            </label>
-            <label>
-              Belongs to unit
-              <select name="unitId">
-                <option value="">Common / hostel lot</option>
-                {data.units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.hostelName}/{u.unitCode}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Status
-              <select name="status">
-                <option value="available">Available</option>
-                <option value="reserved">Reserved</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </label>
-            <label className="wide">
-              Notes
-              <input name="notes" placeholder="e.g. Notes about the lot" />
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Add lot
-              </button>
-            </div>
-          </form>
+          <AddParkingLotForm
+            data={data}
+            save={save}
+            busy={busy}
+            onDone={() => setModal("")}
+          />
         </Modal>
       )}
       {modal === "rental" && (
@@ -673,90 +664,6 @@ export function ParkingModule({
             lockedLotId={reservingLotId ?? undefined}
             onDone={() => setModal("")}
           />
-        </Modal>
-      )}
-      {modal === "owner-payment" && (
-        <Modal
-          title="Add owner parking payment"
-          kicker="PARKING PAYMENT TO OWNER"
-          onClose={() => setModal("")}
-          wide
-        >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                { action: "parking-owner-payment", ...formValues(e) },
-                "Owner payment recorded",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label className="wide">
-              Owner / Unit
-              <SearchSelect
-                name="unitId"
-                required
-                options={data.units.map((u) => ({
-                  value: u.id,
-                  label: `${u.hostelName}/${u.unitCode}${u.ownerName ? ` · ${u.ownerName}` : ""}`,
-                }))}
-                placeholder="Type unit code, hostel or owner name"
-              />
-            </label>
-            <label className="wide">
-              Parking lot (optional)
-              <SearchSelect
-                name="parkingLotId"
-                options={data.parkingLots.map((lot) => ({
-                  value: lot.id,
-                  label: `${lot.hostelName} · ${lot.lotNumber} · ${lot.unitCode || "Common"}`,
-                }))}
-                placeholder="Type hostel, lot or unit"
-              />
-            </label>
-            <label>
-              Payment for period
-              <input name="period" placeholder="e.g. 2026-07" />
-            </label>
-            <label>
-              Amount
-              <input name="amount" type="number" min="0" step="0.01" required />
-            </label>
-            <label>
-              Payment date
-              <input name="paymentDate" type="date" required />
-            </label>
-            <label>
-              Payment method
-              <select name="method">
-                <option value="bank-transfer">Bank transfer</option>
-                <option value="cash">Cash</option>
-                <option value="cheque">Cheque</option>
-              </select>
-            </label>
-            <label>
-              Reference / receipt no.
-              <input name="reference" placeholder="e.g. 1234567890" />
-            </label>
-            <label>
-              Status
-              <select name="status">
-                <option value="paid">Paid</option>
-                <option value="pending">Pending</option>
-              </select>
-            </label>
-            <label className="wide">
-              Remarks
-              <input name="remarks" placeholder="e.g. Payment for July 2026" />
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Record payment
-              </button>
-            </div>
-          </form>
         </Modal>
       )}
     </>

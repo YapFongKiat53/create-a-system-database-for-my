@@ -15,6 +15,34 @@
       "when": 1786333892598,
       "tag": "0001_add_nationality_race_religion_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786587883288,
+      "tag": "0002_add_reservation_contact_state_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786601426918,
+      "tag": "0003_add_student_state_field",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786605174704,
+      "tag": "0004_add_courses_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786613672821,
+      "tag": "0005_drop_owner_parking_payments",
+      "breakpoints": true
     }
   ]
 }

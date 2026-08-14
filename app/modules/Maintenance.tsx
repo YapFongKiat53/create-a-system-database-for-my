@@ -7,6 +7,7 @@ import {
   Modal,
   ReportCard,
   SearchSelect,
+  blockOf,
   dateLabel,
   formValues,
   money,
@@ -16,14 +17,110 @@ import {
 } from "./shared";
 import type { Data, Row } from "./shared";
 
+// Pictures and videos render inline (no click-through needed) and split
+// into their own sections since they're viewed differently. Deleting calls
+// the file store directly rather than going through save()/action dispatch
+// since attachments aren't part of the /api/system action set.
+function TicketAttachments({
+  attachments,
+  onDeleted,
+  compact = false,
+}: {
+  attachments: Row[];
+  onDeleted: () => void;
+  compact?: boolean;
+}) {
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const pictures = attachments.filter((attachment) =>
+    String(attachment.contentType || "").startsWith("image/"),
+  );
+  const videos = attachments.filter((attachment) =>
+    String(attachment.contentType || "").startsWith("video/"),
+  );
+  if (!pictures.length && !videos.length) return null;
+
+  const handleDelete = async (id: string | number) => {
+    if (!window.confirm("Delete this file? This cannot be undone.")) return;
+    setDeletingId(id);
+    try {
+      const response = await fetch(`/api/files?id=${id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        window.alert(result.error || "Unable to delete file");
+        return;
+      }
+      await onDeleted();
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const group = (items: Row[], label: string) =>
+    items.length > 0 && (
+      <div className="attachment-thumb-grid">
+        <small className="attachment-group-label">{label}</small>
+        {items.map((attachment) => (
+          <figure key={attachment.id} className="attachment-thumb">
+            {attachment.contentType?.startsWith("video/") ? (
+              <video
+                src={`/api/files?id=${attachment.id}`}
+                controls
+                preload="metadata"
+              />
+            ) : (
+              <a
+                href={`/api/files?id=${attachment.id}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img
+                  src={`/api/files?id=${attachment.id}`}
+                  alt={attachment.fileName}
+                  loading="lazy"
+                />
+              </a>
+            )}
+            <button
+              type="button"
+              className="secondary compact attachment-delete"
+              disabled={deletingId === attachment.id}
+              onClick={() => handleDelete(attachment.id)}
+            >
+              Delete
+            </button>
+          </figure>
+        ))}
+      </div>
+    );
+
+  const content = (
+    <>
+      {!compact && <strong>Pictures &amp; videos</strong>}
+      {group(pictures, "PICTURE")}
+      {group(videos, "VIDEO")}
+    </>
+  );
+  return compact ? (
+    <div className="attachment-list attachment-list-compact">{content}</div>
+  ) : (
+    <section className="drawer-section attachment-list">{content}</section>
+  );
+}
+
 export function MaintenanceModule({
   data,
   save,
   busy,
+  load,
 }: {
   data: Data;
   save: any;
   busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
 }) {
   const [tab, setTab] = useState("tickets");
   const [modal, setModal] = useState("");
@@ -33,6 +130,7 @@ export function MaintenanceModule({
   const [ticketHostel, setTicketHostel] = useState("all");
   const [ticketCategory, setTicketCategory] = useState("");
   const [ticketHostelId, setTicketHostelId] = useState("");
+  const [ticketBlock, setTicketBlock] = useState("");
   const [ticketUnitId, setTicketUnitId] = useState("");
   const [ticketStudentId, setTicketStudentId] = useState("");
   const [ticketRoomId, setTicketRoomId] = useState("");
@@ -155,6 +253,18 @@ export function MaintenanceModule({
       `${rows.length} meter rows imported`,
     );
   };
+  const ticketHostelUnits = data.units.filter(
+    (unit) =>
+      !ticketHostelId || String(unit.hostelId) === ticketHostelId,
+  );
+  const ticketBlockOptions = [
+    ...new Set(ticketHostelUnits.map((unit) => blockOf(unit.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const ticketBlockedUnits = ticketHostelUnits.filter(
+    (unit) => !ticketBlock || blockOf(unit.unitCode) === ticketBlock,
+  );
   return (
     <>
       <section className="intro compact-intro">
@@ -647,31 +757,14 @@ export function MaintenanceModule({
                 <b>{money(ticket.studentCharge)}</b>
               </div>
             </section>
-            {data.attachments.some(
-              (attachment) =>
-                attachment.contextType === "ticket" &&
-                attachment.recordId === ticket.id,
-            ) && (
-              <section className="drawer-section attachment-list">
-                <strong>Ticket pictures / videos</strong>
-                {data.attachments
-                  .filter(
-                    (attachment) =>
-                      attachment.contextType === "ticket" &&
-                      attachment.recordId === ticket.id,
-                  )
-                  .map((attachment) => (
-                    <a
-                      key={attachment.id}
-                      href={`/api/files?id=${attachment.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {attachment.fileName}
-                    </a>
-                  ))}
-              </section>
-            )}
+            <TicketAttachments
+              attachments={data.attachments.filter(
+                (attachment) =>
+                  attachment.contextType === "ticket" &&
+                  attachment.recordId === ticket.id,
+              )}
+              onDeleted={() => load(["attachments"])}
+            />
             <section className="drawer-section">
               <div className="section-title">
                 <div>
@@ -701,22 +794,15 @@ export function MaintenanceModule({
                       {m.statusAfter && (
                         <span>Status: {titleCase(m.statusAfter)}</span>
                       )}
-                      {data.attachments
-                        .filter(
+                      <TicketAttachments
+                        attachments={data.attachments.filter(
                           (attachment) =>
                             attachment.contextType === "ticket-update" &&
                             attachment.recordId === m.id,
-                        )
-                        .map((attachment) => (
-                          <a
-                            key={attachment.id}
-                            href={`/api/files?id=${attachment.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            View attachment: {attachment.fileName}
-                          </a>
-                        ))}
+                        )}
+                        onDeleted={() => load(["attachments"])}
+                        compact
+                      />
                     </article>
                   ))}
               </div>
@@ -1087,6 +1173,7 @@ export function MaintenanceModule({
                 value={ticketHostelId}
                 onChange={(event) => {
                   setTicketHostelId(event.target.value);
+                  setTicketBlock("");
                   setTicketUnitId("");
                   setTicketStudentId("");
                   setTicketRoomId("");
@@ -1100,8 +1187,30 @@ export function MaintenanceModule({
                 ))}
               </select>
             </label>
+            {ticketBlockOptions.length > 0 && (
+              <label>
+                2. Block
+                <select
+                  value={ticketBlock}
+                  disabled={!ticketHostelId}
+                  onChange={(event) => {
+                    setTicketBlock(event.target.value);
+                    setTicketUnitId("");
+                    setTicketStudentId("");
+                    setTicketRoomId("");
+                  }}
+                >
+                  <option value="">All blocks in this hostel</option>
+                  {ticketBlockOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
-              2. Unit
+              3. Unit
               <select
                 name="unitId"
                 required
@@ -1116,22 +1225,16 @@ export function MaintenanceModule({
                 <option value="">
                   {ticketHostelId ? "Select unit" : "Select a hostel first"}
                 </option>
-                {data.units
-                  .filter(
-                    (unit) =>
-                      !ticketHostelId ||
-                      String(unit.hostelId) === ticketHostelId,
-                  )
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.hostelName}/{u.unitCode}
-                    </option>
-                  ))}
+                {ticketBlockedUnits.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.hostelName}/{u.unitCode}
+                  </option>
+                ))}
               </select>
             </label>
             {data.currentUser?.roleKey !== "tenant" && (
               <label>
-                3. Student
+                4. Student
                 <select
                   name="studentId"
                   value={ticketStudentId}
@@ -1167,7 +1270,7 @@ export function MaintenanceModule({
               </label>
             )}
             <label>
-              4. Room / complaint location
+              5. Room / complaint location
               <select
                 name="roomId"
                 value={ticketRoomId}

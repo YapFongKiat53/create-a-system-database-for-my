@@ -32,6 +32,329 @@ function unitInitials(value: unknown) {
   return (compact.slice(0, 2) || "UN").toUpperCase();
 }
 
+// Hostels that organise units into lettered/numbered blocks (e.g. Damai's
+// D1/D2/D3, Nadayu's NB/NC/NE). Hostels not listed here have no block
+// structure — their unit codes are plain numbers (Atria's "1201") or
+// hostel-specific strings (Subang Residences' "SR23"), so the block step is
+// skipped and staff type the whole unit code by hand, as before.
+const UNIT_BLOCKS_BY_HOSTEL: Record<string, string[]> = {
+  DAM: ["D1", "D2", "D3"],
+  NDY: ["NB", "NC", "NE"],
+};
+
+// A fresh instance mounts every time the "Add unit" modal opens (the caller
+// only renders it while `modal === "unit"`), so its hostel/block/suffix
+// state always starts clean without needing a reset effect.
+function AddUnitForm({
+  data,
+  save,
+  busy,
+  defaultHostelId,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  defaultHostelId?: string | number;
+  onDone: () => void;
+}) {
+  const [hostelId, setHostelId] = useState(String(defaultHostelId || ""));
+  const [block, setBlock] = useState("");
+  const [unitSuffix, setUnitSuffix] = useState("");
+  const [unitCode, setUnitCode] = useState("");
+  const [includeOwner, setIncludeOwner] = useState(false);
+  const [agreementType, setAgreementType] = useState("rental");
+  const [agreementFile, setAgreementFile] = useState<File | null>(null);
+
+  const hostel = data.hostels.find((h) => String(h.id) === hostelId);
+  const blockOptions = UNIT_BLOCKS_BY_HOSTEL[String(hostel?.code || "")] || [];
+  const canViewOwner = data.currentUser?.permissions?.some(
+    (permission: Row) =>
+      permission.moduleKey === "units-owner" && permission.canView,
+  );
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const code = block ? `${block}-${unitSuffix.trim()}` : unitCode.trim();
+        const values = formValues(e);
+        const unitResult = await save(
+          { action: "unit-create", ...values, unitCode: code },
+          "Unit added",
+        );
+        if (!unitResult?.id) return;
+        if (includeOwner) {
+          await save(
+            { action: "unit-owner", unitId: unitResult.id, ...values },
+            "Owner agreement saved",
+          );
+          if (agreementFile)
+            await uploadAttachment(
+              agreementFile,
+              "agreement",
+              unitResult.id,
+              data.currentUser?.displayName,
+            );
+        }
+        onDone();
+      }}
+    >
+      <label>
+        Hostel
+        <select
+          name="hostelId"
+          required
+          value={hostelId}
+          onChange={(event) => {
+            setHostelId(event.target.value);
+            setBlock("");
+            setUnitSuffix("");
+            setUnitCode("");
+          }}
+        >
+          <option value="">Select hostel</option>
+          {data.hostels.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {blockOptions.length > 0 ? (
+        <>
+          <label>
+            Block
+            <select
+              value={block}
+              disabled={!hostelId}
+              onChange={(event) => setBlock(event.target.value)}
+            >
+              <option value="">Select block</option>
+              {blockOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Unit number
+            <div className="unit-code-input">
+              {block && <span className="unit-code-prefix">{block}-</span>}
+              <input
+                required
+                disabled={!block}
+                value={unitSuffix}
+                onChange={(event) => setUnitSuffix(event.target.value)}
+                placeholder={block ? "e.g. 1301" : "Select a block first"}
+              />
+            </div>
+          </label>
+        </>
+      ) : (
+        <label>
+          Unit number
+          <input
+            required
+            disabled={!hostelId}
+            value={unitCode}
+            onChange={(event) => setUnitCode(event.target.value)}
+            placeholder="e.g. NB-0801"
+          />
+        </label>
+      )}
+      <label>
+        Gender
+        <select name="gender">
+          <option value="unspecified">Not set</option>
+          <option value="female">Female</option>
+          <option value="male">Male</option>
+          <option value="mixed">Special / mixed</option>
+        </select>
+      </label>
+      <p className="wide auto-address-note">
+        Address is generated automatically from the selected hostel&apos;s
+        address and the unit number.
+      </p>
+      {canViewOwner && (
+        <label className="checkbox-field wide">
+          <input
+            type="checkbox"
+            checked={includeOwner}
+            onChange={(event) => setIncludeOwner(event.target.checked)}
+          />{" "}
+          Add owner &amp; agreement details now
+        </label>
+      )}
+      {canViewOwner && includeOwner && (
+        <>
+          <div className="wide form-divider">
+            <strong>Owner information</strong>
+          </div>
+          <label>
+            Owner name
+            <input name="ownerName" placeholder="e.g. John Doe" />
+          </label>
+          <label>
+            Owner IC / passport / registration no.
+            <input
+              name="ownerIdentityNo"
+              placeholder="e.g. 010101-01-0101"
+            />
+          </label>
+          <label>
+            Owner email
+            <input name="ownerEmail" type="email" placeholder="e.g. john.doe@example.com" />
+          </label>
+          <label className="wide">
+            Registered residential address
+            <textarea
+              name="registeredAddress"
+              placeholder="e.g. 123, Jalan Merdeka, 50000 Kuala Lumpur"
+            />
+          </label>
+          <label>
+            Agreement type
+            <select
+              name="agreementType"
+              value={agreementType}
+              onChange={(event) => setAgreementType(event.target.value)}
+            >
+              <option value="rental">Rental basis</option>
+              <option value="service">Service agreement</option>
+            </select>
+          </label>
+          <label>
+            Primary contact name
+            <input name="primaryContactName" placeholder="e.g. John Doe" />
+          </label>
+          <label>
+            Primary contact number
+            <input name="primaryContactPhone" placeholder="e.g. 0123456789" />
+          </label>
+          <label>
+            Secondary contact name
+            <input name="secondaryContactName" placeholder="e.g. Jane Doe" />
+          </label>
+          <label>
+            Secondary contact number
+            <input name="secondaryContactPhone" placeholder="e.g. 0123456789" />
+          </label>
+          <div className="wide form-divider">
+            <strong>Designated bank account</strong>
+          </div>
+          <label>
+            Bank account number
+            <input name="bankAccountNumber" placeholder="e.g. 1234567890" />
+          </label>
+          <label>
+            Account holder
+            <input name="bankAccountHolder" placeholder="e.g. John Doe" />
+          </label>
+          <label>
+            Bank name
+            <input name="bankName" placeholder="e.g. Maybank" />
+          </label>
+          <div className="wide form-divider">
+            <strong>Lease information</strong>
+          </div>
+          <label>
+            Lease start
+            <input name="leaseStartDate" type="date" />
+          </label>
+          <label>
+            Lease end
+            <input name="leaseEndDate" type="date" />
+          </label>
+          {agreementType === "rental" ? (
+            <>
+              <label>
+                Monthly owner rental
+                <input name="monthlyLeaseRental" type="number" min="0" placeholder="e.g. 1000" />
+              </label>
+              <label>
+                Security deposit
+                <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
+              </label>
+              <label>
+                Utility deposit
+                <input name="utilityDeposit" type="number" min="0" placeholder="e.g. 1000" />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Monthly service percentage
+                <input
+                  name="servicePercentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  placeholder="e.g. 10"
+                />
+              </label>
+              <label>
+                New student commission
+                <input name="commissionAmount" type="number" min="0" placeholder="e.g. 100" />
+              </label>
+              <label>
+                Monthly cleaning fee
+                <input name="monthlyCleaningFee" type="number" min="0" placeholder="e.g. 100" />
+              </label>
+              <label>
+                Monthly water dispenser fee
+                <input
+                  name="monthlyWaterDispenserFee"
+                  type="number"
+                  min="0"
+                  placeholder="e.g. 100"
+                />
+              </label>
+            </>
+          )}
+          <div className="wide form-divider">
+            <strong>Utility accounts</strong>
+          </div>
+          <label>
+            TNB account
+            <input name="tnbAccount" placeholder="e.g. 1234567890" />
+          </label>
+          <label>
+            Air Selangor account
+            <input name="airSelangorAccount" placeholder="e.g. 1234567890" />
+          </label>
+          <label>
+            Indah Water account
+            <input name="indahWaterAccount" placeholder="e.g. 1234567890" />
+          </label>
+          <label className="wide">
+            Agreement notes
+            <input name="ownerNotes" placeholder="e.g. Agreement notes" />
+          </label>
+          <label className="wide">
+            Upload signed agreement
+            <input
+              type="file"
+              accept="application/pdf,image/*,.doc,.docx"
+              onChange={(event) =>
+                setAgreementFile(event.target.files?.[0] || null)
+              }
+            />
+          </label>
+        </>
+      )}
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy}>
+          Add unit
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function UnitsModule({
   data,
   save,
@@ -1180,60 +1503,15 @@ export function UnitsModule({
           title="Add unit"
           kicker="UNIT REGISTER"
           onClose={() => setModal("")}
+          wide
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                { action: "unit-create", ...formValues(e) },
-                "Unit added",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label>
-              Hostel
-              <select
-                name="hostelId"
-                required
-                defaultValue={selectedHostel?.id || ""}
-              >
-                <option value="">Select hostel</option>
-                {data.hostels.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Unit number
-              <input name="unitCode" required placeholder="e.g. NB-0801" />
-              
-            </label>
-            <label>
-              Gender
-              <select name="gender">
-                <option value="unspecified">Not set</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-                <option value="mixed">Special / mixed</option>
-              </select>
-            </label>
-            <div className="wide auto-address-note">
-              <strong>Address is generated automatically</strong>
-              <span>
-                The unit number is added in front of the selected hostel
-                address.
-              </span>
-            </div>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Add unit
-              </button>
-            </div>
-          </form>
+          <AddUnitForm
+            data={data}
+            save={save}
+            busy={busy}
+            defaultHostelId={selectedHostel?.id}
+            onDone={() => setModal("")}
+          />
         </Modal>
       )}
       {modal === "card" && unit && (
