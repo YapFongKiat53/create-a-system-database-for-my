@@ -3,8 +3,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  DemographicFields,
   Modal,
-  NATIONALITIES,
   SearchSelect,
   Stat,
   dateLabel,
@@ -291,13 +291,10 @@ export function StudentsModule({
           (completionFilter === "incomplete"
             ? isProfileIncomplete(item)
             : !isProfileIncomplete(item));
-        const text = `${item.fullName || ""} ${item.studentCode || ""} ${
-          item.identityNo || ""
-        } ${item.roomCode || ""} ${item.unitCode || ""} ${
-          item.hostelName || ""
-        } ${item.school || ""} ${item.course || ""} ${
-          item.nationality || ""
-        } ${item.agency || ""}`.toLowerCase();
+        const text = `${item.fullName || ""} ${item.studentCode || ""} ${item.identityNo || ""
+          } ${item.roomCode || ""} ${item.unitCode || ""} ${item.hostelName || ""
+          } ${item.school || ""} ${item.course || ""} ${item.nationality || ""
+          } ${item.agency || ""}`.toLowerCase();
 
         return (
           tabMatch &&
@@ -362,7 +359,7 @@ export function StudentsModule({
           (String(bed.hostelId || "") === String(selectedHostel.id) ||
             (!bed.hostelId &&
               String(bed.hostelName || "").toLowerCase() ===
-                String(selectedHostel.name || "").toLowerCase())),
+              String(selectedHostel.name || "").toLowerCase())),
       )
       .map((bed) => ({
         value: bed.id,
@@ -764,9 +761,8 @@ export function StudentsModule({
                           </td>
                           <td>
                             <span
-                              className={`unit-status ${
-                                item.assignmentStatus || item.profileStatus
-                              }`}
+                              className={`unit-status ${item.assignmentStatus || item.profileStatus
+                                }`}
                             >
                               {titleCase(
                                 item.assignmentStatus || item.profileStatus,
@@ -836,9 +832,8 @@ export function StudentsModule({
                         <button
                           type="button"
                           key={item}
-                          className={`student-page-button ${
-                            item === currentPage ? "active" : ""
-                          }`}
+                          className={`student-page-button ${item === currentPage ? "active" : ""
+                            }`}
                           onClick={() => setPage(item)}
                         >
                           {item}
@@ -917,6 +912,7 @@ export function StudentsModule({
                     Student code
                     <input
                       name="studentCode"
+                      placeholder="e.g. B200000000"
                       defaultValue={student.studentCode}
                     />
                   </label>
@@ -924,6 +920,7 @@ export function StudentsModule({
                     IC / passport
                     <input
                       name="identityNo"
+                      placeholder="e.g. 010101-01-0101"
                       defaultValue={student.identityNo}
                     />
                   </label>
@@ -938,50 +935,20 @@ export function StudentsModule({
                   <label>
                     Gender
                     <select name="gender" defaultValue={student.gender}>
-                      <option value="unspecified">Not set</option>
-                      <option value="female">Female</option>
                       <option value="male">Male</option>
+                      <option value="female">Female</option>
                     </select>
                   </label>
-                  <label>
-                    Nationality
-                    <select
-                      name="nationality"
-                      defaultValue={student.nationality || ""}
-                    >
-                      <option value="">Not set</option>
-                      {withCurrent(NATIONALITIES, student.nationality).map(
-                        (n) => (
-                          <option key={n}>{n}</option>
-                        ),
-                      )}
-                    </select>
-                  </label>
-                  <label>
-                    Hometown
-                    <input name="hometown" defaultValue={student.hometown} />
-                  </label>
-                  <label>
-                    Race
-                    <select name="race" defaultValue={student.race || ""}>
-                      <option value="">Select race</option>
-                      <option value="Chinese">Chinese</option>
-                      <option value="Malay">Malay</option>
-                      <option value="Indian">Indian</option>
-                      <option value="Others">Others</option>
-                    </select>
-                  </label>
-                  <label>
-                    Religion
-                    <select name="religion" defaultValue={student.religion || ""}>
-                      <option value="">Select religion</option>
-                      <option value="Hinduism">Hinduism</option>
-                      <option value="Buddhism">Buddhism</option>
-                      <option value="Islam">Islam</option>
-                      <option value="Christianity">Christianity</option>
-                      <option value="Others">Others</option>
-                    </select>
-                  </label>
+                  <DemographicFields
+                    key={student.id}
+                    nationality={student.nationality || ""}
+                    nationalityOther={student.nationalityOther || ""}
+                    hometown={student.hometown || ""}
+                    race={student.race || ""}
+                    raceOther={student.raceOther || ""}
+                    religion={student.religion || ""}
+                    religionOther={student.religionOther || ""}
+                  />
                 </div>
               </div>
 
@@ -992,6 +959,7 @@ export function StudentsModule({
                     Contact number
                     <input
                       name="contactNumber"
+                      placeholder="e.g. 0123456789"
                       defaultValue={student.contactNumber}
                     />
                   </label>
@@ -1150,16 +1118,17 @@ export function StudentsModule({
                     Sales person
                     <input
                       name="salesperson"
+                      placeholder="e.g. John Doe"
                       defaultValue={student.salesperson}
                     />
                   </label>
                   <label>
                     Agency
-                    <input name="agency" defaultValue={student.agency} />
+                    <input name="agency" placeholder="e.g. John Doe Agency" defaultValue={student.agency} />
                   </label>
                   <label>
                     Receipt serial no.
-                    <input name="receiptNo" defaultValue={student.receiptNo} />
+                    <input name="receiptNo" placeholder="e.g. 1234567890" defaultValue={student.receiptNo} />
                   </label>
                   <label>
                     Status
@@ -1174,7 +1143,7 @@ export function StudentsModule({
                   </label>
                   <label className="wide">
                     Remarks
-                    <input name="remarks" defaultValue={student.remarks} />
+                    <input name="remarks" placeholder="e.g. Student is relocating to a different unit" defaultValue={student.remarks} />
                   </label>
                 </div>
               </div>
@@ -1348,15 +1317,18 @@ export function StudentsModule({
               <div className="form-grid">
                 <label>
                   Full name
-                  <input name="fullName" required />
+                  <input name="fullName" required placeholder="e.g. John Doe" />
+
                 </label>
                 <label>
                   Student code
-                  <input name="studentCode" />
+                  <input name="studentCode"
+                    placeholder="e.g. B200000000"
+                  />
                 </label>
                 <label>
                   IC / passport
-                  <input name="identityNo" />
+                  <input name="identityNo" placeholder="e.g. 010101-01-0101" />
                 </label>
                 <label>
                   Date of birth
@@ -1365,45 +1337,11 @@ export function StudentsModule({
                 <label>
                   Gender
                   <select name="gender" defaultValue="unspecified">
-                    <option value="unspecified">Not set</option>
-                    <option value="female">Female</option>
                     <option value="male">Male</option>
+                    <option value="female">Female</option>
                   </select>
                 </label>
-                <label>
-                  Nationality
-                  <select name="nationality" defaultValue="">
-                    <option value="">Not set</option>
-                    {NATIONALITIES.map((n) => (
-                      <option key={n}>{n}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Hometown
-                  <input name="hometown" />
-                </label>
-                <label>
-                  Race
-                  <select name="race" defaultValue="">
-                    <option value="">Select race</option>
-                    <option value="Chinese">Chinese</option>
-                    <option value="Malay">Malay</option>
-                    <option value="Indian">Indian</option>
-                    <option value="Others">Others</option>
-                  </select>
-                </label>
-                <label>
-                  Religion
-                  <select name="religion" defaultValue="">
-                    <option value="">Select religion</option>
-                    <option value="Hinduism">Hinduism</option>
-                    <option value="Buddhism">Buddhism</option>
-                    <option value="Islam">Islam</option>
-                    <option value="Christianity">Christianity</option>
-                    <option value="Others">Others</option>
-                  </select>
-                </label>
+                <DemographicFields />
               </div>
             </div>
             <div className="drawer-subsection wide">
@@ -1411,11 +1349,11 @@ export function StudentsModule({
               <div className="form-grid">
                 <label>
                   Contact number
-                  <input name="contactNumber" />
+                  <input name="contactNumber" placeholder="e.g. 0123456789" />
                 </label>
                 <label>
                   Email
-                  <input name="email" type="email" />
+                  <input name="email" type="email" placeholder="e.g. john.doe@example.com" />
                 </label>
               </div>
             </div>
@@ -1434,11 +1372,11 @@ export function StudentsModule({
                 </label>
                 <label>
                   Course enrolled
-                  <input name="course" />
+                  <input name="course" placeholder="e.g. Bachelor of Science" />
                 </label>
                 <label>
                   Application form no.
-                  <input name="applicationFormNo" />
+                  <input name="applicationFormNo" placeholder="e.g. A200000000" />
                 </label>
               </div>
             </div>
@@ -1447,19 +1385,19 @@ export function StudentsModule({
               <div className="form-grid">
                 <label>
                   Sales person
-                  <input name="salesperson" />
+                  <input name="salesperson" placeholder="e.g. John Doe" />
                 </label>
                 <label>
                   Agency
-                  <input name="agency" />
+                  <input name="agency" placeholder="e.g. John Doe Agency" />
                 </label>
                 <label>
                   Receipt serial no.
-                  <input name="receiptNo" />
+                  <input name="receiptNo" placeholder="e.g. 1234567890" />
                 </label>
                 <label className="wide">
                   Remarks
-                  <input name="remarks" />
+                  <input name="remarks" placeholder="e.g. Student is relocating to a different unit" />
                 </label>
               </div>
             </div>
@@ -1488,31 +1426,31 @@ export function StudentsModule({
                   </label>
                   <label>
                     Monthly rental
-                    <input name="monthlyRental" type="number" min="0" />
+                    <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
                   </label>
                   <label>
                     Security deposit
-                    <input name="securityDeposit" type="number" min="0" />
+                    <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
                   </label>
                   <label>
                     Access card deposit
-                    <input name="accessCardDeposit" type="number" min="0" />
+                    <input name="accessCardDeposit" type="number" min="0" placeholder="e.g. 1000" />
                   </label>
                   <label>
                     Parking deposit
-                    <input name="parkingDeposit" type="number" min="0" />
+                    <input name="parkingDeposit" type="number" min="0" placeholder="e.g. 1000" />
                   </label>
                   <label>
                     Check-in
-                    <input name="checkInDate" type="date" />
+                    <input name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
                   </label>
                   <label>
                     Lease start
-                    <input name="leaseStartDate" type="date" />
+                    <input name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01"  />
                   </label>
                   <label>
                     Lease end
-                    <input name="leaseEndDate" type="date" />
+                    <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
                   </label>
                 </div>
               )}
@@ -1554,11 +1492,11 @@ export function StudentsModule({
           >
             <label>
               Check-out date
-              <input name="checkOutDate" type="date" required />
+              <input name="checkOutDate" type="date" required placeholder="e.g. 2026-01-01" />
             </label>
             <label>
               Check-out meter
-              <input name="checkOutMeter" type="number" step="0.01" />
+              <input name="checkOutMeter" type="number" step="0.01" placeholder="e.g. 1000" />
             </label>
             <label>
               Set profile status
@@ -1684,21 +1622,21 @@ export function StudentsModule({
           >
             <label>
               Effective date
-              <input name="effectiveDate" type="date" required />
+              <input name="effectiveDate" type="date" required placeholder="e.g. 2026-01-01" />
             </label>
             <label>
               Monthly rental
-              <input name="monthlyRental" type="number" min="0" />
+              <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
             </label>
             <label>
               Security deposit
-              <input name="securityDeposit" type="number" min="0" />
+              <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
             </label>
             <label className="wide">
               Reason
               <input
                 name="reason"
-                placeholder="Short-term renewal, promotion ended..."
+                placeholder="e.g. Short-term renewal, promotion ended..."
               />
             </label>
             <div className="form-actions wide">
@@ -1747,35 +1685,35 @@ export function StudentsModule({
             </label>
             <label>
               Effective date
-              <input name="effectiveDate" type="date" required />
+              <input name="effectiveDate" type="date" required placeholder="e.g. 2026-01-01" />
             </label>
             <label>
               New monthly rental
-              <input name="monthlyRental" type="number" min="0" />
+              <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
             </label>
             <label>
               New security deposit
-              <input name="securityDeposit" type="number" min="0" />
+              <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
             </label>
             <label>
               Access card deposit
-              <input name="accessCardDeposit" type="number" min="0" />
+              <input name="accessCardDeposit" type="number" min="0" placeholder="e.g. 1000" />
             </label>
             <label>
               Old room check-out meter
-              <input name="checkOutMeter" type="number" step="0.01" />
+              <input name="checkOutMeter" type="number" step="0.01" placeholder="e.g. 1000"   />
             </label>
             <label>
               New room check-in meter
-              <input name="checkInMeter" type="number" step="0.01" />
+              <input name="checkInMeter" type="number" step="0.01" placeholder="e.g. 1000" />
             </label>
             <label>
               New lease end
-              <input name="leaseEndDate" type="date" />
+              <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
             </label>
             <label className="wide">
               Reason / remarks
-              <input name="reason" />
+              <input name="reason" placeholder="e.g. Short-term renewal, promotion ended..." />
             </label>
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>

@@ -842,6 +842,7 @@ export function UnitsModule({
                       Surrender notes
                       <input
                         name="surrenderNotes"
+                        placeholder="e.g. Student is relocating to a different unit"
                         defaultValue={unit.surrenderNotes}
                       />
                     </label>
@@ -2078,12 +2079,13 @@ function OwnerAgreement({
         </div>
         <label>
           Owner name
-          <input name="ownerName" defaultValue={owner?.ownerName || ""} />
+          <input name="ownerName" placeholder="e.g. John Doe" defaultValue={owner?.ownerName || ""} />
         </label>
         <label>
           Owner IC / passport / registration no.
           <input
             name="ownerIdentityNo"
+            placeholder="e.g. 010101-01-0101"
             defaultValue={owner?.ownerIdentityNo || ""}
           />
         </label>
@@ -2091,6 +2093,7 @@ function OwnerAgreement({
           Owner email
           <input
             name="ownerEmail"
+            placeholder="e.g. john.doe@example.com"
             type="email"
             defaultValue={owner?.ownerEmail || ""}
           />
@@ -2099,6 +2102,7 @@ function OwnerAgreement({
           Registered residential address
           <textarea
             name="registeredAddress"
+            placeholder="e.g. 123, Jalan Merdeka, 50000 Kuala Lumpur"
             defaultValue={owner?.registeredAddress || ""}
           />
         </label>
@@ -2117,6 +2121,7 @@ function OwnerAgreement({
           Primary contact name
           <input
             name="primaryContactName"
+            placeholder="e.g. John Doe"
             defaultValue={owner?.primaryContactName || ""}
           />
         </label>
@@ -2124,6 +2129,7 @@ function OwnerAgreement({
           Primary contact number
           <input
             name="primaryContactPhone"
+            placeholder="e.g. 0123456789"
             defaultValue={owner?.primaryContactPhone || ""}
           />
         </label>
@@ -2131,6 +2137,7 @@ function OwnerAgreement({
           Secondary contact name
           <input
             name="secondaryContactName"
+            placeholder="e.g. Jane Doe"
             defaultValue={owner?.secondaryContactName || ""}
           />
         </label>
@@ -2138,6 +2145,7 @@ function OwnerAgreement({
           Secondary contact number
           <input
             name="secondaryContactPhone"
+            placeholder="e.g. 0123456789"
             defaultValue={owner?.secondaryContactPhone || ""}
           />
         </label>
@@ -2148,6 +2156,7 @@ function OwnerAgreement({
           Bank account number
           <input
             name="bankAccountNumber"
+            placeholder="e.g. 1234567890"
             defaultValue={owner?.bankAccountNumber || ""}
           />
         </label>
@@ -2155,12 +2164,13 @@ function OwnerAgreement({
           Account holder
           <input
             name="bankAccountHolder"
+            placeholder="e.g. John Doe"
             defaultValue={owner?.bankAccountHolder || ""}
           />
         </label>
         <label>
           Bank name
-          <input name="bankName" defaultValue={owner?.bankName || ""} />
+          <input name="bankName" placeholder="e.g. Maybank" defaultValue={owner?.bankName || ""} />
         </label>
         <div className="wide form-divider">
           <strong>Lease information</strong>
@@ -2170,6 +2180,7 @@ function OwnerAgreement({
           <input
             name="leaseStartDate"
             type="date"
+            placeholder="e.g. 2026-01-01"
             defaultValue={owner?.leaseStartDate || ""}
           />
         </label>
@@ -2178,6 +2189,7 @@ function OwnerAgreement({
           <input
             name="leaseEndDate"
             type="date"
+            placeholder="e.g. 2026-01-01"
             defaultValue={owner?.leaseEndDate || ""}
           />
         </label>
@@ -2189,6 +2201,7 @@ function OwnerAgreement({
                 name="monthlyLeaseRental"
                 type="number"
                 min="0"
+                placeholder="e.g. 1000"
                 defaultValue={owner?.monthlyLeaseRental ?? ""}
               />
             </label>
@@ -2198,6 +2211,7 @@ function OwnerAgreement({
                 name="securityDeposit"
                 type="number"
                 min="0"
+                placeholder="e.g. 1000"
                 defaultValue={owner?.securityDeposit ?? ""}
               />
             </label>
@@ -2207,6 +2221,7 @@ function OwnerAgreement({
                 name="utilityDeposit"
                 type="number"
                 min="0"
+                placeholder="e.g. 1000"
                 defaultValue={owner?.utilityDeposit ?? ""}
               />
             </label>
@@ -2221,6 +2236,7 @@ function OwnerAgreement({
                 min="0"
                 max="100"
                 step="0.01"
+                placeholder="e.g. 10"
                 defaultValue={owner?.servicePercentage ?? ""}
               />
             </label>
@@ -2230,6 +2246,7 @@ function OwnerAgreement({
                 name="commissionAmount"
                 type="number"
                 min="0"
+                placeholder="e.g. 100"
                 defaultValue={owner?.commissionAmount ?? ""}
               />
             </label>
@@ -2239,6 +2256,7 @@ function OwnerAgreement({
                 name="monthlyCleaningFee"
                 type="number"
                 min="0"
+                placeholder="e.g. 100"
                 defaultValue={owner?.monthlyCleaningFee ?? ""}
               />
             </label>
@@ -2248,6 +2266,7 @@ function OwnerAgreement({
                 name="monthlyWaterDispenserFee"
                 type="number"
                 min="0"
+                placeholder="e.g. 100"
                 defaultValue={owner?.monthlyWaterDispenserFee ?? ""}
               />
             </label>
@@ -2258,12 +2277,13 @@ function OwnerAgreement({
         </div>
         <label>
           TNB account
-          <input name="tnbAccount" defaultValue={owner?.tnbAccount || ""} />
+          <input name="tnbAccount" placeholder="e.g. 1234567890" defaultValue={owner?.tnbAccount || ""} />
         </label>
         <label>
           Air Selangor account
           <input
             name="airSelangorAccount"
+            placeholder="e.g. 1234567890"
             defaultValue={owner?.airSelangorAccount || ""}
           />
         </label>
@@ -2271,12 +2291,13 @@ function OwnerAgreement({
           Indah Water account
           <input
             name="indahWaterAccount"
+            placeholder="e.g. 1234567890"
             defaultValue={owner?.indahWaterAccount || ""}
           />
         </label>
         <label className="wide">
           Agreement notes
-          <input name="ownerNotes" defaultValue={owner?.notes || ""} />
+          <input name="ownerNotes" placeholder="e.g. Agreement notes" defaultValue={owner?.notes || ""} />
         </label>
         <label className="wide">
           Upload signed agreement

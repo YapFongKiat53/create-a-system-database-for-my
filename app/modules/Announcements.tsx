@@ -50,38 +50,65 @@ export function AnnouncementsModule({
         )}
       </section>
       <section className="announcement-list">
-        {data.announcements.map((a) => (
-          <article
-            key={a.id}
-            className={`${a.priority} ${a.pinned ? "pinned" : ""}`}
-          >
-            <div>
-              <span className="announcement-priority">
-                {a.pinned ? "PINNED · " : ""}
-                {titleCase(a.priority)}
+        {data.announcements.map((a) => {
+          const canPin = data.currentUser?.permissions?.some(
+            (permission: Row) =>
+              permission.moduleKey === "announcements" && permission.canEdit,
+          );
+          return (
+            <article
+              key={a.id}
+              className={`${a.priority} ${a.pinned ? "pinned" : ""}`}
+            >
+              <div>
+                <span className="announcement-priority">
+                  {a.pinned ? "PINNED · " : ""}
+                  {titleCase(a.priority)}
+                </span>
+                <small>{dateLabel(a.publishAt)}</small>
+              </div>
+              <span className={`unit-status ${a.status}`}>
+                {titleCase(a.status)}
               </span>
-              <small>{dateLabel(a.publishAt)}</small>
-            </div>
-            <span className={`unit-status ${a.status}`}>
-              {titleCase(a.status)}
-            </span>
-            <h3>{a.title}</h3>
-            <p>{a.body}</p>
-            <footer>
-              Audience:{" "}
-              <b>
-                {a.audienceType === "all"
-                  ? "All hostels"
-                  : a.audienceType === "hostel"
-                    ? a.hostelName
-                    : a.audienceType === "block"
-                      ? `${a.hostelName} · Block ${a.blockCode}`
-                      : `${a.hostelName} · Unit ${a.unitCode}`}
-              </b>
-              {a.expiresAt && <> · Expires {dateLabel(a.expiresAt)}</>}
-            </footer>
-          </article>
-        ))}
+              <h3>{a.title}</h3>
+              <p>{a.body}</p>
+              <footer>
+                Audience:{" "}
+                <b>
+                  {a.audienceType === "all"
+                    ? "All hostels"
+                    : a.audienceType === "hostel"
+                      ? a.hostelName
+                      : a.audienceType === "block"
+                        ? `${a.hostelName} · Block ${a.blockCode}`
+                        : `${a.hostelName} · Unit ${a.unitCode}`}
+                </b>
+                {a.expiresAt && <> · Expires {dateLabel(a.expiresAt)}</>}
+                {canPin && (
+                  <button
+                    type="button"
+                    className="link-button pin-toggle"
+                    disabled={busy}
+                    onClick={() =>
+                      save(
+                        {
+                          action: "announcement-pin",
+                          announcementId: a.id,
+                          pinned: !a.pinned,
+                        },
+                        a.pinned
+                          ? "Announcement unpinned"
+                          : "Announcement pinned to top",
+                      )
+                    }
+                  >
+                    {a.pinned ? "Unpin" : "Pin to top"}
+                  </button>
+                )}
+              </footer>
+            </article>
+          );
+        })}
         {!data.announcements.length && (
           <Empty
             title="No announcements"

@@ -1240,11 +1240,11 @@ export function MaintenanceModule({
             </label>
             <label className="wide">
               Description
-              <textarea name="description" required />
+              <textarea name="description" required placeholder="Describe the issue or request" />
             </label>
             <label>
               Estimated cost
-              <input name="estimatedCost" type="number" min="0" />
+              <input name="estimatedCost" type="number" min="0" placeholder="Estimated cost in RM" />
             </label>
             <label>
               Responsibility

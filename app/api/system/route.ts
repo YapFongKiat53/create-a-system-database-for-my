@@ -980,8 +980,11 @@ export async function GET(request: Request) {
           dateOfBirth: studentProfiles.dateOfBirth,
           gender: studentProfiles.gender,
           race: studentProfiles.race,
+          raceOther: studentProfiles.raceOther,
           religion: studentProfiles.religion,
+          religionOther: studentProfiles.religionOther,
           nationality: studentProfiles.nationality,
+          nationalityOther: studentProfiles.nationalityOther,
           hometown: studentProfiles.hometown,
           course: studentProfiles.course,
           school: studentProfiles.school,
@@ -1756,6 +1759,38 @@ export async function POST(request: Request) {
       await db
         .delete(accessCards)
         .where(eq(accessCards.id, asNumber(body.cardId)));
+    } else if (action === "hostel-create") {
+      if (!asText(body.name) || !asText(body.code))
+        throw new Error("Property name and code are required");
+      const inserted = await db
+        .insert(hostelProperties)
+        .values({
+          code: asText(body.code).toUpperCase(),
+          name: asText(body.name),
+          address: asText(body.address),
+          status: asText(body.status, "active"),
+          electricityRate: asNumber(body.electricityRate, 0),
+          monthlyCleaningFee: asNumber(body.monthlyCleaningFee, 0),
+          monthlyWaterDispenserFee: asNumber(body.monthlyWaterDispenserFee, 0),
+        })
+        .returning({ id: hostelProperties.id });
+      createdId = inserted[0]?.id;
+    } else if (action === "hostel-update") {
+      const hostelId = asNumber(body.hostelId);
+      if (!hostelId || !asText(body.name) || !asText(body.code))
+        throw new Error("Property, name and code are required");
+      await db
+        .update(hostelProperties)
+        .set({
+          code: asText(body.code).toUpperCase(),
+          name: asText(body.name),
+          address: asText(body.address),
+          status: asText(body.status, "active"),
+          electricityRate: asNumber(body.electricityRate, 0),
+          monthlyCleaningFee: asNumber(body.monthlyCleaningFee, 0),
+          monthlyWaterDispenserFee: asNumber(body.monthlyWaterDispenserFee, 0),
+        })
+        .where(eq(hostelProperties.id, hostelId));
     } else if (action === "unit-create") {
       if (!body.hostelId || !asText(body.unitCode))
         throw new Error("Hostel and unit number are required");
@@ -2052,6 +2087,13 @@ export async function POST(request: Request) {
         roomCategory: asText(body.roomCategory, "any"),
         roomType: asText(body.roomType, "any"),
         bathroomType: asText(body.bathroomType, "any"),
+        nationality: asText(body.nationality),
+        nationalityOther: asText(body.nationalityOther),
+        hometown: asText(body.hometown),
+        race: asText(body.race),
+        raceOther: asText(body.raceOther),
+        religion: asText(body.religion),
+        religionOther: asText(body.religionOther),
         targetMoveInDate: asText(body.targetMoveInDate),
         provisionalBedSpaceId: asNullableNumber(body.provisionalBedSpaceId),
         paymentStatus,
@@ -2224,8 +2266,8 @@ export async function POST(request: Request) {
         if (!bedId) throw new Error("Select the actual room code manually");
         const key = `reservation:${reservationId}`;
         await db.execute(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, gender, salesperson, status)
-          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.salesPerson}, 'active')
+          INSERT INTO student_profiles (source_key, student_code, full_name, gender, nationality, nationality_other, hometown, race, race_other, religion, religion_other, salesperson, status)
+          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
           ON CONFLICT DO NOTHING
         `);
         const student = (
@@ -2263,8 +2305,11 @@ export async function POST(request: Request) {
           dateOfBirth: asNullableText(body.dateOfBirth),
           gender: asText(body.gender, "unspecified"),
           race: asText(body.race),
+          raceOther: asText(body.raceOther),
           religion: asText(body.religion),
+          religionOther: asText(body.religionOther),
           nationality: asText(body.nationality),
+          nationalityOther: asText(body.nationalityOther),
           hometown: asText(body.hometown),
           course: asText(body.course),
           school: asText(body.school),
@@ -2321,8 +2366,8 @@ export async function POST(request: Request) {
       if (!asText(body.fullName)) throw new Error("Full name is required");
       const result = (
         await db.execute<{ id: number }>(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, religion, nationality, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status)
-          VALUES (${`manual:${Date.now()}`}, ${asText(body.studentCode)}, ${asText(body.fullName)}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asNullableText(body.dateOfBirth)}, ${asText(body.gender, "unspecified")}, ${asText(body.race)}, ${asText(body.religion)}, ${asText(body.nationality)}, ${asText(body.hometown)}, ${asText(body.course)}, ${asText(body.school)}, ${asText(body.applicationFormNo)}, ${asText(body.receiptNo)}, ${asText(body.salesperson)}, ${asText(body.agency)}, ${asText(body.remarks)}, ${asText(body.profileStatus, "active")})
+          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, contact_number, email, date_of_birth, gender, race, race_other, religion, religion_other, nationality, nationality_other, hometown, course, school, application_form_no, receipt_no, salesperson, agency, remarks, status)
+          VALUES (${`manual:${Date.now()}`}, ${asText(body.studentCode)}, ${asText(body.fullName)}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asNullableText(body.dateOfBirth)}, ${asText(body.gender, "unspecified")}, ${asText(body.race)}, ${asText(body.raceOther)}, ${asText(body.religion)}, ${asText(body.religionOther)}, ${asText(body.nationality)}, ${asText(body.nationalityOther)}, ${asText(body.hometown)}, ${asText(body.course)}, ${asText(body.school)}, ${asText(body.applicationFormNo)}, ${asText(body.receiptNo)}, ${asText(body.salesperson)}, ${asText(body.agency)}, ${asText(body.remarks)}, ${asText(body.profileStatus, "active")})
           RETURNING id
         `)
       )[0];
@@ -3092,6 +3137,13 @@ export async function POST(request: Request) {
         expiresAt: asNullableText(body.expiresAt),
         createdBy: currentUser.displayName,
       });
+    } else if (action === "announcement-pin") {
+      const announcementId = asNumber(body.announcementId);
+      if (!announcementId) throw new Error("Announcement is required");
+      await db
+        .update(announcements)
+        .set({ pinned: boolValue(body.pinned) })
+        .where(eq(announcements.id, announcementId));
     } else if (action === "user-save") {
       if (!asText(body.email) || !body.roleId)
         throw new Error("Email and role are required");

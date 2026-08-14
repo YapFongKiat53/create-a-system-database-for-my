@@ -417,6 +417,7 @@ export function ParkingModule({
                   <input
                     name="tenantName"
                     required
+                    placeholder="e.g. John Doe"
                     defaultValue={rental.tenantName}
                   />
                 </label>
@@ -424,23 +425,25 @@ export function ParkingModule({
                   Contact number
                   <input
                     name="contactNumber"
+                    placeholder="e.g. 0123456789"
                     defaultValue={rental.contactNumber}
                   />
                 </label>
                 <label>
                   Unit number
-                  <input name="unitNumber" defaultValue={rental.unitNumber} />
+                  <input name="unitNumber" placeholder="e.g. NB-0801" defaultValue={rental.unitNumber} />
                 </label>
                 <label>
                   Car plate
                   <input
                     name="carPlateNumber"
+                    placeholder="e.g. ABC 1234"
                     defaultValue={rental.carPlateNumber}
                   />
                 </label>
                 <label>
                   Car model
-                  <input name="carModel" defaultValue={rental.carModel} />
+                  <input name="carModel" placeholder="e.g. Proton Persona" defaultValue={rental.carModel} />
                 </label>
                 <label>
                   Monthly rental
@@ -448,6 +451,7 @@ export function ParkingModule({
                     name="monthlyRental"
                     type="number"
                     min="0"
+                    placeholder="e.g. 100"
                     defaultValue={rental.monthlyRental ?? ""}
                   />
                 </label>
@@ -457,6 +461,7 @@ export function ParkingModule({
                     name="depositAmount"
                     type="number"
                     min="0"
+                    placeholder="e.g. 100"
                     defaultValue={rental.depositAmount ?? ""}
                   />
                 </label>
@@ -466,6 +471,7 @@ export function ParkingModule({
                     name="startDate"
                     type="date"
                     required
+                    placeholder="e.g. 2026-01-01"
                     defaultValue={rental.startDate || ""}
                   />
                 </label>
@@ -474,6 +480,7 @@ export function ParkingModule({
                   <input
                     name="endDate"
                     type="date"
+                    placeholder="e.g. 2026-01-01"
                     defaultValue={rental.endDate || ""}
                   />
                 </label>
@@ -482,6 +489,7 @@ export function ParkingModule({
                   <input
                     name="paidUntil"
                     type="date"
+                    placeholder="e.g. 2026-01-01"
                     defaultValue={rental.paidUntil || ""}
                   />
                 </label>
@@ -618,7 +626,7 @@ export function ParkingModule({
             </label>
             <label>
               Lot number
-              <input name="lotNumber" required />
+              <input name="lotNumber" required placeholder="e.g. NB-0801" />
             </label>
             <label>
               Belongs to unit
@@ -641,7 +649,7 @@ export function ParkingModule({
             </label>
             <label className="wide">
               Notes
-              <input name="notes" />
+              <input name="notes" placeholder="e.g. Notes about the lot" />
             </label>
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>
@@ -710,7 +718,7 @@ export function ParkingModule({
             </label>
             <label>
               Payment for period
-              <input name="period" placeholder="e.g. July 2026" />
+              <input name="period" placeholder="e.g. 2026-07" />
             </label>
             <label>
               Amount
@@ -730,7 +738,7 @@ export function ParkingModule({
             </label>
             <label>
               Reference / receipt no.
-              <input name="reference" />
+              <input name="reference" placeholder="e.g. 1234567890" />
             </label>
             <label>
               Status
@@ -741,7 +749,7 @@ export function ParkingModule({
             </label>
             <label className="wide">
               Remarks
-              <input name="remarks" />
+              <input name="remarks" placeholder="e.g. Payment for July 2026" />
             </label>
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>

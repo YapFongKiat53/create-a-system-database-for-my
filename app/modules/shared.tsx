@@ -68,30 +68,15 @@ export const blankCharges = Object.fromEntries(
 ) as Record<string, number>;
 export const NATIONALITIES = [
   "Malaysian",
-  "Chinese",
-  "Indonesian",
-  "Indian",
-  "Bangladeshi",
-  "Pakistani",
-  "Nepalese",
-  "Sri Lankan",
-  "Vietnamese",
-  "Myanmar",
-  "Thai",
-  "Filipino",
-  "Singaporean",
-  "Korean",
-  "Japanese",
-  "Nigerian",
-  "Yemeni",
-  "Saudi Arabian",
-  "Omani",
-  "Iraqi",
-  "Iranian",
-  "Sudanese",
-  "Somali",
-  "Kazakh",
-  "Other",
+  "International",
+];
+export const RACES = ["Chinese", "Malay", "Indian", "Others"];
+export const RELIGIONS = [
+  "Hinduism",
+  "Buddhism",
+  "Islam",
+  "Christianity",
+  "Others",
 ];
 export const money = (value: number | null | undefined, cents = false) =>
   value === null || value === undefined || Number.isNaN(Number(value))
@@ -251,6 +236,118 @@ export function SearchSelect({
           <option key={String(option.value)} value={option.label} />
         ))}
       </datalist>
+    </>
+  );
+}
+
+// Nationality / hometown / race / religion fields shared by the reservation
+// form and both student create/edit forms. Renders inline inside the
+// caller's own <form> (it has no <form> or submit of its own) — the extra
+// "specify" inputs only exist in the DOM while International/Others is
+// selected, so `formValues()` naturally omits them otherwise. Pass a `key`
+// that changes with the record being edited (e.g. `key={student.id}`) so
+// the internal show/hide state resets when switching records; a
+// freshly-mounted create form needs no key since mounting already starts
+// state fresh.
+export function DemographicFields({
+  nationality: initialNationality = "",
+  nationalityOther: initialNationalityOther = "",
+  hometown: initialHometown = "",
+  race: initialRace = "",
+  raceOther: initialRaceOther = "",
+  religion: initialReligion = "",
+  religionOther: initialReligionOther = "",
+}: {
+  nationality?: string;
+  nationalityOther?: string;
+  hometown?: string;
+  race?: string;
+  raceOther?: string;
+  religion?: string;
+  religionOther?: string;
+}) {
+  const [nationality, setNationality] = useState(initialNationality);
+  const [race, setRace] = useState(initialRace);
+  const [religion, setReligion] = useState(initialReligion);
+  return (
+    <>
+      <label>
+        Nationality
+        <select
+          name="nationality"
+          value={nationality}
+          onChange={(event) => setNationality(event.target.value)}
+        >
+          <option value="">Not set</option>
+          {NATIONALITIES.map((n) => (
+            <option key={n}>{n}</option>
+          ))}
+        </select>
+      </label>
+      {nationality === "International" && (
+        <label>
+          Specify country
+          <input
+            name="nationalityOther"
+            placeholder="e.g. Indonesia"
+            defaultValue={initialNationalityOther}
+          />
+        </label>
+      )}
+      <label>
+        Hometown
+        <input
+          name="hometown"
+          placeholder="e.g. Kuala Lumpur"
+          defaultValue={initialHometown}
+        />
+      </label>
+      <label>
+        Race
+        <select
+          name="race"
+          value={race}
+          onChange={(event) => setRace(event.target.value)}
+        >
+          <option value="">Select race</option>
+          {RACES.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      </label>
+      {race === "Others" && (
+        <label>
+          Specify race
+          <input
+            name="raceOther"
+            placeholder="e.g. Eurasian"
+            defaultValue={initialRaceOther}
+          />
+        </label>
+      )}
+      <label>
+        Religion
+        <select
+          name="religion"
+          value={religion}
+          onChange={(event) => setReligion(event.target.value)}
+        >
+          <option value="">Select religion</option>
+          {RELIGIONS.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      </label>
+      {religion === "Others" && (
+        <label>
+          Specify religion
+          <input
+            name="religionOther"
+            placeholder="e.g. Sikhism"
+            defaultValue={initialReligionOther}
+          />
+        </label>
+      )}
     </>
   );
 }

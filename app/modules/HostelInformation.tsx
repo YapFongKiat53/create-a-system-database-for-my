@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  DemographicFields,
   Empty,
   Modal,
   SearchSelect,
@@ -490,6 +491,11 @@ export function HostelModule({
   const [expandedUnit, setExpandedUnit] = useState<string | null>(null);
   const [unitSearchQuery, setUnitSearchQuery] = useState("");
   const [unitStatusFilter, setUnitStatusFilter] = useState("all"); // 'all' | 'available' | 'unavailable'
+  const [hostelSearchQuery, setHostelSearchQuery] = useState("");
+  const [hostelStatusFilter, setHostelStatusFilter] = useState("all"); // 'all' | 'available' | 'full'
+  const [hostelGenderFilter, setHostelGenderFilter] = useState("all");
+  const [hostelModalOpen, setHostelModalOpen] = useState(false);
+  const [editingHostel, setEditingHostel] = useState<Row | null>(null);
 
   const [roomSearchQuery, setRoomSearchQuery] = useState("");
   const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied'
@@ -512,43 +518,98 @@ export function HostelModule({
     rooms.length > 0 &&
     rooms.every((room) => selectedRooms.includes(room.id));
 
+  // Unit-level occupancy for the directory header — distinct from the
+  // bed-level totals already tracked above (a unit counts as occupied if
+  // any of its beds is not vacant).
+  const occupiedUnitsCount = data.units.filter((unit) =>
+    data.bedSpaces.some(
+      (bed) => bed.unitId === unit.id && bed.status !== "vacant",
+    ),
+  ).length;
+  const unitOccupancyRate =
+    data.units.length > 0
+      ? Math.round((occupiedUnitsCount / data.units.length) * 1000) / 10
+      : 0;
+
+  const filteredHostels = data.hostels.filter((hostel) => {
+    const query = hostelSearchQuery.toLowerCase().trim();
+    const matchesSearch =
+      !query ||
+      hostel.name.toLowerCase().includes(query) ||
+      hostel.address.toLowerCase().includes(query) ||
+      hostel.code.toLowerCase().includes(query);
+    const matchesStatus =
+      hostelStatusFilter === "all" ||
+      (hostelStatusFilter === "available" && hostel.vacant > 0) ||
+      (hostelStatusFilter === "full" && hostel.vacant === 0);
+    const gendersInHostel = new Set(
+      data.units
+        .filter((unit) => unit.hostelId === hostel.id)
+        .map((unit) => unit.gender),
+    );
+    const hostelGender =
+      gendersInHostel.size > 1
+        ? "mixed"
+        : [...gendersInHostel][0] || "mixed";
+    const matchesGender =
+      hostelGenderFilter === "all" || hostelGender === hostelGenderFilter;
+    return matchesSearch && matchesStatus && matchesGender;
+  });
 
   return (
     <>
       <div className="sales-overview">
 
+        <section className="directory-header">
+          <div>
+            <h1>Hostel Directory</h1>
+            <p>All properties and their unit overview at a glance.</p>
+          </div>
+          <div className="directory-header-actions">
+            {canUseSales && (
+              <button className="primary" onClick={() => openReservation()}>
+                + New reservation
+              </button>
+            )}
+            {canUseSales && (
+              <button
+                className="primary"
+                onClick={() => {
+                  setEditingHostel(null);
+                  setHostelModalOpen(true);
+                }}
+              >
+                + Add property
+              </button>
+            )}
+          </div>
+        </section>
+
         <section className="metrics-container">
           <Metric
-            label="HOSTELS"
+            label="TOTAL PROPERTIES"
             value={String(data.hostels.length)}
-            note={`${data.units.length} property units`}
+            note="Active properties"
             tone="green"
           />
           <Metric
-            label="TOTAL ROOM CODES"
-            value={String(totals.beds)}
-            note={`${totals.vacant} vacant now`}
+            label="TOTAL UNITS"
+            value={String(data.units.length)}
+            note={`${totals.beds} room codes total`}
             tone="navy"
           />
           <Metric
-            label="OCCUPIED"
-            value={String(totals.occupied)}
-            note={`${totals.occupied} of ${totals.beds} codes`}
+            label="TOTAL OCCUPIED"
+            value={String(occupiedUnitsCount)}
+            note={`${totals.occupied} of ${totals.beds} beds occupied`}
             tone="sand"
           />
           <Metric
-            label="OCCUPANCY"
-            value={`${Math.round((totals.occupied / Math.max(1, totals.occupied + totals.vacant)) * 100)}%`}
-            note={`${totals.special} special-use`}
+            label="OVERALL OCCUPANCY"
+            value={`${unitOccupancyRate}%`}
+            note={`${totals.vacant} beds vacant now`}
             tone="coral"
           />
-        </section>
-        <section className="intro compact-intro">
-          {canUseSales && (
-            <button className="primary" onClick={() => openReservation()}>
-              + New reservation
-            </button>
-          )}
         </section>
 
       </div>
@@ -623,20 +684,77 @@ export function HostelModule({
                 </span>
               </div>
             </div> */}
+            <section className="directory-filters">
+              <div className="inline-filters">
+              <div className="search-input-wrapper">
+                <svg className="search-icon" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search property, address..."
+                  value={hostelSearchQuery}
+                  onChange={(e) => setHostelSearchQuery(e.target.value)}
+                />
+              </div>
+              <select
+                value={hostelStatusFilter}
+                onChange={(e) => setHostelStatusFilter(e.target.value)}
+              >
+                <option value="all">All Status</option>
+                <option value="available">Available</option>
+                <option value="full">Full</option>
+              </select>
+              <select
+                value={hostelGenderFilter}
+                onChange={(e) => setHostelGenderFilter(e.target.value)}
+              >
+                <option value="all">All Gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="mixed">Mixed</option>
+              </select>
+              </div>
+            </section>
             <section className="directory-table-container">
               <div className="modern-property-table">
                 <div className="mpt-header">
                   <span>Property</span>
-                  <span>Unit / Type</span>
-                  <span>Gender</span>
+                  <span>Units</span>
+                  <span>Gender / Type</span>
                   <span>Status</span>
-                  <span>Occupant</span>
-                  <span>Action / Rate</span>
+                  <span>Occupancy</span>
+                  <span>Access / Wi-Fi</span>
+                  <span>Parking</span>
+                  <span>Action</span>
                 </div>
 
-                {data.hostels.map((hostel) => {
+                {filteredHostels.map((hostel) => {
                   const unitsInHostel = data.units.filter(u => u.hostelId === hostel.id);
                   const isHostelExpanded = expandedHostel === hostel.id;
+                  const activeUnitsCount = unitsInHostel.filter(
+                    (u) => u.status === "active",
+                  ).length;
+                  const gendersInHostel = new Set(
+                    unitsInHostel.map((u) => u.gender),
+                  );
+                  const hostelGenderLabel =
+                    gendersInHostel.size > 1
+                      ? "Mixed"
+                      : genderLabel([...gendersInHostel][0] || "mixed");
+                  const accessCardsCount = data.accessCards.filter(
+                    (c) => c.hostelName === hostel.name,
+                  ).length;
+                  const wifiCount = data.services.filter(
+                    (s) => s.hostelName === hostel.name,
+                  ).length;
+                  const parkingCount = data.parkingLots.filter(
+                    (p) => p.hostelId === hostel.id,
+                  ).length;
+                  const hostelOccupancyRate =
+                    hostel.bedSpaces > 0
+                      ? Math.round((hostel.occupied / hostel.bedSpaces) * 1000) / 10
+                      : 0;
 
                   // 1. 提前处理好【过滤后的 Unit 数组】
                   const filteredUnits = unitsInHostel.filter((unit) => {
@@ -661,25 +779,61 @@ export function HostelModule({
 
                   return (
                     <React.Fragment key={hostel.id}>
-                      {/* 第一层：Hostel 级别 (保持不变) */}
+                      {/* 第一层：Hostel 级别 */}
                       <div className="mpt-row hostel-row" onClick={() => toggleHostel(hostel.id)}>
                         <div className="mpt-property">
-                          <img src={`https://ui-avatars.com/api/?name=${hostel.name}&background=f3f4f6&color=374151&size=128&font-size=0.33`} alt={hostel.name} />
+                          <span className="hostel-avatar">{hostel.code}</span>
                           <div className="info">
                             <strong>{hostel.name}</strong>
                             <span>{hostel.address}</span>
                           </div>
                         </div>
-                        <div className="mpt-cell">{hostel.units} Units</div>
-                        <div className="mpt-cell">Mixed</div>
+                        <div className="mpt-cell">{unitsInHostel.length} units</div>
+                        <div className="mpt-cell mpt-cell-stacked">
+                          <span>{hostelGenderLabel}</span>
+                          <small>Unit allocation</small>
+                        </div>
                         <div className="mpt-cell">
                           <span className={`status-badge ${hostel.vacant > 0 ? 'available' : 'occupied'}`}>
                             {hostel.vacant > 0 ? 'Available' : 'Full'}
                           </span>
                         </div>
-                        <div className="mpt-cell">-</div>
-                        <div className="mpt-cell rate-cell">
-                          {hostel.vacant} vacant
+                        <div className="mpt-cell mpt-cell-stacked">
+                          <span>{hostelOccupancyRate}%</span>
+                          <small>
+                            {activeUnitsCount} active of {unitsInHostel.length}
+                          </small>
+                        </div>
+                        <div className="mpt-cell mpt-cell-stacked">
+                          <span>{accessCardsCount} cards</span>
+                          <small>{wifiCount} Wi-Fi</small>
+                        </div>
+                        <div className="mpt-cell">
+                          {parkingCount} {parkingCount === 1 ? "lot" : "lots"}
+                        </div>
+                        <div className="mpt-cell hostel-action-cell">
+                          <button
+                            type="button"
+                            className="secondary compact"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleHostel(hostel.id);
+                            }}
+                          >
+                            {isHostelExpanded ? "Hide units" : "View units"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary compact icon-btn"
+                            aria-label="Edit property"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingHostel(hostel);
+                              setHostelModalOpen(true);
+                            }}
+                          >
+                            ⋮
+                          </button>
                         </div>
                       </div>
 
@@ -1998,6 +2152,73 @@ export function HostelModule({
           </>
         )}
       </section>
+      {hostelModalOpen && (
+        <Modal
+          title={editingHostel ? "Edit property" : "Add property"}
+          kicker="HOSTEL DIRECTORY"
+          onClose={() => {
+            setHostelModalOpen(false);
+            setEditingHostel(null);
+          }}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                {
+                  action: editingHostel ? "hostel-update" : "hostel-create",
+                  hostelId: editingHostel?.id,
+                  ...formValues(e),
+                },
+                editingHostel ? "Property updated" : "Property added",
+              );
+              if (ok) {
+                setHostelModalOpen(false);
+                setEditingHostel(null);
+              }
+            }}
+          >
+            <label>
+              Property name
+              <input
+                name="name"
+                required
+                defaultValue={editingHostel?.name || ""}
+              />
+            </label>
+            <label>
+              Property code
+              <input
+                name="code"
+                required
+                maxLength={10}
+                style={{ textTransform: "uppercase" }}
+                defaultValue={editingHostel?.code || ""}
+              />
+            </label>
+            <label className="wide">
+              Address
+              <input
+                name="address"
+                defaultValue={editingHostel?.address || ""}
+              />
+            </label>
+            <label>
+              Status
+              <select name="status" defaultValue={editingHostel?.status || "active"}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
+            <div className="form-actions wide">
+              <button className="primary" disabled={busy}>
+                {editingHostel ? "Update property" : "Save property"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {reservationOpen && (
         <Modal
           title={editingReservation ? "Edit reservation" : "New reservation"}
@@ -2260,7 +2481,7 @@ function ReservationEditor({
     ),
   );
   const [gender, setGender] = useState(
-    editingReservation?.preferredGender || reservationBed?.gender || "female",
+    editingReservation?.preferredGender || reservationBed?.gender || "male",
   );
   const [date, setDate] = useState(
     editingReservation?.targetMoveInDate || availableDate,
@@ -2372,6 +2593,7 @@ function ReservationEditor({
         <input
           name="studentName"
           required
+          placeholder="e.g. John Doe"
           defaultValue={editingReservation?.studentName || ""}
         />
       </label>
@@ -2382,10 +2604,20 @@ function ReservationEditor({
           value={gender}
           onChange={(event) => setGender(event.target.value)}
         >
-          <option value="female">Female student</option>
           <option value="male">Male student</option>
+          <option value="female">Female student</option>
         </select>
       </label>
+      <DemographicFields
+        key={editingReservation?.id || "new"}
+        nationality={editingReservation?.nationality || ""}
+        nationalityOther={editingReservation?.nationalityOther || ""}
+        hometown={editingReservation?.hometown || ""}
+        race={editingReservation?.race || ""}
+        raceOther={editingReservation?.raceOther || ""}
+        religion={editingReservation?.religion || ""}
+        religionOther={editingReservation?.religionOther || ""}
+      />
       {kind === "group" && (
         <>
           <label>
