@@ -1,0 +1,1 @@
+ALTER TABLE "reservations" ADD COLUMN "identity_no" text DEFAULT '' NOT NULL;

@@ -5,7 +5,9 @@ import { useState } from "react";
 import {
   Modal,
   ParkingRentalForm,
+  SearchIcon,
   Stat,
+  StatusPill,
   blockOf,
   dateLabel,
   formValues,
@@ -87,7 +89,9 @@ function AddParkingLotForm({
         <input
           name="lotNumber"
           required
-          placeholder={LOT_NUMBER_HINTS[String(hostel?.code || "")] || "e.g. Parking 101"}
+          placeholder={
+            LOT_NUMBER_HINTS[String(hostel?.code || "")] || "e.g. Parking 101"
+          }
         />
       </label>
       {blockOptions.length > 0 && (
@@ -214,7 +218,7 @@ export function ParkingModule({
       return rentalSortDir === "asc" ? result : -result;
     });
   return (
-    <>
+    <div className="table-v2">
       <section className="intro compact-intro">
         <div>
           <span className="section-kicker">PARKING REGISTER</span>
@@ -225,7 +229,7 @@ export function ParkingModule({
           </p>
         </div>
         <div className="button-row">
-          <button className="secondary" onClick={() => setModal("lot")}>
+          <button className="v2-btn-primary" onClick={() => setModal("lot")}>
             + Add parking lot
           </button>
         </div>
@@ -276,31 +280,29 @@ export function ParkingModule({
             Outside tenants
           </button>
         </div>
-        <div className="filters">
-          <label className="search">
-            <span>Search rentals</span>
+        <div className="v2-toolbar">
+          <label className="v2-search">
+            <SearchIcon />
             <input
               value={rentalSearch}
               onChange={(e) => setRentalSearch(e.target.value)}
-              placeholder="Tenant, car plate, lot or hostel"
+              placeholder="Search tenant, car plate, lot or hostel"
             />
           </label>
-          <label>
-            Hostel
-            <select
-              value={hostelFilter}
-              onChange={(event) => setHostelFilter(event.target.value)}
-            >
-              <option value="all">All hostels</option>
-              {data.hostels.map((hostel) => (
-                <option key={hostel.id} value={hostel.id}>
-                  {hostel.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            className="v2-pill-select"
+            value={hostelFilter}
+            onChange={(event) => setHostelFilter(event.target.value)}
+          >
+            <option value="all">All hostels</option>
+            {data.hostels.map((hostel) => (
+              <option key={hostel.id} value={hostel.id}>
+                {hostel.name}
+              </option>
+            ))}
+          </select>
           <button
-            className="secondary reset-button"
+            className="v2-reset"
             onClick={() => {
               setRentalSearch("");
               setHostelFilter("all");
@@ -366,9 +368,7 @@ export function ParkingModule({
                     )}
                   </td>
                   <td>
-                    <span className={`unit-status ${r.status}`}>
-                      {titleCase(r.status)}
-                    </span>
+                    <StatusPill status={r.status} />
                   </td>
                   <td>
                     <button
@@ -401,32 +401,57 @@ export function ParkingModule({
             <h3>Lots by hostel and unit</h3>
           </div>
         </div>
-        <div className="lot-grid">
-          {filteredLots.map((l) => (
-            <article key={l.id}>
-              <code>{l.lotNumber}</code>
-              <strong>{l.hostelName}</strong>
-              <small>
-                {l.unitCode
-                  ? `Belongs to unit ${l.unitCode}`
-                  : "Common / hostel lot"}
-              </small>
-              <span className={`unit-status ${l.status}`}>
-                {titleCase(l.status)}
-              </span>
-              {l.status === "available" && (
-                <button
-                  className="secondary compact"
-                  onClick={() => {
-                    setReservingLotId(l.id);
-                    setModal("rental");
-                  }}
-                >
-                  Reserve / rent this lot
-                </button>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Lot</th>
+                <th>Hostel / Unit</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLots.map((l) => (
+                <tr key={l.id}>
+                  <td>
+                    <code>{l.lotNumber}</code>
+                  </td>
+                  <td>
+                    <strong>{l.hostelName}</strong>
+                    <small>
+                      {l.unitCode
+                        ? `Belongs to unit ${l.unitCode}`
+                        : "Common / hostel lot"}
+                    </small>
+                  </td>
+                  <td>
+                    <StatusPill status={l.status} />
+                  </td>
+                  <td>
+                    {l.status === "available" && (
+                      <button
+                        className="secondary compact"
+                        onClick={() => {
+                          setReservingLotId(l.id);
+                          setModal("rental");
+                        }}
+                      >
+                        Reserve / rent this lot
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filteredLots.length === 0 && (
+                <tr>
+                  <td colSpan={4}>
+                    <em>No parking lots match this view.</em>
+                  </td>
+                </tr>
               )}
-            </article>
-          ))}
+            </tbody>
+          </table>
         </div>
       </section>
       {rental && (
@@ -666,6 +691,6 @@ export function ParkingModule({
           />
         </Modal>
       )}
-    </>
+    </div>
   );
 }

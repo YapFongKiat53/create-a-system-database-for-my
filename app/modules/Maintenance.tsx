@@ -6,7 +6,9 @@ import {
   Empty,
   Modal,
   ReportCard,
+  SearchIcon,
   SearchSelect,
+  StatusPill,
   blockOf,
   dateLabel,
   formValues,
@@ -139,6 +141,8 @@ export function MaintenanceModule({
   const [costTo, setCostTo] = useState("");
   const [editingMeter, setEditingMeter] = useState<Row | null>(null);
   const [meterRoomId, setMeterRoomId] = useState("");
+  const [meterHostelId, setMeterHostelId] = useState("");
+  const [meterRoomType, setMeterRoomType] = useState("");
   const meterMonths = [
     ...new Set(
       data.meterReadings
@@ -188,6 +192,31 @@ export function MaintenanceModule({
       .includes(meterQuery.toLowerCase());
     return monthMatch && searchMatch;
   });
+  // Same pairing/rounding as the billing-cycle calculation (current minus
+  // the room's immediately preceding reading, billed at the hostel's
+  // per-kWh rate) — shown here so staff can see, at the moment they record
+  // a reading, what it will actually bill out to once shared among the
+  // room's students.
+  const readingUsage = (reading: Row) => {
+    const previous = data.meterReadings
+      .filter(
+        (candidate: Row) =>
+          candidate.roomId === reading.roomId &&
+          (candidate.readingDate < reading.readingDate ||
+            (candidate.readingDate === reading.readingDate &&
+              Number(candidate.id) < Number(reading.id))),
+      )
+      .sort((a: Row, b: Row) =>
+        a.readingDate === b.readingDate
+          ? Number(b.id) - Number(a.id)
+          : String(b.readingDate).localeCompare(String(a.readingDate)),
+      )[0];
+    if (!previous) return null;
+    const usage = Number(reading.readingValue) - Number(previous.readingValue);
+    if (!(usage > 0)) return { usage: 0, amount: 0 };
+    const amount = Math.ceil(usage * Number(reading.electricityRate || 0));
+    return { usage, amount };
+  };
   const filteredCosts = [
     ...data.tickets
       .filter(
@@ -266,7 +295,7 @@ export function MaintenanceModule({
     (unit) => !ticketBlock || blockOf(unit.unitCode) === ticketBlock,
   );
   return (
-    <>
+    <div className="table-v2">
       <section className="intro compact-intro">
         <div>
           <span className="section-kicker">MAINTENANCE & RESIDENT SUPPORT</span>
@@ -292,7 +321,7 @@ export function MaintenanceModule({
               Manage categories
             </button>
           )}
-          <button className="primary" onClick={() => setModal("ticket")}>
+          <button className="v2-btn-primary" onClick={() => setModal("ticket")}>
             + Submit ticket
           </button>
         </div>
@@ -384,31 +413,29 @@ export function MaintenanceModule({
             )}
           </section>
           <section className="panel">
-            <div className="filters">
-              <label className="search">
-                Hostel, room, student or issue
+            <div className="v2-toolbar">
+              <label className="v2-search">
+                <SearchIcon />
                 <input
                   value={ticketQuery}
                   onChange={(event) => setTicketQuery(event.target.value)}
                   placeholder="Search hostel/room code, student, category or issue"
                 />
               </label>
-              <label>
-                Hostel
-                <select
-                  value={ticketHostel}
-                  onChange={(event) => setTicketHostel(event.target.value)}
-                >
-                  <option value="all">All hostels</option>
-                  {data.hostels.map((hostel) => (
-                    <option key={hostel.id} value={hostel.id}>
-                      {hostel.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <select
+                className="v2-pill-select"
+                value={ticketHostel}
+                onChange={(event) => setTicketHostel(event.target.value)}
+              >
+                <option value="all">All hostels</option>
+                {data.hostels.map((hostel) => (
+                  <option key={hostel.id} value={hostel.id}>
+                    {hostel.name}
+                  </option>
+                ))}
+              </select>
               <button
-                className="secondary reset-button"
+                className="v2-reset"
                 onClick={() => {
                   setTicketQuery("");
                   setTicketHostel("all");
@@ -458,9 +485,7 @@ export function MaintenanceModule({
                         <small>{t.description}</small>
                       </td>
                       <td>
-                        <span className={`ticket-status ${t.status}`}>
-                          {titleCase(t.status)}
-                        </span>
+                        <StatusPill status={t.status} />
                         <small>{titleCase(t.priority)}</small>
                       </td>
                       <td>{dateLabel(t.createdAt)}</td>
@@ -519,6 +544,8 @@ export function MaintenanceModule({
                 onClick={() => {
                   setEditingMeter(null);
                   setMeterRoomId("");
+                  setMeterHostelId("");
+                  setMeterRoomType("");
                   setModal("meter");
                 }}
               >
@@ -526,29 +553,27 @@ export function MaintenanceModule({
               </button>
             </div>
           </div>
-          <div className="filters">
-            <label className="search">
-              Unit / room code
+          <div className="v2-toolbar">
+            <label className="v2-search">
+              <SearchIcon />
               <input
                 value={meterQuery}
                 onChange={(event) => setMeterQuery(event.target.value)}
                 placeholder="Type unit or room code"
               />
             </label>
-            <label>
-              Month
-              <select
-                value={meterMonth}
-                onChange={(event) => setMeterMonth(event.target.value)}
-              >
-                <option value="all">All months</option>
-                {meterMonths.map((ym) => (
-                  <option key={ym} value={ym}>
-                    {monthLabel(ym)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <select
+              className="v2-pill-select"
+              value={meterMonth}
+              onChange={(event) => setMeterMonth(event.target.value)}
+            >
+              <option value="all">All months</option>
+              {meterMonths.map((ym) => (
+                <option key={ym} value={ym}>
+                  {monthLabel(ym)}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="table-wrap">
             <table>
@@ -558,6 +583,8 @@ export function MaintenanceModule({
                   <th>Hostel / unit</th>
                   <th>Date</th>
                   <th>Reading</th>
+                  <th>Usage</th>
+                  <th>Amount</th>
                   <th>Type</th>
                   <th>Submitted by</th>
                   <th>Notes</th>
@@ -565,7 +592,9 @@ export function MaintenanceModule({
                 </tr>
               </thead>
               <tbody>
-                {filteredReadings.map((r) => (
+                {filteredReadings.map((r) => {
+                  const usage = readingUsage(r);
+                  return (
                   <tr key={r.id}>
                     <td>
                       <code>{r.roomCode}</code>
@@ -577,6 +606,15 @@ export function MaintenanceModule({
                     <td>
                       <strong>{r.readingValue}</strong>
                     </td>
+                    <td>
+                      {usage ? `${usage.usage.toFixed(2)} kWh` : "First reading"}
+                    </td>
+                    <td>
+                      <strong>{usage ? money(usage.amount, true) : "-"}</strong>
+                      {usage && (
+                        <small>total for room, split by occupants</small>
+                      )}
+                    </td>
                     <td>{titleCase(r.readingType)}</td>
                     <td>{r.submittedBy}</td>
                     <td>{r.notes || "-"}</td>
@@ -586,6 +624,13 @@ export function MaintenanceModule({
                         onClick={() => {
                           setEditingMeter(r);
                           setMeterRoomId(String(r.roomId));
+                          const room = meterRooms.find(
+                            (rm) => String(rm.roomId) === String(r.roomId),
+                          );
+                          setMeterHostelId(
+                            room ? String(room.hostelId) : "",
+                          );
+                          setMeterRoomType(room ? room.roomType : "");
                           setModal("meter");
                         }}
                       >
@@ -593,7 +638,8 @@ export function MaintenanceModule({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -656,13 +702,13 @@ export function MaintenanceModule({
                 </h3>
               </div>
               <button
-                className="primary compact"
+                className="v2-btn-primary"
                 onClick={() => setModal("general-cost")}
               >
                 + Add general costing
               </button>
             </div>
-            <div className="filters">
+            <div className="v2-toolbar">
               <label>
                 From
                 <input
@@ -680,7 +726,7 @@ export function MaintenanceModule({
                 />
               </label>
               <button
-                className="secondary reset-button"
+                className="v2-reset"
                 onClick={() => {
                   setCostFrom("");
                   setCostTo("");
@@ -1491,17 +1537,61 @@ export function MaintenanceModule({
               }
             }}
           >
+            <label>
+              Hostel
+              <select
+                value={meterHostelId}
+                onChange={(event) => {
+                  setMeterHostelId(event.target.value);
+                  setMeterRoomId("");
+                }}
+              >
+                <option value="">Select hostel</option>
+                {data.hostels.map((hostel) => (
+                  <option key={hostel.id} value={hostel.id}>
+                    {hostel.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Room type
+              <select
+                value={meterRoomType}
+                disabled={!meterHostelId}
+                onChange={(event) => {
+                  setMeterRoomType(event.target.value);
+                  setMeterRoomId("");
+                }}
+              >
+                <option value="">Select room type</option>
+                <option value="single">Single room</option>
+                <option value="sharing">Sharing room</option>
+              </select>
+            </label>
             <label className="wide">
               Room code
               <SearchSelect
+                key={`${meterHostelId}:${meterRoomType}`}
                 name="roomId"
                 required={!editingMeter}
                 defaultValue={editingMeter?.roomId}
-                options={meterRooms.map((room) => ({
-                  value: room.roomId,
-                  label: `${room.unitCode}-${room.roomLabel} · ${room.hostelName}/${room.unitCode}`,
-                }))}
-                placeholder="Type room code, unit or hostel"
+                options={meterRooms
+                  .filter(
+                    (room) =>
+                      (!meterHostelId ||
+                        String(room.hostelId) === meterHostelId) &&
+                      (!meterRoomType || room.roomType === meterRoomType),
+                  )
+                  .map((room) => ({
+                    value: room.roomId,
+                    label: `${room.unitCode}-${room.roomLabel} · ${room.hostelName}/${room.unitCode}`,
+                  }))}
+                placeholder={
+                  meterHostelId && meterRoomType
+                    ? "Type room code or unit"
+                    : "Select a hostel and room type first"
+                }
                 onValueChange={setMeterRoomId}
               />
             </label>
@@ -1578,6 +1668,6 @@ export function MaintenanceModule({
           </form>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

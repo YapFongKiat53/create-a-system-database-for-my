@@ -68,6 +68,32 @@ export const hostelRooms = pgTable(
   ],
 );
 
+// The standard monthly rate for a room category (A/B/C/D) at a hostel —
+// e.g. Damai Room A is always RM750 unless a specific room's own
+// sales_rate overrides it. Newly created rooms in a category with a row
+// here inherit this rate instead of starting unpriced; the reservation
+// payment breakdown reads the same row rather than a hardcoded constant.
+export const hostelCategoryRates = pgTable(
+  "hostel_category_rates",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+    hostelId: bigint("hostel_id", { mode: "number" })
+      .notNull()
+      .references(() => hostelProperties.id),
+    roomCategory: text("room_category").notNull(),
+    monthlyRate: doublePrecision("monthly_rate").notNull(),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(CURRENT_TIMESTAMP)::text`),
+  },
+  (table) => [
+    uniqueIndex("hostel_category_rate_unique").on(
+      table.hostelId,
+      table.roomCategory,
+    ),
+  ],
+);
+
 export const bedSpaces = pgTable(
   "bed_spaces",
   {
@@ -159,6 +185,10 @@ export const accommodationAssignments = pgTable("accommodation_assignments", {
   sourceReservationId: bigint("source_reservation_id", { mode: "number" }),
   remarks: text("remarks").notNull().default(""),
   status: text("status").notNull().default("active"),
+  // Set once staff mark that the student has applied to renew this
+  // tenancy — clears the "ending soon, no renewal" flag on the room even
+  // though the agreement end date itself hasn't moved yet.
+  renewalAppliedAt: text("renewal_applied_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
@@ -184,6 +214,7 @@ export const reservations = pgTable("reservations", {
   bathroomType: text("bathroom_type").notNull().default("any"),
   contactNumber: text("contact_number").notNull().default(""),
   email: text("email").notNull().default(""),
+  identityNo: text("identity_no").notNull().default(""),
   nationality: text("nationality").notNull().default(""),
   nationalityOther: text("nationality_other").notNull().default(""),
   state: text("state").notNull().default(""),
@@ -208,8 +239,16 @@ export const reservations = pgTable("reservations", {
   paymentReference: text("payment_reference").notNull().default(""),
   inventoryCommitted: boolean("inventory_committed").notNull().default(false),
   paymentUpdatedAt: text("payment_updated_at"),
+  // Set when Finance marks this reservation's payment as reviewed/recorded.
+  // Null, or older than paymentUpdatedAt, means Finance hasn't seen the
+  // latest payment yet — that's what drives the pending-review badge.
+  financeReviewedAt: text("finance_reviewed_at"),
   status: text("status").notNull().default("reserved"),
   convertedAt: text("converted_at"),
+  // Soft-cancel: status becomes "cancelled" and this is stamped, but the
+  // row (and its payments/charges) stays — unlike reservation-delete, which
+  // hard-deletes everything. Kept for accounting history and audit trail.
+  cancelledAt: text("cancelled_at"),
   notes: text("notes").notNull().default(""),
   createdAt: text("created_at")
     .notNull()
@@ -533,17 +572,29 @@ export const billingInvoices = pgTable("billing_invoices", {
     .default(sql`(CURRENT_TIMESTAMP)::text`),
 });
 
-export const billingItems = pgTable("billing_items", {
-  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
-  invoiceId: bigint("invoice_id", { mode: "number" })
-    .notNull()
-    .references(() => billingInvoices.id),
-  itemType: text("item_type").notNull(),
-  description: text("description").notNull(),
-  quantity: doublePrecision("quantity").notNull().default(1),
-  rate: doublePrecision("rate").notNull().default(0),
-  amount: doublePrecision("amount").notNull().default(0),
-});
+export const billingItems = pgTable(
+  "billing_items",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+    invoiceId: bigint("invoice_id", { mode: "number" })
+      .notNull()
+      .references(() => billingInvoices.id),
+    itemType: text("item_type").notNull(),
+    description: text("description").notNull(),
+    quantity: doublePrecision("quantity").notNull().default(1),
+    rate: doublePrecision("rate").notNull().default(0),
+    amount: doublePrecision("amount").notNull().default(0),
+  },
+  (table) => [
+    // Each invoice can only carry one late-payment-charge line item — this
+    // is what lets applyLatePaymentCharges use a single atomic upsert
+    // instead of a select-then-branch that two concurrent runs could both
+    // pass, each inserting their own duplicate row.
+    uniqueIndex("billing_item_late_charge_unique")
+      .on(table.invoiceId)
+      .where(sql`item_type = 'late-payment-charge'`),
+  ],
+);
 
 export const billingPaymentRecords = pgTable("billing_payment_records", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),

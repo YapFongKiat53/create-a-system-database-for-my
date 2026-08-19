@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Empty,
   MALAYSIAN_STATES,
@@ -16,15 +16,25 @@ import {
   chargeLabels,
   commitsInventory,
   dateLabel,
+  formatIC,
   formValues,
   genderLabel,
   money,
   reservationWeight,
   titleCase,
   today,
+  uploadAttachment,
 } from "./shared";
 import type { Data, HostelTab, Row } from "./shared";
 import React from "react";
+
+// Access card price differs by hostel; the card admin/handling fee is flat.
+const STANDARD_CARD_PRICE: Record<string, number> = { DAM: 100, NDY: 150 };
+const STANDARD_CARD_HANDLING_FEE = 20;
+const STANDARD_ADMIN_FEE: Record<string, number> = {
+  Malaysian: 250,
+  International: 500,
+};
 
 // Defined at module scope: creating components during render remounts them.
 const getIcon = (tone: string) => {
@@ -96,59 +106,6 @@ const roomStatus = (bed: Row): "available" | "occupied" | "unavailable" => {
   return "unavailable";
 };
 
-type UnitAvailability =
-  | "no-rooms"
-  | "available"
-  | "partial"
-  | "occupied"
-  | "unavailable";
-
-const UNIT_STATUS_LABEL: Record<UnitAvailability, string> = {
-  "no-rooms": "No Rooms",
-  available: "Fully Available",
-  partial: "Partially Available",
-  occupied: "Fully Occupied",
-  unavailable: "Unavailable",
-};
-
-// Reuses the existing .status-badge color language (green/gray/red);
-// "partial" is the one new amber variant.
-const UNIT_STATUS_BADGE_CLASS: Record<UnitAvailability, string> = {
-  "no-rooms": "occupied",
-  available: "available",
-  partial: "partial",
-  occupied: "occupied",
-  unavailable: "unavailable",
-};
-
-// Derives the unit's own availability from its rooms — never labels a unit
-// "Available" just because it has any vacant room.
-const unitAvailabilitySummary = (unit: Row, bedsInUnit: Row[]) => {
-  const totalRooms = bedsInUnit.length;
-  const availableBeds = bedsInUnit.filter(isRoomAvailable);
-  const occupiedCount = bedsInUnit.filter(
-    (bed) => roomStatus(bed) === "occupied",
-  ).length;
-  const unavailableCount = totalRooms - availableBeds.length - occupiedCount;
-
-  let status: UnitAvailability;
-  if (unit.status && unit.status !== "active") status = "unavailable";
-  else if (totalRooms === 0) status = "no-rooms";
-  else if (availableBeds.length === totalRooms) status = "available";
-  else if (availableBeds.length > 0) status = "partial";
-  else status = "occupied";
-
-  return {
-    totalRooms,
-    availableCount: availableBeds.length,
-    occupiedCount,
-    unavailableCount,
-    status,
-    availableCodes: availableBeds
-      .map((bed) => bed.legacyCode)
-      .filter(Boolean),
-  };
-};
 
 export function HostelModule({
   data,
@@ -156,12 +113,14 @@ export function HostelModule({
   busy,
   tab,
   setTab,
+  load,
 }: {
   data: Data;
   save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
   busy: boolean;
   tab: HostelTab;
   setTab: (tab: HostelTab) => void;
+  load: (modules?: string[]) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [hostelFilter, setHostelFilter] = useState("all");
@@ -188,6 +147,14 @@ export function HostelModule({
   const [reservationKind, setReservationKind] = useState("individual");
   const [reservationQuery, setReservationQuery] = useState("");
   const [reservationHostelFilter, setReservationHostelFilter] = useState("all");
+  const [reservationStatusTab, setReservationStatusTab] = useState<
+    "reserved" | "converted" | "cancelled"
+  >("reserved");
+  // Converted reservations still collect balance payments, so staff need to
+  // slice them by payment progress the same way Finance does for invoices.
+  const [reservationPaymentFilter, setReservationPaymentFilter] = useState<
+    "all" | "partial" | "unpaid" | "admin-fee" | "full"
+  >("all");
   const [pricingHostel, setPricingHostel] = useState(
     data.hostels[0]?.code || "all",
   );
@@ -198,6 +165,7 @@ export function HostelModule({
   const [promotionStart, setPromotionStart] = useState(today);
   const [promotionEnd, setPromotionEnd] = useState("");
   const [selectedRooms, setSelectedRooms] = useState<number[]>([]);
+  const [setAsDefault, setSetAsDefault] = useState(false);
   const [occupancyQuery, setOccupancyQuery] = useState("");
   const [occupancyHostel, setOccupancyHostel] = useState("all");
   const [occupancyContractEnd, setOccupancyContractEnd] = useState("");
@@ -389,9 +357,42 @@ export function HostelModule({
     (sum, value) => sum + Number(value || 0),
     0,
   );
+  // Converted/cancelled reservations no longer need action — keeping them
+  // out of the default "Reserved" view is what the status tabs are for.
+  const reservationCounts = {
+    reserved: data.reservations.filter((r) => r.status === "reserved")
+      .length,
+    converted: data.reservations.filter((r) => r.status === "converted")
+      .length,
+    cancelled: data.reservations.filter((r) => r.status === "cancelled")
+      .length,
+  };
+  const convertedReservations = data.reservations.filter(
+    (r) => r.status === "converted",
+  );
+  const convertedPaymentCounts = {
+    all: convertedReservations.length,
+    partial: convertedReservations.filter(
+      (r) => (r.paymentStatus || "unpaid") === "partial",
+    ).length,
+    unpaid: convertedReservations.filter(
+      (r) => (r.paymentStatus || "unpaid") === "unpaid",
+    ).length,
+    "admin-fee": convertedReservations.filter(
+      (r) => r.paymentStatus === "admin-fee",
+    ).length,
+    full: convertedReservations.filter((r) => r.paymentStatus === "full")
+      .length,
+  };
   const filteredReservations = data.reservations.filter((reservation) => {
     const search = reservationQuery.trim().toLowerCase();
+    const matchesPayment =
+      reservationStatusTab !== "converted" ||
+      reservationPaymentFilter === "all" ||
+      (reservation.paymentStatus || "unpaid") === reservationPaymentFilter;
     return (
+      reservation.status === reservationStatusTab &&
+      matchesPayment &&
       (reservationHostelFilter === "all" ||
         String(reservation.preferredHostelId || "") ===
         reservationHostelFilter) &&
@@ -435,6 +436,18 @@ export function HostelModule({
         room.vacant > 0,
     );
   }, [data, pricingHostel, pricingCategory, pricingRoomType]);
+  // Default rates are only settable for Damai/Nadayu, which have fixed,
+  // predictable room categories — other hostels keep purely manual pricing.
+  const canSetDefaultRate =
+    pricingHostel === "DAM" || pricingHostel === "NDY";
+  const pricingHostelId = data.hostels.find(
+    (hostel) => hostel.code === pricingHostel,
+  )?.id;
+  const currentDefaultRate = data.categoryRates.find(
+    (rate) =>
+      String(rate.hostelId) === String(pricingHostelId) &&
+      rate.roomCategory === pricingCategory,
+  )?.monthlyRate as number | undefined;
   const bulkPrice = async () => {
     const ok = await save(
       {
@@ -444,12 +457,18 @@ export function HostelModule({
         priceType,
         promotionStartDate: promotionStart,
         promotionEndDate: promotionEnd,
+        setAsDefault: canSetDefaultRate && priceType === "standard" && setAsDefault,
+        hostelId: pricingHostelId,
+        roomCategory: pricingCategory,
       },
-      "Pricing updated for vacant rooms",
+      setAsDefault
+        ? "Pricing updated and set as default rate"
+        : "Pricing updated for vacant rooms",
     );
     if (ok) {
       setSelectedRooms([]);
       setPricingRate("");
+      setSetAsDefault(false);
     }
   };
   const endPromotions = async () => {
@@ -491,32 +510,14 @@ export function HostelModule({
 
 
 
-  const [expandedHostel, setExpandedHostel] = useState<string | null>(null);
-  const [expandedUnit, setExpandedUnit] = useState<string | null>(null);
-  const [unitSearchQuery, setUnitSearchQuery] = useState("");
-  const [unitStatusFilter, setUnitStatusFilter] = useState("all"); // 'all' | 'available' | 'unavailable'
-  const [hostelSearchQuery, setHostelSearchQuery] = useState("");
-  const [hostelStatusFilter, setHostelStatusFilter] = useState("all"); // 'all' | 'available' | 'full'
-  const [hostelGenderFilter, setHostelGenderFilter] = useState("all");
+  const [activeAvailabilityHostel, setActiveAvailabilityHostel] = useState<
+    string | null
+  >(null);
+  const [roomSearchQuery, setRoomSearchQuery] = useState("");
+  const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied' | 'unavailable'
+  const [roomGenderFilter, setRoomGenderFilter] = useState("all");
   const [hostelModalOpen, setHostelModalOpen] = useState(false);
   const [editingHostel, setEditingHostel] = useState<Row | null>(null);
-
-  const [roomSearchQuery, setRoomSearchQuery] = useState("");
-  const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied'
-
-  const toggleHostel = (id: string) => {
-    setExpandedHostel((prev) => (prev === id ? null : id));
-    setExpandedUnit(null);
-    // 切换 Hostel 时清空 Unit 筛选条件
-    setUnitSearchQuery("");
-    setUnitStatusFilter("all");
-  };
-
-  const toggleUnit = (id: string) => {
-    setExpandedUnit((prev) => (prev === id ? null : id));
-  };
-
-  const getInitial = (name?: string) => (name ? name.charAt(0).toUpperCase() : "?");
 
   const allMatchingRoomsSelected =
     rooms.length > 0 &&
@@ -535,30 +536,91 @@ export function HostelModule({
       ? Math.round((occupiedUnitsCount / data.units.length) * 1000) / 10
       : 0;
 
-  const filteredHostels = data.hostels.filter((hostel) => {
-    const query = hostelSearchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !query ||
-      hostel.name.toLowerCase().includes(query) ||
-      hostel.address.toLowerCase().includes(query) ||
-      hostel.code.toLowerCase().includes(query);
-    const matchesStatus =
-      hostelStatusFilter === "all" ||
-      (hostelStatusFilter === "available" && hostel.vacant > 0) ||
-      (hostelStatusFilter === "full" && hostel.vacant === 0);
-    const gendersInHostel = new Set(
-      data.units
-        .filter((unit) => unit.hostelId === hostel.id)
-        .map((unit) => unit.gender),
+  // One tab per hostel, in the order hostels were created — a new hostel
+  // automatically gets its own tab without any code change.
+  const bedsByHostel = useMemo(() => {
+    const query = roomSearchQuery.toLowerCase().trim();
+    return data.hostels.map((hostel) => ({
+      hostel,
+      beds: data.bedSpaces.filter((bed) => {
+        if (bed.hostelCode !== hostel.code) return false;
+        const status = roomStatus(bed);
+        const matchesQuery =
+          !query ||
+          `${bed.unitCode} ${bed.roomLabel} ${bed.legacyCode} ${bed.occupantName || ""}`
+            .toLowerCase()
+            .includes(query);
+        const matchesGender =
+          roomGenderFilter === "all" || bed.gender === roomGenderFilter;
+        const matchesStatus =
+          roomStatusFilter === "all" || status === roomStatusFilter;
+        return matchesQuery && matchesGender && matchesStatus;
+      }),
+    }));
+  }, [
+    data.hostels,
+    data.bedSpaces,
+    roomSearchQuery,
+    roomGenderFilter,
+    roomStatusFilter,
+  ]);
+
+  const activeAvailabilityGroup = bedsByHostel.find(
+    (group) => group.hostel.code === activeAvailabilityHostel,
+  );
+
+  // Rooms grouped by unit so the table shows one row per unit — each
+  // room becomes a colored chip instead of its own row.
+  const unitsInActiveGroup = useMemo(() => {
+    if (!activeAvailabilityGroup) return [];
+    const map = new Map<number, { unit: Row; beds: Row[] }>();
+    for (const bed of activeAvailabilityGroup.beds) {
+      const unit = data.units.find((u) => u.id === bed.unitId);
+      if (!unit) continue;
+      if (!map.has(unit.id)) map.set(unit.id, { unit, beds: [] });
+      map.get(unit.id)!.beds.push(bed);
+    }
+    return [...map.values()].sort((a, b) =>
+      a.unit.unitCode.localeCompare(b.unit.unitCode, undefined, {
+        numeric: true,
+      }),
     );
-    const hostelGender =
-      gendersInHostel.size > 1
-        ? "mixed"
-        : [...gendersInHostel][0] || "mixed";
-    const matchesGender =
-      hostelGenderFilter === "all" || hostelGender === hostelGenderFilter;
-    return matchesSearch && matchesStatus && matchesGender;
-  });
+  }, [activeAvailabilityGroup, data.units]);
+
+  // Quick per-category vacancy count for the selected hostel — how many
+  // Room A/B/C/D are still available right now, split by gender so staff
+  // can see male vs female availability at a glance.
+  const categoryAvailability = useMemo(() => {
+    if (!activeAvailabilityGroup) return [];
+    const counts = new Map<
+      string,
+      { total: number; male: number; female: number; other: number }
+    >();
+    for (const bed of activeAvailabilityGroup.beds) {
+      if (!isRoomAvailable(bed)) continue;
+      const label = bed.roomLabel || "Other";
+      const entry = counts.get(label) || {
+        total: 0,
+        male: 0,
+        female: 0,
+        other: 0,
+      };
+      entry.total += 1;
+      if (bed.gender === "male") entry.male += 1;
+      else if (bed.gender === "female") entry.female += 1;
+      else entry.other += 1;
+      counts.set(label, entry);
+    }
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [activeAvailabilityGroup]);
+
+  const [blockedNotice, setBlockedNotice] = useState("");
+  const showBlockedNotice = (bed: Row) => {
+    setBlockedNotice(
+      `${bed.legacyCode || `Room ${bed.roomLabel}`} is not available to reserve`,
+    );
+    window.setTimeout(() => setBlockedNotice(""), 3000);
+  };
 
   return (
     <>
@@ -660,358 +722,218 @@ export function HostelModule({
         </div>
         {currentHostelTab === "availability" && (
           <>
-            {/* <div className="section-heading">
-              <div>
-                <small>DATE-BASED SEARCH</small>
-                <h3>Available on {dateLabel(availableDate)}</h3>
-                <p>
-                  Reservation names and Sales persons are searchable even before
-                  actual room assignment.
-                </p>
-              </div>
-              <div className="availability-summary">
-                <span>
-                  <b>{availability.length}</b> physical options
-                </span>
-                <span>
-                  <b>{committedWeight}</b> paid commitments
-                </span>
-                <strong>{sellable} sellable</strong>
-              </div>
-            </div>
-            <div className="inventory-rule">
-              <div>
-                <strong>Paid commitments reduce the Sales balance</strong>
-                <span>
-                  Unpaid enquiries remain visible but do not reduce
-                  availability.
-                </span>
-              </div>
-            </div> */}
+            {blockedNotice && (
+              <div className="notice-banner blocked">{blockedNotice}</div>
+            )}
             <section className="directory-filters">
+              <div className="workspace-tabs">
+                {bedsByHostel.map(({ hostel, beds: hostelBeds }) => (
+                  <button
+                    key={hostel.id}
+                    className={
+                      activeAvailabilityHostel === hostel.code ? "active" : ""
+                    }
+                    onClick={() => setActiveAvailabilityHostel(hostel.code)}
+                  >
+                    {hostel.name} ({hostelBeds.length})
+                  </button>
+                ))}
+                {!bedsByHostel.length && <em>No hostels added yet.</em>}
+              </div>
               <div className="inline-filters">
-              <div className="search-input-wrapper">
-                <svg className="search-icon" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                </svg>
-                <input
-                  type="text"
-                  placeholder="Search property, address..."
-                  value={hostelSearchQuery}
-                  onChange={(e) => setHostelSearchQuery(e.target.value)}
-                />
-              </div>
-              <select
-                value={hostelStatusFilter}
-                onChange={(e) => setHostelStatusFilter(e.target.value)}
-              >
-                <option value="all">All Status</option>
-                <option value="available">Available</option>
-                <option value="full">Full</option>
-              </select>
-              <select
-                value={hostelGenderFilter}
-                onChange={(e) => setHostelGenderFilter(e.target.value)}
-              >
-                <option value="all">All Gender</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="mixed">Mixed</option>
-              </select>
-              </div>
-            </section>
-            <section className="directory-table-container">
-              <div className="modern-property-table">
-                <div className="mpt-header">
-                  <span>Property</span>
-                  <span>Units</span>
-                  <span>Gender / Type</span>
-                  <span>Status</span>
-                  <span>Occupancy</span>
-                  <span>Access / Wi-Fi</span>
-                  <span>Parking</span>
-                  <span>Action</span>
+                <div className="search-input-wrapper">
+                  <svg className="search-icon" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search room code, unit or occupant..."
+                    value={roomSearchQuery}
+                    onChange={(e) => setRoomSearchQuery(e.target.value)}
+                  />
                 </div>
-
-                {filteredHostels.map((hostel) => {
-                  const unitsInHostel = data.units.filter(u => u.hostelId === hostel.id);
-                  const isHostelExpanded = expandedHostel === hostel.id;
-                  const activeUnitsCount = unitsInHostel.filter(
-                    (u) => u.status === "active",
-                  ).length;
-                  const gendersInHostel = new Set(
-                    unitsInHostel.map((u) => u.gender),
-                  );
-                  const hostelGenderLabel =
-                    gendersInHostel.size > 1
-                      ? "Mixed"
-                      : genderLabel([...gendersInHostel][0] || "mixed");
-                  const accessCardsCount = data.accessCards.filter(
-                    (c) => c.hostelName === hostel.name,
-                  ).length;
-                  const wifiCount = data.services.filter(
-                    (s) => s.hostelName === hostel.name,
-                  ).length;
-                  const parkingCount = data.parkingLots.filter(
-                    (p) => p.hostelId === hostel.id,
-                  ).length;
-                  const hostelOccupancyRate =
-                    hostel.bedSpaces > 0
-                      ? Math.round((hostel.occupied / hostel.bedSpaces) * 1000) / 10
-                      : 0;
-
-                  // 1. 提前处理好【过滤后的 Unit 数组】
-                  const filteredUnits = unitsInHostel.filter((unit) => {
-                    // 该 unit 是否至少有一个可预订的房间 (Fully/Partially Available)
-                    const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
-                    const hasAvailableRoom =
-                      unitAvailabilitySummary(unit, bedsInUnit).availableCount > 0;
-
-                    // 文本搜索逻辑 (搜 Unit 编号或性别)
-                    const query = unitSearchQuery.toLowerCase().trim();
-                    const matchesSearch = !query ||
-                      unit.unitCode?.toLowerCase().includes(query) ||
-                      genderLabel(unit.gender).toLowerCase().includes(query);
-
-                    // 状态筛选逻辑
-                    const matchesStatus = unitStatusFilter === "all" ||
-                      (unitStatusFilter === "available" && hasAvailableRoom) ||
-                      (unitStatusFilter === "unavailable" && !hasAvailableRoom);
-
-                    return matchesSearch && matchesStatus;
-                  });
-
-                  return (
-                    <React.Fragment key={hostel.id}>
-                      {/* 第一层：Hostel 级别 */}
-                      <div className="mpt-row hostel-row" onClick={() => toggleHostel(hostel.id)}>
-                        <div className="mpt-property">
-                          <span className="hostel-avatar">{hostel.code}</span>
-                          <div className="info">
-                            <strong>{hostel.name}</strong>
-                            <span>{hostel.address}</span>
-                          </div>
-                        </div>
-                        <div className="mpt-cell">{unitsInHostel.length} units</div>
-                        <div className="mpt-cell mpt-cell-stacked">
-                          <span>{hostelGenderLabel}</span>
-                          <small>Unit allocation</small>
-                        </div>
-                        <div className="mpt-cell">
-                          <span className={`status-badge ${hostel.vacant > 0 ? 'available' : 'occupied'}`}>
-                            {hostel.vacant > 0 ? 'Available' : 'Full'}
-                          </span>
-                        </div>
-                        <div className="mpt-cell mpt-cell-stacked">
-                          <span>{hostelOccupancyRate}%</span>
-                          <small>
-                            {activeUnitsCount} active of {unitsInHostel.length}
-                          </small>
-                        </div>
-                        <div className="mpt-cell mpt-cell-stacked">
-                          <span>{accessCardsCount} cards</span>
-                          <small>{wifiCount} Wi-Fi</small>
-                        </div>
-                        <div className="mpt-cell">
-                          {parkingCount} {parkingCount === 1 ? "lot" : "lots"}
-                        </div>
-                        <div className="mpt-cell hostel-action-cell">
-                          <button
-                            type="button"
-                            className="secondary compact"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleHostel(hostel.id);
-                            }}
-                          >
-                            {isHostelExpanded ? "Hide units" : "View units"}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary compact icon-btn"
-                            aria-label="Edit property"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingHostel(hostel);
-                              setHostelModalOpen(true);
-                            }}
-                          >
-                            ⋮
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* =========================================
-                      第二层顶部：Unit 筛选栏 (Inline Filter)
-                      ========================================= */}
-                      {isHostelExpanded && (
-                        <div className="mpt-row unit-filter-row">
-                          <div className="inline-filters">
-                            <div className="search-input-wrapper">
-                              <svg className="search-icon" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                              </svg>
-                              <input
-                                type="text"
-                                placeholder="Search unit code (e.g. A-1)..."
-                                value={unitSearchQuery}
-                                onChange={(e) => setUnitSearchQuery(e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            </div>
-                            <select
-                              value={unitStatusFilter}
-                              onChange={(e) => setUnitStatusFilter(e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <option value="all">All Units</option>
-                              <option value="available">Available Units</option>
-                              <option value="unavailable">Full / Unavailable</option>
-                            </select>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 第二层：Unit 级别 (使用过滤后的 filteredUnits 进行映射) */}
-                      {isHostelExpanded && filteredUnits.map((unit) => {
-                        const bedsInUnit = data.bedSpaces.filter(b => b.unitId === unit.id);
-                        const summary = unitAvailabilitySummary(unit, bedsInUnit);
-                        const isUnitExpanded = expandedUnit === unit.id;
-                        const handleUnitToggle = (e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          toggleUnit(unit.id);
-                        };
-
-                        return (
-                          <React.Fragment key={unit.id}>
-                            <div className="mpt-row unit-row" onClick={handleUnitToggle}>
-                              <div className="mpt-property">
-                                <div className="info">
-                                  <strong style={{ color: '#4b5563' }}>Unit {unit.unitCode}</strong>
-                                </div>
-                              </div>
-                              <div className="mpt-cell">Apartment</div>
-                              <div className="mpt-cell">{genderLabel(unit.gender)}</div>
-                              <div className="mpt-cell">
-                                <span className={`status-badge ${UNIT_STATUS_BADGE_CLASS[summary.status]}`}>
-                                  {UNIT_STATUS_LABEL[summary.status]}
-                                </span>
-                              </div>
-                              <div className="mpt-cell">-</div>
-                              <div className="mpt-cell rate-cell">
-                                {summary.totalRooms === 0
-                                  ? "0 rooms"
-                                  : `${summary.availableCount}/${summary.totalRooms} available`}
-                              </div>
-                            </div>
-
-                            {/* Unit-level availability summary — visible without expanding the unit. */}
-                            <div className="mpt-row unit-summary-row" onClick={handleUnitToggle}>
-                              <div className="unit-summary-content">
-                                <span className="unit-summary-count">
-                                  {summary.totalRooms} Room{summary.totalRooms === 1 ? "" : "s"}
-                                </span>
-                                {summary.totalRooms > 0 && (
-                                  <>
-                                    <span className="unit-summary-chip available">
-                                      {summary.availableCount} Available
-                                    </span>
-                                    <span className="unit-summary-chip occupied">
-                                      {summary.occupiedCount} Occupied
-                                    </span>
-                                    {summary.unavailableCount > 0 && (
-                                      <span className="unit-summary-chip unavailable">
-                                        {summary.unavailableCount} Unavailable
-                                      </span>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                              {summary.availableCodes.length > 0 && (
-                                <div className="unit-summary-available-rooms">
-                                  <span className="unit-summary-label">Available:</span>
-                                  {summary.availableCodes.map((code: string) => (
-                                    <span className="room-chip" key={code}>
-                                      {code}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* 第三层：Room 级别 (不带过滤，直接显示该 Unit 下的所有房间) */}
-                            {isUnitExpanded && bedsInUnit.map((bed) => {
-                              const isAvailable = isRoomAvailable(bed);
-                              const status = roomStatus(bed);
-                              const statusLabel =
-                                status === "available"
-                                  ? "Available"
-                                  : status === "occupied"
-                                    ? "Occupied"
-                                    : "Unavailable";
-
-                              return (
-                                <div className="mpt-row room-row" key={bed.id}>
-                                  <div className="mpt-property">
-                                    <div className="info">
-                                      <strong>Room {bed.roomLabel}</strong>
-                                      <span>{bed.legacyCode}</span>
-                                    </div>
-                                  </div>
-                                  <div className="mpt-cell">{titleCase(bed.roomType)}</div>
-                                  <div className="mpt-cell">{genderLabel(bed.gender)}</div>
-                                  <div className="mpt-cell">
-                                    <span className={`status-badge ${status}`}>
-                                      {statusLabel}
-                                    </span>
-                                  </div>
-                                  <div className="mpt-cell occupant-cell">
-                                    {bed.occupantName ? (
-                                      <>
-                                        <div className="occupant-avatar">{getInitial(bed.occupantName)}</div>
-                                        <span>{bed.occupantName}</span>
-                                      </>
-                                    ) : (
-                                      <span style={{ color: '#9ca3af' }}>No occupant</span>
-                                    )}
-                                  </div>
-                                  <div className="mpt-cell action-cell">
-                                    {isAvailable ? (
-                                      <button
-                                        className="primary compact mpt-reserve-btn"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openReservation(bed);
-                                        }}
-                                      >
-                                        Reserve
-                                      </button>
-                                    ) : (
-                                      <button className="secondary compact mpt-reserve-btn disabled" disabled>
-                                        Unavailable
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
-
-                      {/* 当搜不到匹配的 Unit 时的空状态提示 */}
-                      {isHostelExpanded && unitsInHostel.length > 0 && filteredUnits.length === 0 && (
-                        <div className="mpt-row unit-row empty-result">
-                          <div className="mpt-cell" style={{ gridColumn: '1 / -1', textAlign: 'center', color: '#9ca3af', padding: '20px 0' }}>
-                            No units match your filter criteria.
-                          </div>
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                <select
+                  value={roomGenderFilter}
+                  onChange={(e) => setRoomGenderFilter(e.target.value)}
+                >
+                  <option value="all">All Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+                <select
+                  value={roomStatusFilter}
+                  onChange={(e) => setRoomStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Status</option>
+                  <option value="available">Available (reservable)</option>
+                  <option value="occupied">Occupied</option>
+                  <option value="unavailable">Unavailable</option>
+                </select>
+                <button
+                  type="button"
+                  className="secondary reset-button"
+                  onClick={() => {
+                    setRoomSearchQuery("");
+                    setRoomGenderFilter("all");
+                    setRoomStatusFilter("all");
+                  }}
+                >
+                  Reset filters
+                </button>
               </div>
             </section>
+
+            {activeAvailabilityGroup && (
+              <section className="directory-table-container">
+                <div className="section-heading">
+                  <div>
+                    <small>HOSTEL</small>
+                    <h3>{activeAvailabilityGroup.hostel.name}</h3>
+                    <p>{activeAvailabilityGroup.hostel.address}</p>
+                  </div>
+                  <span>
+                    {activeAvailabilityGroup.beds.length} room
+                    {activeAvailabilityGroup.beds.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {categoryAvailability.length > 0 && (
+                  <div
+                    className="category-availability-row"
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                      marginBottom: '18px',
+                    }}
+                  >
+                    {categoryAvailability.map(([label, breakdown]) => (
+                      <div
+                        key={label}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '10px 18px',
+                          borderRadius: '10px',
+                          border: '1px solid #e5e7eb',
+                          background: '#f9fafb',
+                          minWidth: '96px',
+                        }}
+                      >
+                        <strong style={{ fontSize: '20px', color: '#111827', lineHeight: 1.2 }}>
+                          {breakdown.total}
+                        </strong>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            color: '#6b7280',
+                            fontWeight: 600,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.03em',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Room {label} available
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            gap: '8px',
+                            marginTop: '4px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <span style={{ color: '#2563eb' }}>
+                            ♂ {breakdown.male}
+                          </span>
+                          <span style={{ color: '#db2777' }}>
+                            ♀ {breakdown.female}
+                          </span>
+                          {breakdown.other > 0 && (
+                            <span style={{ color: '#6b7280' }}>
+                              Mixed {breakdown.other}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Unit</th>
+                        <th>Gender</th>
+                        <th>Rooms</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unitsInActiveGroup.map(({ unit, beds: unitBeds }) => (
+                        <tr key={unit.id}>
+                          <td>
+                            <strong>{unit.unitCode}</strong>
+                            <small>
+                              {unitBeds.length} room
+                              {unitBeds.length === 1 ? "" : "s"}
+                            </small>
+                          </td>
+                          <td>{genderLabel(unit.gender)}</td>
+                          <td>
+                            <div className="room-chip-row">
+                              {unitBeds.map((bed) => {
+                                const available = isRoomAvailable(bed);
+                                const dueSoon = !available && bed.renewalDueSoon;
+                                const chipState = available
+                                  ? "available"
+                                  : dueSoon
+                                    ? "ending-soon"
+                                    : "unavailable";
+                                return (
+                                  <button
+                                    key={bed.id}
+                                    type="button"
+                                    className={`room-chip ${chipState}`}
+                                    title={
+                                      dueSoon
+                                        ? "Tenancy ends within 2 weeks — no renewal applied. Room can be pre-reserved."
+                                        : undefined
+                                    }
+                                    onClick={() =>
+                                      available || dueSoon
+                                        ? openReservation(bed)
+                                        : showBlockedNotice(bed)
+                                    }
+                                  >
+                                    {bed.legacyCode || `Room ${bed.roomLabel}`}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {!unitsInActiveGroup.length && (
+                        <tr>
+                          <td colSpan={3}>
+                            <em>No rooms match this view.</em>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+            {!activeAvailabilityGroup && bedsByHostel.length > 0 && (
+              <section className="directory-table-container">
+                <em>Select a hostel above to view its rooms.</em>
+              </section>
+            )}
           </>
         )}
         {currentHostelTab === "reservations" && (
@@ -1092,6 +1014,82 @@ export function HostelModule({
               </div>
             </header>
 
+            <div className="workspace-tabs">
+              <button
+                type="button"
+                className={reservationStatusTab === "reserved" ? "active" : ""}
+                onClick={() => setReservationStatusTab("reserved")}
+              >
+                Reserved ({reservationCounts.reserved})
+              </button>
+              <button
+                type="button"
+                className={
+                  reservationStatusTab === "converted" ? "active" : ""
+                }
+                onClick={() => setReservationStatusTab("converted")}
+              >
+                Converted ({reservationCounts.converted})
+              </button>
+              <button
+                type="button"
+                className={
+                  reservationStatusTab === "cancelled" ? "active" : ""
+                }
+                onClick={() => setReservationStatusTab("cancelled")}
+              >
+                Cancelled ({reservationCounts.cancelled})
+              </button>
+            </div>
+
+            {reservationStatusTab === "converted" && (
+              <div className="workspace-tabs workspace-tabs-secondary">
+                <button
+                  type="button"
+                  className={reservationPaymentFilter === "all" ? "active" : ""}
+                  onClick={() => setReservationPaymentFilter("all")}
+                >
+                  All ({convertedPaymentCounts.all})
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reservationPaymentFilter === "partial" ? "active" : ""
+                  }
+                  onClick={() => setReservationPaymentFilter("partial")}
+                >
+                  Partial ({convertedPaymentCounts.partial})
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reservationPaymentFilter === "unpaid" ? "active" : ""
+                  }
+                  onClick={() => setReservationPaymentFilter("unpaid")}
+                >
+                  Unpaid ({convertedPaymentCounts.unpaid})
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reservationPaymentFilter === "admin-fee" ? "active" : ""
+                  }
+                  onClick={() => setReservationPaymentFilter("admin-fee")}
+                >
+                  Admin Fee ({convertedPaymentCounts["admin-fee"]})
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reservationPaymentFilter === "full" ? "active" : ""
+                  }
+                  onClick={() => setReservationPaymentFilter("full")}
+                >
+                  Full Payment ({convertedPaymentCounts.full})
+                </button>
+              </div>
+            )}
+
             {/* Filters */}
             <section
               className="reservation-filter-panel"
@@ -1142,6 +1140,7 @@ export function HostelModule({
                 <div className="reservation-card-grid">
                   {filteredReservations.map((r) => {
                     const isConverted = r.status === "converted";
+                    const isCancelled = r.status === "cancelled";
 
                     const totalPayable = Number(r.totalPayable || 0);
                     const totalPaid = Number(r.amountPaid || 0);
@@ -1168,23 +1167,29 @@ export function HostelModule({
                         ? "Admin fee"
                         : titleCase(r.paymentStatus || "unpaid");
 
-                    const commitmentClass = isConverted
-                      ? "assigned"
-                      : r.inventoryCommitted
-                        ? "committed"
-                        : "enquiry";
+                    const commitmentClass = isCancelled
+                      ? "cancelled"
+                      : isConverted
+                        ? "assigned"
+                        : r.inventoryCommitted
+                          ? "committed"
+                          : "enquiry";
 
-                    const commitmentTitle = isConverted
-                      ? `Assigned: ${r.assignedCode || "Unit confirmed"}`
-                      : r.inventoryCommitted
-                        ? "Included in sales balance"
-                        : "Enquiry only";
+                    const commitmentTitle = isCancelled
+                      ? "Cancelled"
+                      : isConverted
+                        ? `Assigned: ${r.assignedCode || "Unit confirmed"}`
+                        : r.inventoryCommitted
+                          ? "Included in sales balance"
+                          : "Enquiry only";
 
-                    const commitmentDescription = isConverted
-                      ? "Reservation converted to an actual room assignment"
-                      : r.inventoryCommitted
-                        ? "This reservation reduces sellable availability"
-                        : "This enquiry does not reduce room availability";
+                    const commitmentDescription = isCancelled
+                      ? `Cancelled ${dateLabel(r.cancelledAt)} — no longer holds a room`
+                      : isConverted
+                        ? "Reservation converted to an actual room assignment"
+                        : r.inventoryCommitted
+                          ? "This reservation reduces sellable availability"
+                          : "This enquiry does not reduce room availability";
 
                     return (
                       <article
@@ -1378,6 +1383,24 @@ export function HostelModule({
                                         </span>
                                       </>
                                     )}
+
+                                    {data.attachments
+                                      .filter(
+                                        (attachment) =>
+                                          attachment.contextType === "payment-proof" &&
+                                          attachment.recordId === payment.id,
+                                      )
+                                      .map((attachment) => (
+                                        <a
+                                          key={attachment.id}
+                                          href={`/api/files?id=${attachment.id}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          style={{ fontSize: '12px', color: '#008861', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                        >
+                                          View payment slip
+                                        </a>
+                                      ))}
                                   </div>
 
                                   {/* 下半部分：操作按钮 */}
@@ -1448,8 +1471,11 @@ export function HostelModule({
                           )}
                         </section>
 
-                        {/* Quick payment and actions */}
-                        {r.status === "reserved" && (
+                        {/* Quick payment and actions — converted reservations
+                            keep collecting the balance owed even after the
+                            room assignment is finalised. */}
+                        {(r.status === "reserved" ||
+                          r.status === "converted") && (
                           <div className="reservation-card-footer" style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             <form
                               className="reservation-quick-payment"
@@ -1458,7 +1484,7 @@ export function HostelModule({
 
                                 const form = event.currentTarget;
 
-                                const ok = await save(
+                                const result = await save(
                                   {
                                     action: "reservation-payment",
                                     reservationId: r.id,
@@ -1467,7 +1493,21 @@ export function HostelModule({
                                   "Payment added",
                                 );
 
-                                if (ok) {
+                                if (result) {
+                                  const file = (
+                                    form.elements.namedItem(
+                                      "paymentProof",
+                                    ) as HTMLInputElement
+                                  ).files?.[0];
+                                  if (file && result.id) {
+                                    await uploadAttachment(
+                                      file,
+                                      "payment-proof",
+                                      result.id,
+                                      data.currentUser?.displayName,
+                                    );
+                                    await load();
+                                  }
                                   form.reset();
                                 }
                               }}
@@ -1481,6 +1521,28 @@ export function HostelModule({
                                   name="paymentStatus"
                                   defaultValue="partial"
                                   disabled={busy}
+                                  onChange={(event) => {
+                                    const form = event.currentTarget.form;
+                                    const amountInput = form?.elements.namedItem(
+                                      "paymentAmount",
+                                    ) as HTMLInputElement | null;
+                                    if (!amountInput) return;
+                                    const type = event.currentTarget.value;
+                                    if (type === "admin-fee") {
+                                      amountInput.value = String(
+                                        r.nationality === "International"
+                                          ? STANDARD_ADMIN_FEE.International
+                                          : STANDARD_ADMIN_FEE.Malaysian,
+                                      );
+                                      amountInput.readOnly = true;
+                                    } else if (type === "full") {
+                                      amountInput.value = String(balanceRequired);
+                                      amountInput.readOnly = true;
+                                    } else {
+                                      amountInput.value = "";
+                                      amountInput.readOnly = false;
+                                    }
+                                  }}
                                   style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
                                 >
                                   <option value="admin-fee">Admin fee paid</option>
@@ -1511,6 +1573,18 @@ export function HostelModule({
                                 <input
                                   name="paymentReference"
                                   placeholder="Receipt number, bank reference..."
+                                  disabled={busy}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
+                                />
+                              </label>
+
+                              {/* 第四行：Payment slip */}
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment slip (optional)</span>
+                                <input
+                                  name="paymentProof"
+                                  type="file"
+                                  accept="image/*,.pdf"
                                   disabled={busy}
                                   style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
                                 />
@@ -1549,40 +1623,69 @@ export function HostelModule({
                                   Edit reservation
                                 </button>
 
-                                <button
-                                  type="button"
-                                  className="reservation-btn reservation-btn-convert"
-                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                                  disabled={busy}
-                                  onClick={() => setConvertReservation(r)}
-                                >
-                                  Convert assignment
-                                </button>
+                                {r.status === "reserved" && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-convert"
+                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => setConvertReservation(r)}
+                                  >
+                                    Convert assignment
+                                  </button>
+                                )}
                               </div>
 
-                              <button
-                                type="button"
-                                className="reservation-btn reservation-btn-danger"
-                                style={{ width: '100%', padding: '5px', fontSize: '11px', justifyContent: 'center' }}
-                                disabled={busy}
-                                onClick={() => {
-                                  const confirmed = confirm(
-                                    `Delete reservation ${r.referenceNo}?`,
-                                  );
+                              <div className="reservation-main-actions" style={{ display: 'flex', gap: '6px', width: '100%' }}>
+                                {r.status === "reserved" && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-cancel"
+                                    style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => {
+                                      const confirmed = confirm(
+                                        `Cancel reservation ${r.referenceNo}? The room is released and payment history is kept for your records.`,
+                                      );
 
-                                  if (confirmed) {
-                                    save(
-                                      {
-                                        action: "reservation-delete",
-                                        reservationId: r.id,
-                                      },
-                                      "Reservation deleted",
+                                      if (confirmed) {
+                                        save(
+                                          {
+                                            action: "reservation-cancel",
+                                            reservationId: r.id,
+                                          },
+                                          "Reservation cancelled",
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="reservation-btn reservation-btn-danger"
+                                  style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
+                                  disabled={busy}
+                                  onClick={() => {
+                                    const confirmed = confirm(
+                                      `Permanently delete reservation ${r.referenceNo}? This also erases its payment history.`,
                                     );
-                                  }
-                                }}
-                              >
-                                Delete
-                              </button>
+
+                                    if (confirmed) {
+                                      save(
+                                        {
+                                          action: "reservation-delete",
+                                          reservationId: r.id,
+                                        },
+                                        "Reservation deleted",
+                                      );
+                                    }
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1767,6 +1870,41 @@ export function HostelModule({
                       </div>
                     </label>
                   </div>
+
+                  {/* Default rate for Damai/Nadayu */}
+                  {canSetDefaultRate && (
+                    <div className="pricing-default-area">
+                      <div className="default-area-heading">
+                        <div>
+                          <strong>Default rate — Room {pricingCategory}</strong>
+                          <small>
+                            New rooms in this hostel + category inherit this
+                            rate automatically, and reservation payment
+                            breakdowns use it too.
+                          </small>
+                        </div>
+
+                        <span className="default-status">
+                          {currentDefaultRate !== undefined
+                            ? money(currentDefaultRate)
+                            : "Not set"}
+                        </span>
+                      </div>
+
+                      {priceType === "standard" && (
+                        <label className="pricing-default-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={setAsDefault}
+                            onChange={(event) =>
+                              setSetAsDefault(event.target.checked)
+                            }
+                          />
+                          Set as default price for this hostel + category
+                        </label>
+                      )}
+                    </div>
+                  )}
 
                   {/* Promotion date fields */}
                   {priceType === "promotion" && (
@@ -2239,6 +2377,7 @@ export function HostelModule({
             reservationBed={reservationBed}
             availableDate={availableDate}
             charges={charges}
+            setCharges={setCharges}
             totalCharges={totalCharges}
             effectiveRate={effectiveRate}
             openCharges={() => setChargeOpen(true)}
@@ -2322,130 +2461,271 @@ export function HostelModule({
           }
           onClose={() => setConvertReservation(null)}
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                {
-                  action: "reservation-convert",
-                  reservationId: convertReservation.id,
-                  ...formValues(e),
-                },
-                "Reservation converted to assignment",
-              );
-              if (ok) setConvertReservation(null);
-            }}
-          >
-            {/* ---------------- SECTION 1: Reservation Summary ---------------- */}
-            <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px', marginTop: '4px' }}>
-              <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>1. Reservation Summary</h4>
-            </div>
-
-            <div className="wide" style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '16px', fontSize: '14px', color: '#4b5563' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span>{convertReservation.reservationType === "group" ? "Representative:" : "Student Name:"}</span>
-                <strong style={{ color: '#111827' }}>{convertReservation.studentName}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span>Check-in Date:</span>
-                <strong style={{ color: '#111827' }}>{dateLabel(convertReservation.targetMoveInDate)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #d1d5db', paddingTop: '8px', marginTop: '4px' }}>
-                <span>Target Preferences:</span>
-                <strong style={{ color: '#111827', textAlign: 'right' }}>
-                  {convertReservation.preferredHostelName || "Any Hostel"}
-                  {convertReservation.reservationType === "individual" && convertReservation.roomCategory !== "any"
-                    ? ` · Room ${convertReservation.roomCategory}`
-                    : ""}
-                </strong>
-              </div>
-            </div>
-
-            {/* ---------------- SECTION 2: Final Assignment ---------------- */}
-            <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px' }}>
-              <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>2. Final Assignment</h4>
-            </div>
-
-            {convertReservation.reservationType === "group" ? (
-              <label className="wide">
-                Confirmed unit / house
-                <SearchSelect
-                  name="unitId"
-                  required
-                  defaultValue={convertReservation.preferredUnitId}
-                  options={data.units.map((unit) => ({
-                    value: unit.id,
-                    label: `${unit.hostelName} / ${unit.unitCode} · ${genderLabel(unit.gender)}`,
-                  }))}
-                  placeholder="Type unit number or hostel"
-                />
-                <select
-                  hidden
-                  disabled
-                  name="unitId"
-                  required
-                  defaultValue={convertReservation.preferredUnitId || ""}
-                >
-                  <option value="">Select unit</option>
-                  {data.units.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.hostelName} / {u.unitCode} · {genderLabel(u.gender)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <label className="wide">
-                Actual room code
-                <SearchSelect
-                  name="bedSpaceId"
-                  required
-                  defaultValue={convertReservation.provisionalBedSpaceId}
-                  options={data.bedSpaces
-                    .filter((bed) => bed.status === "vacant")
-                    .map((bed) => ({
-                      value: bed.id,
-                      label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode} · Room ${bed.roomLabel}`,
-                    }))}
-                  placeholder="Type room code, unit or hostel"
-                />
-                <select
-                  hidden
-                  disabled
-                  name="bedSpaceId"
-                  required
-                  defaultValue={convertReservation.provisionalBedSpaceId || ""}
-                >
-                  <option value="">Select room code manually</option>
-                  {data.bedSpaces
-                    .filter((b) => b.status === "vacant")
-                    .map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.legacyCode} · {b.hostelName} / {b.unitCode} · Room{" "}
-                        {b.roomLabel}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            )}
-
-            <div className="form-actions wide" style={{ marginTop: '16px' }}>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setConvertReservation(null)}
-              >
-                Cancel
-              </button>
-              <button className="primary" disabled={busy}>
-                Confirm assignment
-              </button>
-            </div>
-          </form>
+          <ConvertAssignmentForm
+            data={data}
+            save={save}
+            busy={busy}
+            convertReservation={convertReservation}
+            onDone={() => setConvertReservation(null)}
+          />
         </Modal>
       )}
     </>
+  );
+}
+
+// A fresh instance mounts every time the "Convert to actual assignment"
+// modal opens (the caller only renders it while convertReservation is
+// set), so the hostel-then-room cascade always starts clean.
+function ConvertAssignmentForm({
+  data,
+  save,
+  busy,
+  convertReservation,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  convertReservation: Row;
+  onDone: () => void;
+}) {
+  const [hostelId, setHostelId] = useState(
+    String(convertReservation.preferredHostelId || ""),
+  );
+  const vacantBeds = data.bedSpaces.filter(
+    (bed) =>
+      bed.status === "vacant" &&
+      (!hostelId || String(bed.hostelId) === hostelId),
+  );
+  // A reservation almost always converts into the exact room it already
+  // holds — only special cases (the room got taken, or the student wants a
+  // different one) need the hostel-then-room picker at all.
+  const reservedBed = data.bedSpaces.find(
+    (bed) => bed.id === convertReservation.provisionalBedSpaceId,
+  );
+  const reservedBedAvailable = Boolean(
+    reservedBed && reservedBed.status === "vacant",
+  );
+  const reservedUnit = data.units.find(
+    (unit) => unit.id === convertReservation.preferredUnitId,
+  );
+  const reservedUnitAvailable = Boolean(reservedUnit);
+  const hasDefaultTarget =
+    convertReservation.reservationType === "group"
+      ? reservedUnitAvailable
+      : reservedBedAvailable;
+  const [useReservedTarget, setUseReservedTarget] = useState(hasDefaultTarget);
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "reservation-convert",
+            reservationId: convertReservation.id,
+            ...formValues(e),
+          },
+          "Reservation converted to assignment",
+        );
+        if (ok) onDone();
+      }}
+    >
+      {/* ---------------- SECTION 1: Reservation Summary ---------------- */}
+      <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px', marginTop: '4px' }}>
+        <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>1. Reservation Summary</h4>
+      </div>
+
+      <div className="wide" style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '16px', fontSize: '14px', color: '#4b5563' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span>{convertReservation.reservationType === "group" ? "Representative:" : "Student Name:"}</span>
+          <strong style={{ color: '#111827' }}>{convertReservation.studentName}</strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span>Check-in Date:</span>
+          <strong style={{ color: '#111827' }}>{dateLabel(convertReservation.targetMoveInDate)}</strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #d1d5db', paddingTop: '8px', marginTop: '4px' }}>
+          <span>Target Preferences:</span>
+          <strong style={{ color: '#111827', textAlign: 'right' }}>
+            {convertReservation.preferredHostelName || "Any Hostel"}
+            {convertReservation.reservationType === "individual" && convertReservation.roomCategory !== "any"
+              ? ` · Room ${convertReservation.roomCategory}`
+              : ""}
+          </strong>
+        </div>
+      </div>
+
+      {/* ---------------- SECTION 2: Final Assignment ---------------- */}
+      <div className="wide" style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginBottom: '8px' }}>
+        <h4 style={{ margin: 0, color: '#111827', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>2. Final Assignment</h4>
+      </div>
+
+      {useReservedTarget && hasDefaultTarget ? (
+        <div
+          className="wide"
+          style={{
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '8px',
+            padding: '14px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <span style={{ fontSize: '11px', color: '#166534', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {convertReservation.reservationType === "group"
+                ? "Reserved unit"
+                : "Reserved room"}
+            </span>
+            <div style={{ fontSize: '14px', color: '#111827', marginTop: '4px' }}>
+              {convertReservation.reservationType === "group" ? (
+                <strong>
+                  {reservedUnit!.hostelName} / {reservedUnit!.unitCode} ·{" "}
+                  {genderLabel(reservedUnit!.gender)}
+                </strong>
+              ) : (
+                <strong>
+                  {reservedBed!.legacyCode} · {reservedBed!.hostelName}/
+                  {reservedBed!.unitCode} · Room {reservedBed!.roomLabel}
+                </strong>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="secondary compact"
+            onClick={() => setUseReservedTarget(false)}
+          >
+            Change {convertReservation.reservationType === "group" ? "unit" : "room"}
+          </button>
+          {convertReservation.reservationType === "group" ? (
+            <input type="hidden" name="unitId" value={reservedUnit!.id} />
+          ) : (
+            <input type="hidden" name="bedSpaceId" value={reservedBed!.id} />
+          )}
+        </div>
+      ) : convertReservation.reservationType === "group" ? (
+        <>
+          <label className="wide">
+            Confirmed unit / house
+            <SearchSelect
+              name="unitId"
+              required
+              defaultValue={convertReservation.preferredUnitId}
+              options={data.units.map((unit) => ({
+                value: unit.id,
+                label: `${unit.hostelName} / ${unit.unitCode} · ${genderLabel(unit.gender)}`,
+              }))}
+              placeholder="Type unit number or hostel"
+            />
+            <select
+              hidden
+              disabled
+              name="unitId"
+              required
+              defaultValue={convertReservation.preferredUnitId || ""}
+            >
+              <option value="">Select unit</option>
+              {data.units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.hostelName} / {u.unitCode} · {genderLabel(u.gender)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasDefaultTarget && (
+            <button
+              type="button"
+              className="secondary compact wide"
+              onClick={() => setUseReservedTarget(true)}
+            >
+              Use reserved unit instead
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <label className="wide">
+            Hostel
+            <select
+              value={hostelId}
+              onChange={(event) => setHostelId(event.target.value)}
+            >
+              <option value="">All hostels</option>
+              {data.hostels.map((hostel) => (
+                <option key={hostel.id} value={hostel.id}>
+                  {hostel.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="wide">
+            Actual room code
+            <SearchSelect
+              key={hostelId}
+              name="bedSpaceId"
+              required
+              defaultValue={
+                vacantBeds.some(
+                  (bed) =>
+                    String(bed.id) ===
+                    String(convertReservation.provisionalBedSpaceId),
+                )
+                  ? convertReservation.provisionalBedSpaceId
+                  : undefined
+              }
+              options={vacantBeds.map((bed) => ({
+                value: bed.id,
+                label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode} · Room ${bed.roomLabel}`,
+              }))}
+              placeholder={
+                hostelId
+                  ? "Type room code or unit"
+                  : "Select a hostel first, or search all hostels"
+              }
+            />
+            <select
+              hidden
+              disabled
+              name="bedSpaceId"
+              required
+              defaultValue={convertReservation.provisionalBedSpaceId || ""}
+            >
+              <option value="">Select room code manually</option>
+              {vacantBeds.map((bed) => (
+                <option key={bed.id} value={bed.id}>
+                  {bed.legacyCode} · {bed.hostelName} / {bed.unitCode} · Room{" "}
+                  {bed.roomLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasDefaultTarget && (
+            <button
+              type="button"
+              className="secondary compact wide"
+              onClick={() => setUseReservedTarget(true)}
+            >
+              Use reserved room instead
+            </button>
+          )}
+        </>
+      )}
+
+      <div className="form-actions wide" style={{ marginTop: '16px' }}>
+        <button type="button" className="secondary" onClick={onDone}>
+          Cancel
+        </button>
+        <button className="primary" disabled={busy}>
+          Confirm assignment
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -2457,6 +2737,7 @@ function ReservationEditor({
   reservationBed,
   availableDate,
   charges,
+  setCharges,
   totalCharges,
   effectiveRate,
   openCharges,
@@ -2470,6 +2751,9 @@ function ReservationEditor({
   reservationBed: Row | null;
   availableDate: string;
   charges: Record<string, number>;
+  setCharges: (
+    update: (current: Record<string, number>) => Record<string, number>,
+  ) => void;
   totalCharges: number;
   effectiveRate: (bed: Row) => number | null;
   openCharges: () => void;
@@ -2491,6 +2775,11 @@ function ReservationEditor({
   );
   const [nationality, setNationality] = useState(
     editingReservation?.nationality || "",
+  );
+  const [identityNo, setIdentityNo] = useState(
+    editingReservation?.nationality === "International"
+      ? editingReservation?.identityNo || ""
+      : formatIC(editingReservation?.identityNo || ""),
   );
   const [race, setRace] = useState(editingReservation?.race || "");
   const [religion, setReligion] = useState(editingReservation?.religion || "");
@@ -2519,6 +2808,45 @@ function ReservationEditor({
       editingReservation?.provisionalBedSpaceId || reservationBed?.id || "",
     ),
   );
+
+  // Standard first-payment pricing for hostels with fixed rates (Damai,
+  // Nadayu) — derived from hostel + room category + nationality so staff
+  // don't need to type the breakdown in by hand for a new reservation.
+  // Reads the same hostel_category_rates rows the Pricing tab's "set as
+  // default price" writes, so the two stay in sync by construction.
+  const selectedHostelCode =
+    data.hostels.find((hostel) => String(hostel.id) === hostelId)?.code ||
+    "";
+  const selectedBed = bedSpaceId
+    ? data.bedSpaces.find((bed) => String(bed.id) === bedSpaceId)
+    : undefined;
+  const resolvedCategory =
+    (category !== "any" ? category : selectedBed?.roomLabel) || "";
+  const standardRate = data.categoryRates.find(
+    (rate) =>
+      String(rate.hostelId) === hostelId &&
+      rate.roomCategory === resolvedCategory,
+  )?.monthlyRate as number | undefined;
+  const standardCharges =
+    standardRate !== undefined
+      ? {
+          "first-month-rental": standardRate,
+          deposit: standardRate * 3,
+          "admin-fee":
+            STANDARD_ADMIN_FEE[nationality] || STANDARD_ADMIN_FEE.Malaysian,
+          "access-card-deposit":
+            STANDARD_CARD_PRICE[selectedHostelCode] || 0,
+          "access-card-handling": STANDARD_CARD_HANDLING_FEE,
+        }
+      : null;
+
+  // Only auto-fill for a brand-new reservation — never silently overwrite
+  // an existing reservation's already-agreed charges when editing.
+  useEffect(() => {
+    if (editingReservation || !standardCharges) return;
+    setCharges((current) => ({ ...current, ...standardCharges }));
+  }, [editingReservation, selectedHostelCode, resolvedCategory, nationality]);
+
   // Beds another live reservation already holds — never offer these again.
   const reservedBedIds = new Set(
     data.reservations
@@ -2627,6 +2955,37 @@ function ReservationEditor({
         <span className={step === 3 ? "active" : ""}>3. Payment</span>
       </div>
 
+      {!editingReservation && reservationBed?.status === "occupied" && (
+        <div
+          className="wide"
+          style={{
+            background: '#fef3c7',
+            border: '1px solid #fde68a',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            display: 'flex',
+            gap: '10px',
+            alignItems: 'flex-start',
+          }}
+        >
+          <span style={{ fontSize: '16px', lineHeight: 1 }}>⚠️</span>
+          <div style={{ fontSize: '13px', color: '#92400e' }}>
+            <strong>
+              {reservationBed.legacyCode || `Room ${reservationBed.roomLabel}`}{" "}
+              is still occupied
+            </strong>
+            <div>
+              {reservationBed.occupantName || "The current student"} is living
+              here until{" "}
+              {dateLabel(reservationBed.agreementEndDate) || "an unset date"}
+              , and hasn&apos;t applied to renew. You can pre-reserve this
+              room for a new student, but the room only actually frees up
+              once the current tenancy ends.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: step === 1 ? "contents" : "none" }}>
         <label>
           Reservation type
@@ -2703,6 +3062,35 @@ function ReservationEditor({
               <option key={n}>{n}</option>
             ))}
           </select>
+        </label>
+        <label>
+          {nationality === "International" ? "Passport" : "IC"}
+          <input
+            name="identityNo"
+            placeholder={
+              nationality === "International"
+                ? "e.g. A1234567"
+                : "e.g. 010101-01-0101"
+            }
+            value={identityNo}
+            onChange={(event) =>
+              setIdentityNo(
+                nationality === "International"
+                  ? event.target.value
+                  : formatIC(event.target.value),
+              )
+            }
+            pattern={
+              nationality === "International"
+                ? undefined
+                : "\\d{6}-\\d{2}-\\d{4}"
+            }
+            title={
+              nationality === "International"
+                ? undefined
+                : "Enter the full IC number in the format 010101-01-0101"
+            }
+          />
         </label>
         {nationality === "Malaysian" && (
           <label>
@@ -2975,21 +3363,92 @@ function ReservationEditor({
       </div>
 
       <div style={{ display: step === 3 ? "contents" : "none" }}>
-        <div className="wide total-payable">
-          <div>
-            <small>TOTAL PAYABLE</small>
-            <strong>{money(totalCharges)}</strong>
-            <p>Calculated from the payment breakdown.</p>
+        {!editingReservation && standardCharges ? (
+          <div className="wide standard-charge-breakdown">
+            <small>
+              {data.hostels.find(
+                (hostel) => String(hostel.id) === hostelId,
+              )?.name}{" "}
+              Room {resolvedCategory}
+            </small>
+            <ul>
+              <li>
+                <span>1st month rental</span>
+                <strong>
+                  {money(standardCharges["first-month-rental"])}
+                </strong>
+              </li>
+              <li>
+                <span>
+                  3 months rental deposit
+                  <small>2 month deposit + 1 month utility deposit</small>
+                </span>
+                <strong>{money(standardCharges.deposit)}</strong>
+              </li>
+              <li>
+                <span>Admin fee</span>
+                <strong>{money(standardCharges["admin-fee"])}</strong>
+              </li>
+              <li>
+                <span>Access card deposit</span>
+                <strong>
+                  {money(standardCharges["access-card-deposit"])}
+                </strong>
+              </li>
+              <li>
+                <span>Card admin fee</span>
+                <strong>
+                  {money(standardCharges["access-card-handling"])}
+                </strong>
+              </li>
+            </ul>
+            <div className="standard-charge-total">
+              <span>Total</span>
+              <strong>{money(totalCharges)}</strong>
+            </div>
+            <button type="button" className="secondary compact" onClick={openCharges}>
+              Adjust breakdown
+            </button>
           </div>
-          <button type="button" className="secondary" onClick={openCharges}>
-            Edit payment breakdown
-          </button>
-        </div>
+        ) : (
+          <div className="wide total-payable">
+            <div>
+              <small>TOTAL PAYABLE</small>
+              <strong>{money(totalCharges)}</strong>
+              <p>Calculated from the payment breakdown.</p>
+            </div>
+            <button type="button" className="secondary" onClick={openCharges}>
+              Edit payment breakdown
+            </button>
+          </div>
+        )}
         <label>
           Payment status
           <select
             name="paymentStatus"
             defaultValue={editingReservation?.paymentStatus || "unpaid"}
+            onChange={(event) => {
+              const form = event.currentTarget.form;
+              const amountInput = form?.elements.namedItem(
+                "paymentAmount",
+              ) as HTMLInputElement | null;
+              if (!amountInput) return;
+              const type = event.currentTarget.value;
+              if (type === "admin-fee") {
+                amountInput.value = String(
+                  nationality === "International"
+                    ? STANDARD_ADMIN_FEE.International
+                    : STANDARD_ADMIN_FEE.Malaysian,
+                );
+                amountInput.readOnly = true;
+              } else if (type === "full") {
+                amountInput.value = String(totalCharges);
+                amountInput.readOnly = true;
+              } else {
+                amountInput.value = "0";
+                amountInput.readOnly = false;
+              }
+            }}
           >
             <option value="unpaid">Unpaid enquiry</option>
             <option value="admin-fee">Admin fee paid</option>

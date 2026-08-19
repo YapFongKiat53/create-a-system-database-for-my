@@ -1,0 +1,1 @@
+ALTER TABLE "accommodation_assignments" ADD COLUMN "renewal_applied_at" text;

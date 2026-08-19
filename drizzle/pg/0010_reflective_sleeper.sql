@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "billing_item_late_charge_unique" ON "billing_items" USING btree ("invoice_id") WHERE item_type = 'late-payment-charge';

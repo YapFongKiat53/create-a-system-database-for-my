@@ -19,6 +19,7 @@ import {
   billingPaymentRecords,
   courses,
   generalCosts,
+  hostelCategoryRates,
   hostelProperties,
   hostelRooms,
   hostelUnits,
@@ -130,6 +131,14 @@ function nextDay(value: string | null) {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+// Whole days from `today` to `value` (negative if `value` is in the past).
+function daysUntil(today: string, value: string | null) {
+  if (!value) return null;
+  const diffMs =
+    Date.parse(`${value}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`);
+  return Math.round(diffMs / 86_400_000);
 }
 
 function asText(value: unknown, fallback = "") {
@@ -497,6 +506,7 @@ async function loadScopedModules(
 }
 
 function moduleForAction(action: string) {
+  if (action === "reservation-finance-review") return "finance";
   if (/^(reservation|bulk-room-price|promotion-end)/.test(action))
     return "hostels-sales";
   if (action === "hostel-rates") return "hostels-rates";
@@ -729,15 +739,26 @@ async function applyLatePaymentCharges(db: ReturnType<typeof getDb>) {
     due_date: string;
     amount_paid: number;
     rental: number;
-    late_item_id: number | null;
   }>(sql`
     SELECT i.id, i.due_date, i.amount_paid,
-      COALESCE((SELECT SUM(amount) FROM billing_items WHERE invoice_id=i.id AND item_type='room-rental'),0) rental,
-      (SELECT id FROM billing_items WHERE invoice_id=i.id AND item_type='late-payment-charge' LIMIT 1) late_item_id
+      COALESCE((SELECT SUM(amount) FROM billing_items WHERE invoice_id=i.id AND item_type='room-rental'),0) rental
     FROM billing_invoices i
     JOIN billing_cycles c ON c.id=i.cycle_id
     WHERE c.status='posted' AND i.due_date < ${today}
   `);
+
+  // Same eligibility/amount rules as before. The write is now a single
+  // batched upsert keyed on billing_item_late_charge_unique (one
+  // late-payment-charge row per invoice) instead of a select-then-branch —
+  // two concurrent runs of this function can no longer each decide "no
+  // existing row" and insert a duplicate.
+  const toApply: {
+    invoiceId: number;
+    days: number;
+    amount: number;
+    description: string;
+  }[] = [];
+
   for (const invoice of rows) {
     if (
       Number(invoice.amount_paid || 0) >= Number(invoice.rental || 0) ||
@@ -755,18 +776,41 @@ async function applyLatePaymentCharges(db: ReturnType<typeof getDb>) {
     const amount = days * 3;
     if (!amount) continue;
     const description = `Late payment charge (${days} day${days === 1 ? "" : "s"})`;
-    if (invoice.late_item_id)
-      await db.execute(
-        sql`UPDATE billing_items SET quantity=${days}, rate=3, amount=${amount}, description=${description} WHERE id=${invoice.late_item_id}`,
-      );
-    else
-      await db.execute(
-        sql`INSERT INTO billing_items (invoice_id,item_type,description,quantity,rate,amount) VALUES (${invoice.id},'late-payment-charge',${description},${days},3,${amount})`,
-      );
-    await db.execute(
-      sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${invoice.id}) WHERE id=${invoice.id}`,
-    );
+    toApply.push({ invoiceId: Number(invoice.id), days, amount, description });
   }
+
+  if (!toApply.length) return;
+
+  const idList = (ids: number[]) =>
+    sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    );
+
+  for (const batch of chunks(toApply, 200)) {
+    const valueRows = batch.map(
+      (item) =>
+        sql`(${item.invoiceId}, 'late-payment-charge', ${item.description}, ${item.days}, 3, ${item.amount})`,
+    );
+    await db.execute(sql`
+      INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount)
+      VALUES ${sql.join(valueRows, sql`, `)}
+      ON CONFLICT (invoice_id) WHERE item_type = 'late-payment-charge'
+      DO UPDATE SET
+        quantity = excluded.quantity,
+        rate = excluded.rate,
+        amount = excluded.amount,
+        description = excluded.description
+    `);
+  }
+
+  const affectedInvoiceIds = toApply.map((item) => item.invoiceId);
+  for (const batch of chunks(affectedInvoiceIds, 500))
+    await db.execute(sql`
+      UPDATE billing_invoices
+      SET total_amount = (SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id = billing_invoices.id)
+      WHERE id IN (${idList(batch)})
+    `);
 }
 
 async function resolveCurrentUser(
@@ -1044,22 +1088,27 @@ async function addReservationPayment(
   body: Record<string, unknown>,
 ) {
   const amount = asNumber(body.paymentAmount ?? body.amountPaid, 0);
+  let paymentId: number | undefined;
   if (amount > 0 || asText(body.paymentReference)) {
-    await db.insert(reservationPayments).values({
-      reservationId,
-      amount,
-      reference: asText(body.paymentReference),
-      paymentMethod: asText(body.paymentMethod, "bank-transfer"),
-      paidAt: asNullableText(body.paidAt) || nowIso(),
-      notes: asText(body.paymentNotes),
-    });
+    const inserted = await db
+      .insert(reservationPayments)
+      .values({
+        reservationId,
+        amount,
+        reference: asText(body.paymentReference),
+        paymentMethod: asText(body.paymentMethod, "bank-transfer"),
+        paidAt: asNullableText(body.paidAt) || nowIso(),
+        notes: asText(body.paymentNotes),
+      })
+      .returning({ id: reservationPayments.id });
+    paymentId = inserted[0]?.id;
   }
   const total = (
     await db.execute<{ total: number }>(
       sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
     )
   )[0];
-  return Number(total?.total || 0);
+  return { amountPaid: Number(total?.total || 0), paymentId };
 }
 
 export async function GET(request: Request) {
@@ -1148,6 +1197,7 @@ export async function GET(request: Request) {
       reminderRows,
       schoolRows,
       courseRows,
+      categoryRateRows,
     ] = await Promise.all([
       db
         .select({
@@ -1187,6 +1237,7 @@ export async function GET(request: Request) {
           assignmentId: accommodationAssignments.id,
           agreementEndDate: accommodationAssignments.agreementEndDate,
           assignmentRental: accommodationAssignments.monthlyRental,
+          renewalAppliedAt: accommodationAssignments.renewalAppliedAt,
         })
         .from(bedSpaces)
         .innerJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
@@ -1326,6 +1377,7 @@ export async function GET(request: Request) {
           leaseStartDate: accommodationAssignments.agreementStartDate,
           leaseEndDate: accommodationAssignments.agreementEndDate,
           assignmentStatus: accommodationAssignments.status,
+          renewalAppliedAt: accommodationAssignments.renewalAppliedAt,
         })
         .from(studentProfiles)
         .leftJoin(
@@ -1481,6 +1533,7 @@ export async function GET(request: Request) {
           meterSerial: hostelRooms.meterSerial,
           unitCode: hostelUnits.unitCode,
           hostelName: hostelProperties.name,
+          electricityRate: hostelProperties.electricityRate,
           readingDate: meterReadings.readingDate,
           readingValue: meterReadings.readingValue,
           readingType: meterReadings.readingType,
@@ -1634,6 +1687,7 @@ export async function GET(request: Request) {
         .orderBy(asc(reminderTemplates.dayOfMonth)),
       db.select().from(schools).orderBy(asc(schools.name)),
       db.select().from(courses).orderBy(asc(courses.name)),
+      db.select().from(hostelCategoryRates),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1644,6 +1698,18 @@ export async function GET(request: Request) {
       const agreementEnded = Boolean(
         bed.agreementEndDate && bed.agreementEndDate < today,
       );
+      // A room can be pre-reserved while its current student is still
+      // living there once their 1-year contract is within its last 14
+      // days and they haven't applied to renew — reservedBedIds elsewhere
+      // still keeps it out of the "any hostel" search until it's actually
+      // vacant, this only affects the Availability search chip.
+      const daysLeft = daysUntil(today, bed.agreementEndDate);
+      const renewalDueSoon =
+        bed.status === "occupied" &&
+        !agreementEnded &&
+        !bed.renewalAppliedAt &&
+        daysLeft !== null &&
+        daysLeft <= 14;
       const roomType =
         bed.configuredRoomType === "auto"
           ? (roomCounts.get(bed.roomId) || 1) > 1
@@ -1653,6 +1719,7 @@ export async function GET(request: Request) {
       return {
         ...bed,
         roomType,
+        renewalDueSoon,
         currentRental:
           bed.salesRate ?? bed.assignmentRental ?? bed.monthlyRental,
         rateSource:
@@ -1752,6 +1819,7 @@ export async function GET(request: Request) {
       parkingRentals: parkingRentalRows,
       schools: schoolRows,
       courses: courseRows,
+      categoryRates: categoryRateRows,
       tickets: ticketRows,
       ticketMessages: messageRows,
       meterReadings: readingRows,
@@ -1875,68 +1943,6 @@ export async function GET(request: Request) {
       { status: 500 },
     );
   }
-}
-
-async function electricityShareForAssignment(
-  db: ReturnType<typeof getDb>,
-  assignmentId: number,
-  roomId: number,
-  cutoffDate: string,
-  electricityRate: number,
-) {
-  const readings = await db.execute<{ reading_value: number }>(sql`
-    SELECT reading_value FROM meter_readings
-    WHERE COALESCE(room_id, (SELECT room_id FROM bed_spaces WHERE id=bed_space_id))=${roomId}
-      AND reading_date<=${cutoffDate}
-    ORDER BY reading_date DESC, id DESC LIMIT 2
-  `);
-  if (readings.length < 2) return { usage: 0, amount: 0 };
-  const current = Number(readings[0].reading_value);
-  const previous = Number(readings[1].reading_value);
-  if (!(current > previous)) return { usage: 0, amount: 0 };
-  const occupants = await db.execute<{
-    id: number;
-    check_in_meter: number | null;
-    check_out_meter: number | null;
-  }>(sql`
-    SELECT a.id, a.check_in_meter, a.check_out_meter FROM accommodation_assignments a
-    JOIN bed_spaces b ON a.bed_space_id=b.id
-    WHERE b.room_id=${roomId} AND (a.status='active' OR a.check_out_date>=substr(${cutoffDate},1,7)||'-01')
-  `);
-  const intervals = occupants
-    .map((occupant) => ({
-      id: occupant.id,
-      start:
-        occupant.check_in_meter !== null && occupant.check_in_meter > previous
-          ? Math.min(current, Number(occupant.check_in_meter))
-          : previous,
-      end:
-        occupant.check_out_meter !== null && occupant.check_out_meter < current
-          ? Math.max(previous, Number(occupant.check_out_meter))
-          : current,
-    }))
-    .filter((occupant) => occupant.end > occupant.start);
-  const points = [
-    ...new Set([
-      previous,
-      current,
-      ...intervals.flatMap((occupant) => [occupant.start, occupant.end]),
-    ]),
-  ].sort((a, b) => a - b);
-  let usage = 0;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const start = points[index],
-      end = points[index + 1];
-    const active = intervals.filter(
-      (occupant) => occupant.start <= start && occupant.end >= end,
-    );
-    if (
-      active.some((occupant) => occupant.id === assignmentId) &&
-      active.length
-    )
-      usage += (end - start) / active.length;
-  }
-  return { usage, amount: Math.ceil(usage * electricityRate) };
 }
 
 export async function POST(request: Request) {
@@ -2227,15 +2233,26 @@ export async function POST(request: Request) {
       if (!body.unitId || !asText(body.roomLabel))
         throw new Error("Unit and room category are required");
       const unit = (
-        await db.execute<{ unit_code: string }>(
-          sql`SELECT unit_code FROM hostel_units WHERE id = ${asNumber(body.unitId)}`,
+        await db.execute<{ unit_code: string; hostel_id: number }>(
+          sql`SELECT unit_code, hostel_id FROM hostel_units WHERE id = ${asNumber(body.unitId)}`,
         )
       )[0];
       if (!unit) throw new Error("Unit not found");
+      const defaultRate = (
+        await db
+          .select({ monthlyRate: hostelCategoryRates.monthlyRate })
+          .from(hostelCategoryRates)
+          .where(
+            and(
+              eq(hostelCategoryRates.hostelId, Number(unit.hostel_id)),
+              eq(hostelCategoryRates.roomCategory, asText(body.roomLabel)),
+            ),
+          )
+      )[0];
       const room = (
         await db.execute<{ id: number }>(sql`
-          INSERT INTO hostel_rooms (unit_id, room_label, status, bathroom_type, room_type)
-          VALUES (${asNumber(body.unitId)}, ${asText(body.roomLabel)}, 'active', ${asText(body.bathroomType, "unknown")}, ${asText(body.roomType, "single")})
+          INSERT INTO hostel_rooms (unit_id, room_label, status, bathroom_type, room_type, sales_rate)
+          VALUES (${asNumber(body.unitId)}, ${asText(body.roomLabel)}, 'active', ${asText(body.bathroomType, "unknown")}, ${asText(body.roomType, "single")}, ${defaultRate ? defaultRate.monthlyRate : null})
           RETURNING id
         `)
       )[0];
@@ -2281,6 +2298,25 @@ export async function POST(request: Request) {
           WHERE id = ${roomId} AND EXISTS (SELECT 1 FROM bed_spaces WHERE room_id = ${roomId} AND status = 'vacant')
         `),
       );
+      if (boolValue(body.setAsDefault) && body.hostelId && asText(body.roomCategory)) {
+        await db
+          .insert(hostelCategoryRates)
+          .values({
+            hostelId: asNumber(body.hostelId),
+            roomCategory: asText(body.roomCategory),
+            monthlyRate: rate,
+          })
+          .onConflictDoUpdate({
+            target: [
+              hostelCategoryRates.hostelId,
+              hostelCategoryRates.roomCategory,
+            ],
+            set: {
+              monthlyRate: rate,
+              updatedAt: sql`(CURRENT_TIMESTAMP)::text`,
+            },
+          });
+      }
     } else if (action === "promotion-end") {
       if (!body.hostelId) throw new Error("Hostel is required");
       const endDate = asText(
@@ -2360,6 +2396,12 @@ export async function POST(request: Request) {
           "Student / representative name and check-in date are required",
         );
       const paymentStatus = asText(body.paymentStatus, "unpaid");
+      // status is deliberately NOT part of this shared object — status
+      // transitions (reserved -> converted/cancelled) only ever happen via
+      // the dedicated reservation-convert/reservation-cancel actions. The
+      // edit form has no status field, so folding a status default in here
+      // would silently flip an already-converted reservation back to
+      // "reserved" on every save.
       const values = {
         studentName: asText(body.studentName),
         reservationType: asText(body.reservationType, "individual"),
@@ -2374,6 +2416,7 @@ export async function POST(request: Request) {
         bathroomType: asText(body.bathroomType, "any"),
         contactNumber: asText(body.contactNumber),
         email: asText(body.email),
+        identityNo: asText(body.identityNo),
         nationality: asText(body.nationality),
         nationalityOther: asText(body.nationalityOther),
         state: asText(body.state),
@@ -2387,7 +2430,6 @@ export async function POST(request: Request) {
         paymentStatus,
         inventoryCommitted: paymentStatus !== "unpaid",
         paymentUpdatedAt: nowIso(),
-        status: asText(body.status, "reserved"),
         notes: asText(body.notes),
       };
       let reservationId = asNumber(body.reservationId);
@@ -2403,6 +2445,7 @@ export async function POST(request: Request) {
           .values({
             referenceNo: `RSV-${Date.now().toString().slice(-9)}`,
             ...values,
+            status: asText(body.status, "reserved"),
             amountPaid: 0,
             totalPayable: 0,
             paymentReference: "",
@@ -2418,7 +2461,7 @@ export async function POST(request: Request) {
       );
       const amountPaid =
         action === "reservation"
-          ? await addReservationPayment(db, reservationId, body)
+          ? (await addReservationPayment(db, reservationId, body)).amountPaid
           : Number(
               (
                 await db.execute<{ total: number }>(
@@ -2434,10 +2477,72 @@ export async function POST(request: Request) {
           paymentReference: asText(body.paymentReference),
         })
         .where(eq(reservations.id, reservationId));
+
+      // One-way sync: once a reservation has already converted into a real
+      // tenancy, editing the reservation afterwards (e.g. fixing a typo'd
+      // IC, or updating the agreed deposit) pushes those corrections onto
+      // the live student/assignment record. The reverse never happens —
+      // day-to-day edits in Student Information (phone number, room
+      // change, ...) do not rewrite this historical booking record.
+      if (action === "reservation-update") {
+        const linkedAssignment = (
+          await db.execute<{ id: number; student_id: number; bed_space_id: number }>(
+            sql`SELECT id, student_id, bed_space_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active'`,
+          )
+        )[0];
+        if (linkedAssignment) {
+          await db
+            .update(studentProfiles)
+            .set({
+              fullName: values.studentName,
+              identityNo: values.identityNo,
+              gender: values.preferredGender,
+              contactNumber: values.contactNumber,
+              email: values.email,
+              nationality: values.nationality,
+              nationalityOther: values.nationalityOther,
+              state: values.state,
+              hometown: values.hometown,
+              race: values.race,
+              raceOther: values.raceOther,
+              religion: values.religion,
+              religionOther: values.religionOther,
+            })
+            .where(eq(studentProfiles.id, linkedAssignment.student_id));
+
+          const charges = await db.execute<{
+            charge_type: string;
+            amount: number;
+          }>(
+            sql`SELECT charge_type, amount FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+          );
+          const chargeAmount = (type: string) =>
+            charges.find((row) => row.charge_type === type)?.amount;
+          const firstMonthRental = chargeAmount("first-month-rental");
+          const securityDeposit = chargeAmount("deposit");
+          const accessCardDeposit = chargeAmount("access-card-deposit");
+          const assignmentUpdate: Record<string, number> = {};
+          if (firstMonthRental !== undefined && Number(firstMonthRental) > 0)
+            assignmentUpdate.monthlyRental = firstMonthRental;
+          if (securityDeposit !== undefined)
+            assignmentUpdate.securityDeposit = securityDeposit;
+          if (accessCardDeposit !== undefined)
+            assignmentUpdate.accessCardDeposit = accessCardDeposit;
+          if (Object.keys(assignmentUpdate).length)
+            await db
+              .update(accommodationAssignments)
+              .set(assignmentUpdate)
+              .where(eq(accommodationAssignments.id, linkedAssignment.id));
+        }
+      }
     } else if (action === "reservation-payment") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
-      const amountPaid = await addReservationPayment(db, reservationId, body);
+      const { amountPaid, paymentId } = await addReservationPayment(
+        db,
+        reservationId,
+        body,
+      );
       const paymentStatus = asText(
         body.paymentStatus,
         amountPaid > 0 ? "partial" : "unpaid",
@@ -2451,6 +2556,14 @@ export async function POST(request: Request) {
           inventoryCommitted: paymentStatus !== "unpaid",
           paymentUpdatedAt: nowIso(),
         })
+        .where(eq(reservations.id, reservationId));
+      createdId = paymentId;
+    } else if (action === "reservation-finance-review") {
+      const reservationId = asNumber(body.reservationId);
+      if (!reservationId) throw new Error("Reservation is required");
+      await db
+        .update(reservations)
+        .set({ financeReviewedAt: nowIso() })
         .where(eq(reservations.id, reservationId));
     } else if (action === "payment-delete") {
       const reservationId = asNumber(body.reservationId);
@@ -2528,6 +2641,17 @@ export async function POST(request: Request) {
           sql`DELETE FROM reservations WHERE id = ${reservationId}`,
         );
       });
+    } else if (action === "reservation-cancel") {
+      const reservationId = asNumber(body.reservationId);
+      if (!reservationId) throw new Error("Reservation is required");
+      await db
+        .update(reservations)
+        .set({
+          status: "cancelled",
+          cancelledAt: nowIso(),
+          inventoryCommitted: false,
+        })
+        .where(eq(reservations.id, reservationId));
     } else if (action === "reservation-convert") {
       const reservationId = asNumber(body.reservationId);
       const reservation = (
@@ -2552,10 +2676,57 @@ export async function POST(request: Request) {
           body.bedSpaceId || reservation.provisionalBedSpaceId,
         );
         if (!bedId) throw new Error("Select the actual room code manually");
+        // Same promotion-window rule as the Availability picker's
+        // effectiveRate(): an active promotion (covering the move-in date)
+        // wins over the room's regular sales rate. This is only the
+        // fallback — a recorded "first month advance rental" charge below
+        // is the actual agreed rate and takes priority when present.
+        const roomRate = (
+          await db.execute<{
+            sales_rate: number | null;
+            promotion_rate: number | null;
+            promotion_start_date: string | null;
+            promotion_end_date: string | null;
+            bed_monthly_rental: number | null;
+          }>(sql`
+            SELECT r.sales_rate, r.promotion_rate, r.promotion_start_date, r.promotion_end_date, b.monthly_rental bed_monthly_rental
+            FROM bed_spaces b JOIN hostel_rooms r ON r.id = b.room_id
+            WHERE b.id = ${bedId}
+          `)
+        )[0];
+        const promotionActive =
+          roomRate?.promotion_rate !== null &&
+          roomRate?.promotion_rate !== undefined &&
+          (!roomRate.promotion_start_date ||
+            roomRate.promotion_start_date <= reservation.targetMoveInDate) &&
+          (!roomRate.promotion_end_date ||
+            roomRate.promotion_end_date >= reservation.targetMoveInDate);
+        const roomDerivedRental = promotionActive
+          ? roomRate!.promotion_rate
+          : (roomRate?.sales_rate ?? roomRate?.bed_monthly_rental ?? null);
+        // The reservation's Payment step already collected specific charges
+        // (deposit, access card deposit, first month rental, ...) — carry
+        // those actual figures onto the assignment instead of leaving them
+        // to be re-entered from scratch.
+        const charges = await db.execute<{
+          charge_type: string;
+          amount: number;
+        }>(
+          sql`SELECT charge_type, amount FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+        );
+        const chargeAmount = (type: string) =>
+          charges.find((row) => row.charge_type === type)?.amount;
+        const firstMonthRental = chargeAmount("first-month-rental");
+        const monthlyRental =
+          firstMonthRental && Number(firstMonthRental) > 0
+            ? firstMonthRental
+            : roomDerivedRental;
+        const securityDeposit = chargeAmount("deposit") ?? null;
+        const accessCardDeposit = chargeAmount("access-card-deposit") ?? null;
         const key = `reservation:${reservationId}`;
         await db.execute(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, gender, contact_number, email, nationality, nationality_other, hometown, race, race_other, religion, religion_other, salesperson, status)
-          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.preferredGender}, ${reservation.contactNumber}, ${reservation.email}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
+          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, gender, contact_number, email, nationality, nationality_other, state, hometown, race, race_other, religion, religion_other, salesperson, status)
+          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.identityNo}, ${reservation.preferredGender}, ${reservation.contactNumber}, ${reservation.email}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.state}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
           ON CONFLICT DO NOTHING
         `);
         const student = (
@@ -2565,8 +2736,8 @@ export async function POST(request: Request) {
         )[0];
         if (!student) throw new Error("Unable to create student profile");
         await db.execute(sql`
-          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, salesperson, check_in_date, agreement_start_date, status, remarks, source_reservation_id)
-          VALUES (${key}, ${student.id}, ${bedId}, ${reservation.salesPerson}, ${reservation.targetMoveInDate}, ${reservation.targetMoveInDate}, 'active', ${reservation.notes}, ${reservationId})
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, status, remarks, source_reservation_id)
+          VALUES (${key}, ${student.id}, ${bedId}, ${monthlyRental}, ${securityDeposit}, ${accessCardDeposit}, ${reservation.salesPerson}, ${reservation.targetMoveInDate}, ${reservation.targetMoveInDate}, 'active', ${reservation.notes}, ${reservationId})
           ON CONFLICT DO NOTHING
         `);
         const now = nowIso();
@@ -2651,6 +2822,13 @@ export async function POST(request: Request) {
             agreementEndDate: asNullableText(body.leaseEndDate),
           })
           .where(eq(accommodationAssignments.id, asNumber(body.assignmentId)));
+    } else if (action === "assignment-renewal-apply") {
+      const assignmentId = asNumber(body.assignmentId);
+      if (!assignmentId) throw new Error("Assignment is required");
+      await db
+        .update(accommodationAssignments)
+        .set({ renewalAppliedAt: nowIso() })
+        .where(eq(accommodationAssignments.id, assignmentId));
     } else if (action === "student-create") {
       if (!asText(body.fullName)) throw new Error("Full name is required");
       const result = (
@@ -3129,28 +3307,70 @@ export async function POST(request: Request) {
         : [];
       if (!rows.length)
         throw new Error("The CSV file does not contain meter readings");
-      for (const row of rows) {
+
+      // Same room-matching rule as before (room code, or any bed's legacy
+      // code, lowest room id wins on a tie) — resolved for every distinct
+      // roomCode in one query instead of one lookup per CSV row.
+      const codes = [
+        ...new Set(rows.map((row) => asText(row.roomCode).toLowerCase())),
+      ];
+      const matchRows = await db.execute<{
+        code: string;
+        room_id: number;
+        bed_id: number;
+      }>(sql`
+        WITH input_codes AS (
+          SELECT * FROM (VALUES ${sql.join(
+            codes.map((code) => sql`(${code})`),
+            sql`, `,
+          )}) AS v(code)
+        ),
+        all_matches AS (
+          SELECT lower(u.unit_code || '-' || r.room_label) AS code, r.id AS room_id
+          FROM hostel_rooms r JOIN hostel_units u ON r.unit_id = u.id
+          UNION
+          SELECT lower(b.legacy_code) AS code, b.room_id AS room_id
+          FROM bed_spaces b
+          WHERE b.legacy_code IS NOT NULL AND b.legacy_code <> ''
+        ),
+        ranked AS (
+          SELECT ic.code, am.room_id,
+            ROW_NUMBER() OVER (PARTITION BY ic.code ORDER BY am.room_id) AS rn
+          FROM input_codes ic JOIN all_matches am ON am.code = ic.code
+        ),
+        chosen AS (
+          SELECT code, room_id FROM ranked WHERE rn = 1
+        )
+        SELECT ch.code, ch.room_id, MIN(b.id) AS bed_id
+        FROM chosen ch JOIN bed_spaces b ON b.room_id = ch.room_id
+        GROUP BY ch.code, ch.room_id
+      `);
+      const matchByCode = new Map(
+        matchRows.map((row) => [
+          row.code,
+          { roomId: Number(row.room_id), bedId: Number(row.bed_id) },
+        ]),
+      );
+
+      const toInsert = rows.flatMap((row) => {
         const code = asText(row.roomCode).toLowerCase();
-        const match = (
-          await db.execute<{ room_id: number; bed_id: number }>(sql`
-          SELECT r.id room_id, MIN(b.id) bed_id FROM hostel_rooms r
-          JOIN hostel_units u ON r.unit_id=u.id JOIN bed_spaces b ON b.room_id=r.id
-          WHERE lower(u.unit_code || '-' || r.room_label)=${code} OR lower(b.legacy_code)=${code}
-          GROUP BY r.id
-          ORDER BY r.id LIMIT 1
-        `)
-        )[0];
-        if (!match) continue;
-        await db.insert(meterReadings).values({
-          roomId: match.room_id,
-          bedSpaceId: match.bed_id,
-          readingDate: asText(row.readingDate),
-          readingValue: asNumber(row.readingValue),
-          readingType: asText(row.readingType, "monthly"),
-          submittedBy: currentUser.displayName,
-          notes: asText(row.notes),
-        });
-      }
+        const match = matchByCode.get(code);
+        if (!match) return [];
+        return [
+          {
+            roomId: match.roomId,
+            bedSpaceId: match.bedId,
+            readingDate: asText(row.readingDate),
+            readingValue: asNumber(row.readingValue),
+            readingType: asText(row.readingType, "monthly"),
+            submittedBy: currentUser.displayName,
+            notes: asText(row.notes),
+          },
+        ];
+      });
+
+      for (const batch of chunks(toInsert, 200))
+        await db.insert(meterReadings).values(batch);
     } else if (action === "meter-reading-update") {
       if (!body.readingId || !body.readingDate || body.readingValue === "")
         throw new Error("Reading date and value are required");
@@ -3184,15 +3404,19 @@ export async function POST(request: Request) {
       )[0];
       if (!cycle) throw new Error("Unable to create billing cycle");
       createdId = Number(cycle.id);
+      const cycleId = Number(cycle.id);
+      const cutoffDate = asText(body.cutoffDate);
+      const dueDate = asText(body.dueDate);
+      const invoiceFrequency = asText(body.invoiceFrequency, "on-request");
+
       const active = await db.execute<{
         assignment_id: number;
         student_id: number;
         monthly_rental: number | null;
-        bed_space_id: number;
         room_id: number;
         electricity_rate: number;
       }>(sql`
-        SELECT a.id assignment_id, a.student_id, a.monthly_rental, a.bed_space_id, r.id room_id, h.electricity_rate
+        SELECT a.id assignment_id, a.student_id, a.monthly_rental, r.id room_id, h.electricity_rate
         FROM accommodation_assignments a
         JOIN bed_spaces b ON a.bed_space_id=b.id
         JOIN hostel_rooms r ON b.room_id=r.id
@@ -3200,111 +3424,327 @@ export async function POST(request: Request) {
         JOIN hostel_properties h ON u.hostel_id=h.id
         WHERE a.status='active'
       `);
-      for (const assignment of active) {
-        const existing = (
-          await db.execute<{ id: number }>(
-            sql`SELECT id FROM billing_invoices WHERE cycle_id=${cycle.id} AND student_id=${assignment.student_id}`,
-          )
-        )[0];
-        if (existing) continue;
-        const rateChange = (
-          await db.execute<{ monthly_rental: number | null }>(
-            sql`SELECT monthly_rental FROM student_rate_changes WHERE assignment_id=${assignment.assignment_id} AND effective_date<=${asText(body.cutoffDate)} ORDER BY effective_date DESC LIMIT 1`,
-          )
-        )[0];
-        const rent = Number(
-          rateChange?.monthly_rental ?? assignment.monthly_rental ?? 0,
+
+      if (active.length) {
+        const existingRows = await db.execute<{ student_id: number }>(
+          sql`SELECT student_id FROM billing_invoices WHERE cycle_id=${cycleId}`,
         );
-        const electricity = await electricityShareForAssignment(
-          db,
-          assignment.assignment_id,
-          assignment.room_id,
-          asText(body.cutoffDate),
-          Number(assignment.electricity_rate || 0),
+        const alreadyBilled = new Set(
+          existingRows.map((row) => Number(row.student_id)),
         );
-        // Monthly rentals bill every cycle; annual ones only bill the cycle
-        // whose month matches the anniversary of their start date.
-        const parking = (
-          await db.execute<{ amount: number }>(
-            sql`SELECT COALESCE(SUM(monthly_rental),0) amount FROM parking_rentals
-                WHERE student_id=${assignment.student_id} AND status='active'
-                AND (
-                  billing_frequency='monthly'
-                  OR (billing_frequency IN ('annually','package') AND EXTRACT(MONTH FROM start_date::date)=EXTRACT(MONTH FROM ${asText(body.cutoffDate)}::date))
-                )`,
-          )
-        )[0];
-        const extra = (
-          await db.execute<{ amount: number }>(
-            sql`SELECT COALESCE(SUM(student_charge),0) amount FROM maintenance_tickets WHERE student_id=${assignment.student_id} AND student_charge>0 AND status IN ('completed','closed')`,
-          )
-        )[0];
-        const previousInvoice = (
-          await db.execute<{ total_amount: number; amount_paid: number }>(
-            sql`SELECT total_amount, amount_paid FROM billing_invoices WHERE student_id=${assignment.student_id} ORDER BY id DESC LIMIT 1`,
-          )
-        )[0];
-        const carryForward = previousInvoice
-          ? Math.min(
-              0,
-              Number(previousInvoice.total_amount || 0) -
-                Number(previousInvoice.amount_paid || 0),
-            )
-          : 0;
-        const total =
-          rent +
-          electricity.amount +
-          Number(parking?.amount || 0) +
-          Number(extra?.amount || 0) +
-          carryForward;
-        const invoice = (
-          await db.execute<{ id: number }>(sql`
-            INSERT INTO billing_invoices (invoice_no, cycle_id, student_id, assignment_id, due_date, status, total_amount, amount_paid, invoice_frequency)
-            VALUES (${`INV-${cycle.id}-${assignment.student_id}`}, ${cycle.id}, ${assignment.student_id}, ${assignment.assignment_id}, ${asText(body.dueDate)}, 'unpaid', ${total}, 0, ${asText(body.invoiceFrequency, "on-request")})
-            RETURNING id
-          `)
-        )[0];
-        if (invoice) {
-          const invoiceId = Number(invoice.id);
-          const items = (
-            [
-              ["room-rental", "Room rental", 1, rent, rent],
-              [
-                "electricity",
-                `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
-                electricity.usage,
-                Number(assignment.electricity_rate || 0),
-                electricity.amount,
-              ],
-              [
-                "parking",
-                "Parking rental",
-                1,
-                Number(parking?.amount || 0),
-                Number(parking?.amount || 0),
-              ],
-              [
-                "other",
-                "Additional / penalty charges",
-                1,
-                Number(extra?.amount || 0),
-                Number(extra?.amount || 0),
-              ],
-              [
-                "carry-forward",
-                "Previous excess payment carried forward",
-                1,
-                carryForward,
-                carryForward,
-              ],
-            ] as [string, string, number, number, number][]
-          ).filter((item) => Number(item[4]) !== 0);
-          await db.transaction(async (tx) => {
-            for (const [itemType, description, quantity, rate, amount] of items)
-              await tx.execute(
-                sql`INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount) VALUES (${invoiceId}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+        const pending = active.filter(
+          (assignment) => !alreadyBilled.has(Number(assignment.student_id)),
+        );
+
+        if (pending.length) {
+          const assignmentIds = pending.map((row) =>
+            Number(row.assignment_id),
+          );
+          const studentIds = [
+            ...new Set(pending.map((row) => Number(row.student_id))),
+          ];
+          const roomIds = [
+            ...new Set(pending.map((row) => Number(row.room_id))),
+          ];
+          const idList = (ids: number[]) =>
+            sql.join(
+              ids.map((id) => sql`${id}`),
+              sql`, `,
+            );
+
+          // Latest rate-change override per assignment, effective on/before
+          // cut-off — one query for every pending assignment instead of one
+          // query per student.
+          const rateChangeRows = await db.execute<{
+            assignment_id: number;
+            monthly_rental: number | null;
+          }>(sql`
+            SELECT DISTINCT ON (assignment_id) assignment_id, monthly_rental
+            FROM student_rate_changes
+            WHERE assignment_id IN (${idList(assignmentIds)})
+              AND effective_date <= ${cutoffDate}
+            ORDER BY assignment_id, effective_date DESC
+          `);
+          const rateChangeByAssignment = new Map(
+            rateChangeRows.map((row) => [
+              Number(row.assignment_id),
+              row.monthly_rental,
+            ]),
+          );
+
+          // Electricity: the per-room meter readings and occupant list only
+          // depend on the room, not the individual student, so fetch each
+          // once per room (rooms are shared by up to five students) instead
+          // of redoing the same lookup for every roommate.
+          const readingRows = roomIds.length
+            ? await db.execute<{
+                room_id: number;
+                reading_value: number;
+              }>(sql`
+                SELECT room_id, reading_value FROM (
+                  SELECT
+                    COALESCE(mr.room_id, bs.room_id) AS room_id,
+                    mr.reading_value,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY COALESCE(mr.room_id, bs.room_id)
+                      ORDER BY mr.reading_date DESC, mr.id DESC
+                    ) AS rn
+                  FROM meter_readings mr
+                  LEFT JOIN bed_spaces bs ON bs.id = mr.bed_space_id
+                  WHERE mr.reading_date <= ${cutoffDate}
+                    AND COALESCE(mr.room_id, bs.room_id) IN (${idList(roomIds)})
+                ) ranked
+                WHERE rn <= 2
+                ORDER BY room_id, rn
+              `)
+            : [];
+          const readingsByRoom = new Map<number, number[]>();
+          for (const row of readingRows) {
+            const roomId = Number(row.room_id);
+            const list = readingsByRoom.get(roomId) || [];
+            list.push(Number(row.reading_value));
+            readingsByRoom.set(roomId, list);
+          }
+
+          type OccupantRow = {
+            assignment_id: number;
+            room_id: number;
+            check_in_meter: number | null;
+            check_out_meter: number | null;
+          };
+          const occupantRows: OccupantRow[] = roomIds.length
+            ? await db.execute<OccupantRow>(sql`
+                SELECT a.id assignment_id, b.room_id, a.check_in_meter, a.check_out_meter
+                FROM accommodation_assignments a
+                JOIN bed_spaces b ON a.bed_space_id=b.id
+                WHERE b.room_id IN (${idList(roomIds)})
+                  AND (a.status='active' OR a.check_out_date>=substr(${cutoffDate},1,7)||'-01')
+              `)
+            : [];
+          const occupantsByRoom = new Map<number, OccupantRow[]>();
+          for (const row of occupantRows) {
+            const roomId = Number(row.room_id);
+            const list = occupantsByRoom.get(roomId) || [];
+            list.push(row);
+            occupantsByRoom.set(roomId, list);
+          }
+
+          // Same usage-splitting algorithm as before — only the data source
+          // changed, from a per-assignment query to these per-room caches.
+          const electricityShareFromCache = (
+            assignmentId: number,
+            roomId: number,
+            electricityRate: number,
+          ) => {
+            const readings = readingsByRoom.get(roomId) || [];
+            if (readings.length < 2) return { usage: 0, amount: 0 };
+            const current = readings[0];
+            const previous = readings[1];
+            if (!(current > previous)) return { usage: 0, amount: 0 };
+            const occupants = occupantsByRoom.get(roomId) || [];
+            const intervals = occupants
+              .map((occupant) => ({
+                id: Number(occupant.assignment_id),
+                start:
+                  occupant.check_in_meter !== null &&
+                  Number(occupant.check_in_meter) > previous
+                    ? Math.min(current, Number(occupant.check_in_meter))
+                    : previous,
+                end:
+                  occupant.check_out_meter !== null &&
+                  Number(occupant.check_out_meter) < current
+                    ? Math.max(previous, Number(occupant.check_out_meter))
+                    : current,
+              }))
+              .filter((occupant) => occupant.end > occupant.start);
+            const points = [
+              ...new Set([
+                previous,
+                current,
+                ...intervals.flatMap((occupant) => [
+                  occupant.start,
+                  occupant.end,
+                ]),
+              ]),
+            ].sort((a, b) => a - b);
+            let usage = 0;
+            for (let index = 0; index < points.length - 1; index += 1) {
+              const start = points[index],
+                end = points[index + 1];
+              const activeOccupants = intervals.filter(
+                (occupant) => occupant.start <= start && occupant.end >= end,
               );
+              if (
+                activeOccupants.some(
+                  (occupant) => occupant.id === assignmentId,
+                ) &&
+                activeOccupants.length
+              )
+                usage += (end - start) / activeOccupants.length;
+            }
+            return { usage, amount: Math.ceil(usage * electricityRate) };
+          };
+
+          // Monthly rentals bill every cycle; annual ones only bill the cycle
+          // whose month matches the anniversary of their start date.
+          const parkingRows = await db.execute<{
+            student_id: number;
+            amount: number;
+          }>(sql`
+            SELECT student_id, COALESCE(SUM(monthly_rental),0) amount
+            FROM parking_rentals
+            WHERE student_id IN (${idList(studentIds)}) AND status='active'
+              AND (
+                billing_frequency='monthly'
+                OR (billing_frequency IN ('annually','package') AND EXTRACT(MONTH FROM start_date::date)=EXTRACT(MONTH FROM ${cutoffDate}::date))
+              )
+            GROUP BY student_id
+          `);
+          const parkingByStudent = new Map(
+            parkingRows.map((row) => [
+              Number(row.student_id),
+              Number(row.amount),
+            ]),
+          );
+
+          const maintenanceRows = await db.execute<{
+            student_id: number;
+            amount: number;
+          }>(sql`
+            SELECT student_id, COALESCE(SUM(student_charge),0) amount
+            FROM maintenance_tickets
+            WHERE student_id IN (${idList(studentIds)}) AND student_charge>0
+              AND status IN ('completed','closed')
+            GROUP BY student_id
+          `);
+          const maintenanceByStudent = new Map(
+            maintenanceRows.map((row) => [
+              Number(row.student_id),
+              Number(row.amount),
+            ]),
+          );
+
+          const previousInvoiceRows = await db.execute<{
+            student_id: number;
+            total_amount: number;
+            amount_paid: number;
+          }>(sql`
+            SELECT DISTINCT ON (student_id) student_id, total_amount, amount_paid
+            FROM billing_invoices
+            WHERE student_id IN (${idList(studentIds)})
+            ORDER BY student_id, id DESC
+          `);
+          const previousInvoiceByStudent = new Map(
+            previousInvoiceRows.map((row) => [
+              Number(row.student_id),
+              {
+                totalAmount: Number(row.total_amount || 0),
+                amountPaid: Number(row.amount_paid || 0),
+              },
+            ]),
+          );
+
+          const invoicesToInsert = pending.map((assignment) => {
+            const assignmentId = Number(assignment.assignment_id);
+            const studentId = Number(assignment.student_id);
+            const roomId = Number(assignment.room_id);
+            const electricityRate = Number(assignment.electricity_rate || 0);
+
+            const rateChange = rateChangeByAssignment.get(assignmentId);
+            const rent = Number(rateChange ?? assignment.monthly_rental ?? 0);
+
+            const electricity = electricityShareFromCache(
+              assignmentId,
+              roomId,
+              electricityRate,
+            );
+            const parkingAmount = Number(
+              parkingByStudent.get(studentId) || 0,
+            );
+            const extraAmount = Number(
+              maintenanceByStudent.get(studentId) || 0,
+            );
+            const previousInvoice = previousInvoiceByStudent.get(studentId);
+            const carryForward = previousInvoice
+              ? Math.min(
+                  0,
+                  previousInvoice.totalAmount - previousInvoice.amountPaid,
+                )
+              : 0;
+            const total =
+              rent + electricity.amount + parkingAmount + extraAmount + carryForward;
+
+            const items = (
+              [
+                ["room-rental", "Room rental", 1, rent, rent],
+                [
+                  "electricity",
+                  `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
+                  electricity.usage,
+                  electricityRate,
+                  electricity.amount,
+                ],
+                ["parking", "Parking rental", 1, parkingAmount, parkingAmount],
+                [
+                  "maintenance",
+                  "Maintenance charges",
+                  1,
+                  extraAmount,
+                  extraAmount,
+                ],
+                [
+                  "carry-forward",
+                  "Previous excess payment carried forward",
+                  1,
+                  carryForward,
+                  carryForward,
+                ],
+              ] as [string, string, number, number, number][]
+            ).filter((item) => Number(item[4]) !== 0);
+
+            return {
+              invoiceNo: `INV-${cycleId}-${studentId}`,
+              studentId,
+              assignmentId,
+              total,
+              items,
+            };
           });
+
+          for (const batch of chunks(invoicesToInsert, 200)) {
+            const invoiceValueRows = batch.map(
+              (invoice) =>
+                sql`(${invoice.invoiceNo}, ${cycleId}, ${invoice.studentId}, ${invoice.assignmentId}, ${dueDate}, 'unpaid', ${invoice.total}, 0, ${invoiceFrequency})`,
+            );
+            const insertedInvoices = await db.execute<{
+              id: number;
+              student_id: number;
+            }>(sql`
+              INSERT INTO billing_invoices (invoice_no, cycle_id, student_id, assignment_id, due_date, status, total_amount, amount_paid, invoice_frequency)
+              VALUES ${sql.join(invoiceValueRows, sql`, `)}
+              RETURNING id, student_id
+            `);
+            const invoiceIdByStudent = new Map(
+              insertedInvoices.map((row) => [
+                Number(row.student_id),
+                Number(row.id),
+              ]),
+            );
+
+            const itemValueRows = batch.flatMap((invoice) => {
+              const invoiceId = invoiceIdByStudent.get(invoice.studentId);
+              if (!invoiceId) return [];
+              return invoice.items.map(
+                ([itemType, description, quantity, rate, amount]) =>
+                  sql`(${invoiceId}, ${itemType}, ${description}, ${quantity}, ${rate}, ${amount})`,
+              );
+            });
+            if (itemValueRows.length)
+              await db.execute(sql`
+                INSERT INTO billing_items (invoice_id, item_type, description, quantity, rate, amount)
+                VALUES ${sql.join(itemValueRows, sql`, `)}
+              `);
+          }
         }
       }
     } else if (action === "billing-post") {

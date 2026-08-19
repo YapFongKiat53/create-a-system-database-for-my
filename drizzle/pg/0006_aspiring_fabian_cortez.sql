@@ -1,0 +1,1 @@
+ALTER TABLE "reservations" ADD COLUMN "finance_reviewed_at" text;

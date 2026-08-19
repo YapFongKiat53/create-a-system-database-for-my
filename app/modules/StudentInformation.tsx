@@ -5,12 +5,15 @@ import { useMemo, useState } from "react";
 import {
   DemographicFields,
   Modal,
+  SearchIcon,
   Stat,
+  StatusPill,
   blockOf,
   dateLabel,
   formValues,
   genderLabel,
   money,
+  paginationItems,
   titleCase,
 } from "./shared";
 import type { Data, Row } from "./shared";
@@ -148,28 +151,6 @@ function CourseOptions({ courses, current }: { courses: Row[]; current?: string 
       )}
     </>
   );
-}
-
-function paginationItems(currentPage: number, totalPages: number) {
-  const pages: Array<number | "ellipsis"> = [];
-
-  if (totalPages <= 7) {
-    for (let page = 1; page <= totalPages; page += 1) pages.push(page);
-    return pages;
-  }
-
-  pages.push(1);
-
-  if (currentPage > 4) pages.push("ellipsis");
-
-  const start = Math.max(2, currentPage - 1);
-  const end = Math.min(totalPages - 1, currentPage + 1);
-  for (let page = start; page <= end; page += 1) pages.push(page);
-
-  if (currentPage < totalPages - 3) pages.push("ellipsis");
-
-  pages.push(totalPages);
-  return pages;
 }
 
 // Cascading hostel → unit → type/category/bathroom room picker for the
@@ -636,11 +617,6 @@ export function StudentsModule({
     resetDirectoryFilters(true);
   };
 
-  const backToHostels = () => {
-    setSelectedHostelKey(null);
-    resetDirectoryFilters(true);
-  };
-
   const closeAddStudentModal = () => {
     setModal("");
     setAddAssignRoom(false);
@@ -677,7 +653,7 @@ export function StudentsModule({
       : selectedHostel?.name || "Student directory";
 
   return (
-    <>
+    <div className="table-v2">
       <div className="student-hostel-page">
         <section className="intro compact-intro student-directory-intro">
           <div>
@@ -698,14 +674,14 @@ export function StudentsModule({
           <div className="button-row">
             <button
               type="button"
-              className="secondary"
+              className="v2-btn-ghost"
               onClick={() => setModal("schools")}
             >
               Manage schools
             </button>
             <button
               type="button"
-              className="primary"
+              className="v2-btn-primary"
               onClick={() => setModal("add")}
             >
               + Add student
@@ -732,85 +708,25 @@ export function StudentsModule({
           />
         </section>
 
-        {!selectedHostelKey ? (
-          <section className="panel student-hostel-directory-panel">
-            <div className="student-hostel-list-header">
-              <span>Property</span>
-              <span>Current</span>
-              <span>Moved out</span>
-              <span>Agency</span>
-              <span>Incomplete</span>
-              <span>Action</span>
-            </div>
+        <section className="panel student-filter-panel">
+          <div className="workspace-tabs">
+            {hostelDirectory.map(({ key, hostel, students }) => (
+              <button
+                key={key}
+                type="button"
+                className={selectedHostelKey === key ? "active" : ""}
+                onClick={() => selectHostel(key)}
+              >
+                {hostel?.name || "Unassigned profiles"} ({students.length})
+              </button>
+            ))}
+            {!hostelDirectory.length && <em>No hostels added yet.</em>}
+          </div>
+        </section>
 
-            <div className="student-hostel-list">
-              {hostelDirectory.map(({ key, hostel, students }) => {
-                const name = hostel?.name || "Unassigned profiles";
-                const currentCount = students.filter(isCurrentOccupant).length;
-                const movedCount = students.filter(isMovedOutOrInactive).length;
-                const agencyCount = students.filter(isAgencyLinked).length;
-                const incompleteCount = students.filter(
-                  isProfileIncomplete,
-                ).length;
-
-                return (
-                  <article className="student-hostel-row" key={key}>
-                    <div className="student-hostel-property">
-                      <span className="student-hostel-avatar">
-                        {hostel ? hostelInitials(hostel.name) : "--"}
-                      </span>
-                      <div>
-                        <strong>{name}</strong>
-                        <p>{hostelAddress(hostel)}</p>
-                        <small>
-                          {students.length} student profile
-                          {students.length === 1 ? "" : "s"}
-                        </small>
-                      </div>
-                    </div>
-
-                    <div className="student-hostel-stat">
-                      <strong>{currentCount}</strong>
-                      <small>occupants</small>
-                    </div>
-                    <div className="student-hostel-stat">
-                      <strong>{movedCount}</strong>
-                      <small>inactive</small>
-                    </div>
-                    <div className="student-hostel-stat">
-                      <strong>{agencyCount}</strong>
-                      <small>linked</small>
-                    </div>
-                    <div className="student-hostel-stat">
-                      <strong>{incompleteCount}</strong>
-                      <small>to complete</small>
-                    </div>
-
-                    <div className="student-hostel-action">
-                      <button
-                        type="button"
-                        className="secondary compact"
-                        onClick={() => selectHostel(key)}
-                      >
-                        View students
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        ) : (
+        {selectedHostelKey ? (
           <>
             <section className="student-selected-hostel">
-              <button
-                type="button"
-                className="student-back-button"
-                onClick={backToHostels}
-              >
-                ← All hostels
-              </button>
-
               <div className="student-selected-hostel-card">
                 <span className="student-hostel-avatar large">
                   {selectedHostel
@@ -863,9 +779,9 @@ export function StudentsModule({
                 </button>
               </div>
 
-              <div className="student-second-level-filters">
-                <label className="search student-search-field">
-                  <span>Search students</span>
+              <div className="v2-toolbar">
+                <label className="v2-search">
+                  <SearchIcon />
                   <input
                     value={query}
                     onChange={(event) => {
@@ -876,62 +792,56 @@ export function StudentsModule({
                   />
                 </label>
 
-                <label>
-                  Unit
-                  <select
-                    value={unitFilter}
-                    onChange={(event) => {
-                      setUnitFilter(event.target.value);
-                      setPage(1);
-                    }}
-                  >
-                    <option value="all">All units</option>
-                    {unitOptions.map((unitCode) => (
-                      <option key={unitCode} value={unitCode}>
-                        {unitCode}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <select
+                  className="v2-pill-select"
+                  value={unitFilter}
+                  onChange={(event) => {
+                    setUnitFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All units</option>
+                  {unitOptions.map((unitCode) => (
+                    <option key={unitCode} value={unitCode}>
+                      {unitCode}
+                    </option>
+                  ))}
+                </select>
 
-                <label>
-                  School
-                  <select
-                    value={schoolFilter}
-                    onChange={(event) => {
-                      setSchoolFilter(event.target.value);
-                      setPage(1);
-                    }}
-                  >
-                    <option value="all">All schools</option>
-                    {scopedSchoolOptions.map((school) => (
-                      <option key={school} value={school}>
-                        {school}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <select
+                  className="v2-pill-select"
+                  value={schoolFilter}
+                  onChange={(event) => {
+                    setSchoolFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All schools</option>
+                  {scopedSchoolOptions.map((school) => (
+                    <option key={school} value={school}>
+                      {school}
+                    </option>
+                  ))}
+                </select>
 
-                <label>
-                  Profile details
-                  <select
-                    value={completionFilter}
-                    onChange={(event) => {
-                      setCompletionFilter(
-                        event.target.value as CompletionFilter,
-                      );
-                      setPage(1);
-                    }}
-                  >
-                    <option value="all">All profiles</option>
-                    <option value="complete">Complete profiles</option>
-                    <option value="incomplete">Needs completion</option>
-                  </select>
-                </label>
+                <select
+                  className="v2-pill-select"
+                  value={completionFilter}
+                  onChange={(event) => {
+                    setCompletionFilter(
+                      event.target.value as CompletionFilter,
+                    );
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All profiles</option>
+                  <option value="complete">Complete profiles</option>
+                  <option value="incomplete">Needs completion</option>
+                </select>
 
                 <button
                   type="button"
-                  className="secondary reset-button student-reset-button"
+                  className="v2-reset"
                   onClick={() => resetDirectoryFilters(false)}
                 >
                   Reset filters
@@ -1015,14 +925,11 @@ export function StudentsModule({
                             <small>{item.agency || "Direct"}</small>
                           </td>
                           <td>
-                            <span
-                              className={`unit-status ${item.assignmentStatus || item.profileStatus
-                                }`}
-                            >
-                              {titleCase(
-                                item.assignmentStatus || item.profileStatus,
-                              )}
-                            </span>
+                            <StatusPill
+                              status={
+                                item.assignmentStatus || item.profileStatus
+                              }
+                            />
                           </td>
                           <td>
                             <button
@@ -1111,6 +1018,10 @@ export function StudentsModule({
               </footer>
             </section>
           </>
+        ) : (
+          <section className="panel student-results-panel">
+            <em>Select a hostel above to view its students.</em>
+          </section>
         )}
       </div>
       {student && (
@@ -1321,6 +1232,40 @@ export function StudentsModule({
                           type="date"
                           defaultValue={student.leaseEndDate || ""}
                         />
+                      </label>
+                    </div>
+                    <p className="section-kicker room-details-group">RENEWAL</p>
+                    <div className="form-grid">
+                      <label className="wide">
+                        Renewal status
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {student.renewalAppliedAt ? (
+                            <span>
+                              Applied on {dateLabel(student.renewalAppliedAt)}
+                            </span>
+                          ) : (
+                            <>
+                              <span style={{ color: '#6b7280' }}>
+                                Not yet applied
+                              </span>
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                onClick={() =>
+                                  save(
+                                    {
+                                      action: "assignment-renewal-apply",
+                                      assignmentId: student.assignmentId,
+                                    },
+                                    "Renewal marked as applied",
+                                  )
+                                }
+                              >
+                                Mark renewal applied
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </label>
                     </div>
                   </>
@@ -2202,6 +2147,6 @@ export function StudentsModule({
           </form>
         </Modal>
       )}
-    </>
+    </div>
   );
-} 
+}

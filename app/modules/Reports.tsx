@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Empty,
-  Modal,
+  SearchIcon,
   Stat,
   commitsInventory,
   money,
@@ -193,8 +193,16 @@ export function ReportsModule({ data }: { data: Data }) {
     a.click();
     URL.revokeObjectURL(url);
   };
+  const selectReport = (index: number) => {
+    setSelectedReport(index);
+    setReportQuery("");
+    setReportHostel("all");
+    setReportFrom("");
+    setReportTo("");
+    setReportStatus("all");
+  };
   return (
-    <>
+    <div className="table-v2">
       <section className="intro compact-intro">
         <div>
           <span className="section-kicker">MANAGEMENT REPORTS</span>
@@ -205,53 +213,32 @@ export function ReportsModule({ data }: { data: Data }) {
           </p>
         </div>
       </section>
-      <section className="report-list">
-        {reports.map((r, index) => (
-          <article className="panel" key={r.name}>
-            <span>{String(index + 1).padStart(2, "0")}</span>
+      <section className="panel">
+        <div className="workspace-tabs">
+          {reports.map((r, index) => (
+            <button
+              key={r.key}
+              type="button"
+              className={selectedReport === index ? "active" : ""}
+              onClick={() => selectReport(index)}
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {selectedReport !== null ? (
+        <section className="panel">
+          <div className="section-heading">
             <div>
               <small>REPORT</small>
-              <h3>{r.name}</h3>
-              <strong>{r.value}</strong>
-              <p>{r.note}</p>
+              <h3>{reports[selectedReport].name}</h3>
+              <p>{reports[selectedReport].note}</p>
             </div>
-            <div className="button-row">
-              <button
-                className="primary compact"
-                onClick={() => {
-                  setSelectedReport(index);
-                  setReportQuery("");
-                  setReportHostel("all");
-                  setReportFrom("");
-                  setReportTo("");
-                  setReportStatus("all");
-                }}
-              >
-                View report
-              </button>
-              <button
-                className="secondary compact"
-                onClick={() =>
-                  download(
-                    r.name.toLowerCase().replace(/ /g, "-"),
-                    reportRows(index),
-                  )
-                }
-              >
-                Export CSV
-              </button>
-            </div>
-          </article>
-        ))}
-      </section>
-      {selectedReport !== null && (
-        <Modal
-          title={reports[selectedReport].name}
-          kicker="DETAILED REPORT"
-          description="Filter the detailed register, then export exactly the visible rows."
-          onClose={() => setSelectedReport(null)}
-          wide
-        >
+            <span>{reports[selectedReport].value}</span>
+          </div>
+
           {selectedReport === 5 && (
             <section className="module-metrics report-modal-metrics">
               <Stat
@@ -264,30 +251,29 @@ export function ReportsModule({ data }: { data: Data }) {
               />
             </section>
           )}
-          <div className="filters report-filters">
-            <label className="search">
-              Student, room or description
+
+          <div className="v2-toolbar">
+            <label className="v2-search">
+              <SearchIcon />
               <input
                 value={reportQuery}
                 onChange={(event) => setReportQuery(event.target.value)}
-                placeholder="Search visible report"
+                placeholder="Student, room or description"
               />
             </label>
-            <label>
-              Hostel
-              <select
-                value={reportHostel}
-                onChange={(event) => setReportHostel(event.target.value)}
-              >
-                <option value="all">All hostels</option>
-                {data.hostels.map((hostel) => (
-                  <option key={hostel.id} value={hostel.id}>
-                    {hostel.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
+            <select
+              className="v2-pill-select"
+              value={reportHostel}
+              onChange={(event) => setReportHostel(event.target.value)}
+            >
+              <option value="all">All hostels</option>
+              {data.hostels.map((hostel) => (
+                <option key={hostel.id} value={hostel.id}>
+                  {hostel.name}
+                </option>
+              ))}
+            </select>
+            <label className="v2-date-field">
               From
               <input
                 type="date"
@@ -295,7 +281,7 @@ export function ReportsModule({ data }: { data: Data }) {
                 onChange={(event) => setReportFrom(event.target.value)}
               />
             </label>
-            <label>
+            <label className="v2-date-field">
               To
               <input
                 type="date"
@@ -306,32 +292,43 @@ export function ReportsModule({ data }: { data: Data }) {
             {(selectedReport === 0 ||
               selectedReport === 5 ||
               selectedReport === 6) && (
-              <label>
-                Status
-                <select
-                  value={reportStatus}
-                  onChange={(event) => setReportStatus(event.target.value)}
-                >
-                  <option value="all">All statuses</option>
-                  <option value="active">Active</option>
-                  <option value="moved-out">Moved out</option>
-                  <option value="submitted">Submitted</option>
-                  <option value="in-progress">In progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="closed">Closed</option>
-                  <option value="paid">Paid</option>
-                  <option value="partial">Partial</option>
-                  <option value="unpaid">Unpaid</option>
-                </select>
-              </label>
+              <select
+                className="v2-pill-select"
+                value={reportStatus}
+                onChange={(event) => setReportStatus(event.target.value)}
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="moved-out">Moved out</option>
+                <option value="submitted">Submitted</option>
+                <option value="in-progress">In progress</option>
+                <option value="completed">Completed</option>
+                <option value="closed">Closed</option>
+                <option value="paid">Paid</option>
+                <option value="partial">Partial</option>
+                <option value="unpaid">Unpaid</option>
+              </select>
             )}
             <button
-              className="primary compact"
+              className="v2-reset"
+              onClick={() => {
+                setReportQuery("");
+                setReportHostel("all");
+                setReportFrom("");
+                setReportTo("");
+                setReportStatus("all");
+              }}
+            >
+              Reset filters
+            </button>
+            <button
+              className="v2-btn-primary"
               onClick={() => download(reports[selectedReport].key, detailRows)}
             >
               Export visible CSV
             </button>
           </div>
+
           <div className="table-wrap report-detail-table">
             <table>
               <thead>
@@ -369,8 +366,12 @@ export function ReportsModule({ data }: { data: Data }) {
               />
             )}
           </div>
-        </Modal>
+        </section>
+      ) : (
+        <section className="panel">
+          <em>Select a report above to view its details.</em>
+        </section>
       )}
-    </>
+    </div>
   );
 }

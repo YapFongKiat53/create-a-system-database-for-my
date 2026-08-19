@@ -20,6 +20,7 @@ export type Data = {
   parkingRentals: Row[];
   schools: Row[];
   courses: Row[];
+  categoryRates: Row[];
   tickets: Row[];
   ticketMessages: Row[];
   meterReadings: Row[];
@@ -98,6 +99,27 @@ export const titleCase = (value: string) =>
   String(value || "")
     .replace(/-/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+export function paginationItems(currentPage: number, totalPages: number) {
+  const pages: Array<number | "ellipsis"> = [];
+
+  if (totalPages <= 7) {
+    for (let page = 1; page <= totalPages; page += 1) pages.push(page);
+    return pages;
+  }
+
+  pages.push(1);
+
+  if (currentPage > 4) pages.push("ellipsis");
+
+  const start = Math.max(2, currentPage - 1);
+  const end = Math.min(totalPages - 1, currentPage + 1);
+  for (let page = start; page <= end; page += 1) pages.push(page);
+
+  if (currentPage < totalPages - 3) pages.push("ellipsis");
+
+  pages.push(totalPages);
+  return pages;
+}
 export const dateLabel = (value: string | null | undefined, short = false) =>
   value
     ? new Intl.DateTimeFormat(
@@ -187,6 +209,40 @@ export const uploadAttachment = async (
   if (!response.ok) throw new Error(result.error || "Unable to upload file");
   return result;
 };
+
+// Small shared atoms for the table-v2 redesign (inline row-expand tables) —
+// see globals.css's "TABLE-FORM REDESIGN (V2)" section for the styling.
+export function SearchIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+export function Chevron({ expanded }: { expanded: boolean }) {
+  return (
+    <span className={`v2-chevron ${expanded ? "expanded" : ""}`} aria-hidden>
+      ›
+    </span>
+  );
+}
+
+export function StatusPill({ status }: { status: string }) {
+  return (
+    <span className={`status-pill status-${status}`}>{titleCase(status)}</span>
+  );
+}
 
 export function Modal({
   title,
@@ -288,7 +344,7 @@ export function SearchSelect({
 // Digits typed into an IC field auto-format as 010101-01-0101 (YYMMDD-PB-NNNN)
 // as the user types; passport numbers are left as free text since they have
 // no fixed shape.
-const formatIC = (raw: string) => {
+export const formatIC = (raw: string) => {
   const digits = raw.replace(/\D/g, "").slice(0, 12);
   return [digits.slice(0, 6), digits.slice(6, 8), digits.slice(8, 12)]
     .filter(Boolean)
@@ -359,6 +415,12 @@ export function DemographicFields({
                 ? event.target.value
                 : formatIC(event.target.value),
             )
+          }
+          pattern={isInternational ? undefined : "\\d{6}-\\d{2}-\\d{4}"}
+          title={
+            isInternational
+              ? undefined
+              : "Enter the full IC number in the format 010101-01-0101"
           }
         />
       </label>

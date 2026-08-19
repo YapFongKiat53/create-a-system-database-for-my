@@ -5,32 +5,17 @@ import { useMemo, useState } from "react";
 import {
   Modal,
   ParkingRentalForm,
+  SearchIcon,
   Stat,
+  StatusPill,
   dateLabel,
   formValues,
+  formatIC,
   genderLabel,
   titleCase,
   uploadAttachment,
 } from "./shared";
 import type { Data, Row } from "./shared";
-
-
-function directoryInitials(value: unknown) {
-  const parts = String(value || "Property")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (!parts.length) return "PR";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-
-  return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
-}
-
-function unitInitials(value: unknown) {
-  const compact = String(value || "UN").replace(/[^a-zA-Z0-9]/g, "");
-  return (compact.slice(0, 2) || "UN").toUpperCase();
-}
 
 // Hostels that organise units into lettered/numbered blocks (e.g. Damai's
 // D1/D2/D3, Nadayu's NB/NC/NE). Hostels not listed here have no block
@@ -65,6 +50,7 @@ function AddUnitForm({
   const [includeOwner, setIncludeOwner] = useState(false);
   const [agreementType, setAgreementType] = useState("rental");
   const [agreementFile, setAgreementFile] = useState<File | null>(null);
+  const [ownerIdentityNo, setOwnerIdentityNo] = useState("");
 
   const hostel = data.hostels.find((h) => String(h.id) === hostelId);
   const blockOptions = UNIT_BLOCKS_BY_HOSTEL[String(hostel?.code || "")] || [];
@@ -198,10 +184,16 @@ function AddUnitForm({
             <input name="ownerName" placeholder="e.g. John Doe" />
           </label>
           <label>
-            Owner IC / passport / registration no.
+            IC
             <input
               name="ownerIdentityNo"
               placeholder="e.g. 010101-01-0101"
+              value={ownerIdentityNo}
+              onChange={(event) =>
+                setOwnerIdentityNo(formatIC(event.target.value))
+              }
+              pattern="\d{6}-\d{2}-\d{4}"
+              title="Enter the full IC number in the format 010101-01-0101"
             />
           </label>
           <label>
@@ -365,7 +357,7 @@ export function UnitsModule({
   busy: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedHostelCode, setSelectedHostelCode] = useState<string | null>(
+  const [activeHostelCode, setActiveHostelCode] = useState<string | null>(
     null,
   );
   const [genderFilter, setGenderFilter] = useState("all");
@@ -408,78 +400,10 @@ export function UnitsModule({
     return [...map.values()];
   }, [beds]);
 
-  const hostelSummaries = useMemo(
-    () =>
-      data.hostels.map((property) => {
-        const propertyUnits = data.units.filter(
-          (item) => item.hostelCode === property.code,
-        );
-        const unitIds = new Set(propertyUnits.map((item) => item.id));
-        const activeUnits = propertyUnits.filter(
-          (item) => item.status === "active",
-        ).length;
-        const genderValues = [
-          ...new Set(
-            propertyUnits
-              .map((item) => item.gender)
-              .filter(
-                (value) => value && value !== "unspecified",
-              ),
-          ),
-        ];
-        const genderSummary =
-          genderValues.length === 0
-            ? "Not set"
-            : genderValues.length === 1
-              ? genderLabel(genderValues[0])
-              : "Mixed";
-
-        return {
-          property,
-          unitCount: propertyUnits.length,
-          activeUnits,
-          genderSummary,
-          accessCardCount: data.accessCards.filter((item) =>
-            unitIds.has(item.unitId),
-          ).length,
-          wifiCount: data.services.filter(
-            (item) =>
-              item.serviceType === "wifi" && unitIds.has(item.unitId),
-          ).length,
-          parkingCount: data.parkingLots.filter(
-            (item) =>
-              item.hostelId === property.id || unitIds.has(item.unitId),
-          ).length,
-        };
-      }),
-    [
-      data.hostels,
-      data.units,
-      data.accessCards,
-      data.services,
-      data.parkingLots,
-    ],
-  );
-
-  const selectedHostel = data.hostels.find(
-    (item) => item.code === selectedHostelCode,
-  );
-  const selectedHostelSummary = hostelSummaries.find(
-    (item) => item.property.code === selectedHostelCode,
-  );
-
-  const selectedHostelUnits = useMemo(
-    () =>
-      selectedHostelCode
-        ? data.units.filter((item) => item.hostelCode === selectedHostelCode)
-        : [],
-    [data.units, selectedHostelCode],
-  );
-
   const filtered = useMemo(() => {
     const normalisedQuery = query.trim().toLowerCase();
 
-    return selectedHostelUnits.filter((item) => {
+    return data.units.filter((item) => {
       const itemOwner = ownerByUnit.get(item.id);
       const matchesQuery =
         !normalisedQuery ||
@@ -493,44 +417,29 @@ export function UnitsModule({
 
       return matchesQuery && matchesGender && matchesStatus;
     });
-  }, [
-    selectedHostelUnits,
-    ownerByUnit,
-    query,
-    genderFilter,
-    statusFilter,
-  ]);
+  }, [data.units, ownerByUnit, query, genderFilter, statusFilter]);
 
-  const listedCards = data.accessCards.filter((card) => {
-    const cardUnit = data.units.find((item) => item.id === card.unitId);
-    return Boolean(
-      selectedHostelCode && cardUnit?.hostelCode === selectedHostelCode,
-    );
-  });
-  const listedServices = data.services.filter((service) => {
-    const serviceUnit = data.units.find((item) => item.id === service.unitId);
-    return Boolean(
-      selectedHostelCode &&
-        service.serviceType === "wifi" &&
-        serviceUnit?.hostelCode === selectedHostelCode,
-    );
-  });
-  const listedParking = data.parkingLots.filter((lot) => {
-    const property = data.hostels.find((item) => item.id === lot.hostelId);
-    const lotUnit = data.units.find((item) => item.id === lot.unitId);
-    return Boolean(
-      selectedHostelCode &&
-        (property?.code === selectedHostelCode ||
-          lotUnit?.hostelCode === selectedHostelCode),
-    );
-  });
+  // One tab per hostel, in the order hostels were created — a new hostel
+  // automatically gets its own tab without any code change.
+  const unitsByHostel = useMemo(
+    () =>
+      data.hostels.map((hostel) => ({
+        hostel,
+        units: filtered.filter((item) => item.hostelCode === hostel.code),
+      })),
+    [data.hostels, filtered],
+  );
+
+  const activeGroup = unitsByHostel.find(
+    (group) => group.hostel.code === activeHostelCode,
+  );
 
   const canViewOwner = data.currentUser?.permissions?.some(
     (permission: Row) =>
       permission.moduleKey === "units-owner" && permission.canView,
   );
   return (
-    <>
+    <div className="table-v2">
       <section className="intro compact-intro">
         <div>
           <span className="section-kicker">PROPERTY & OWNER CONTROL</span>
@@ -540,7 +449,7 @@ export function UnitsModule({
             banking and P&amp;L charges.
           </p>
         </div>
-        <button className="primary" onClick={() => setModal("unit")}>
+        <button className="v2-btn-primary" onClick={() => setModal("unit")}>
           + Add unit
         </button>
       </section>
@@ -550,517 +459,174 @@ export function UnitsModule({
         <Stat value={data.services.length} label="Wi-Fi accounts" />
         <Stat value={data.parkingLots.length} label="Parking lots" />
       </section>
-      {!selectedHostel ? (
-        <section className="hostel-directory">
-          <div className="hostel-directory-title">
+      <section className="panel">
+        <div className="workspace-tabs">
+          {unitsByHostel.map(({ hostel, units: hostelUnits }) => (
+            <button
+              key={hostel.id}
+              className={activeHostelCode === hostel.code ? "active" : ""}
+              onClick={() => setActiveHostelCode(hostel.code)}
+            >
+              {hostel.name} ({hostelUnits.length})
+            </button>
+          ))}
+          {!unitsByHostel.length && <em>No hostels added yet.</em>}
+        </div>
+        <div className="v2-toolbar">
+          <label className="v2-search">
+            <SearchIcon />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Unit, owner or address"
+            />
+          </label>
+          <select
+            className="v2-pill-select"
+            value={genderFilter}
+            onChange={(event) => setGenderFilter(event.target.value)}
+          >
+            <option value="all">All genders</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="mixed">Special / mixed</option>
+            <option value="unspecified">Not set</option>
+          </select>
+          <select
+            className="v2-pill-select"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="return-planned">To surrender</option>
+            <option value="surrendered">Surrendered</option>
+          </select>
+          <button
+            className="v2-reset"
+            onClick={() => {
+              setQuery("");
+              setGenderFilter("all");
+              setStatusFilter("all");
+            }}
+          >
+            Reset filters
+          </button>
+        </div>
+      </section>
+
+      {activeGroup && (
+        <section className="panel">
+          <div className="section-heading">
             <div>
-              <small>HOSTEL DIRECTORY</small>
-              <h3>Select a hostel to view its units</h3>
-              <p>
-                Unit search and filters are available after a hostel is opened.
-              </p>
+              <small>HOSTEL</small>
+              <h3>{activeGroup.hostel.name}</h3>
+              <p>{activeGroup.hostel.address || "Address not set"}</p>
             </div>
-            <span className="hostel-directory-count">
-              {hostelSummaries.length} properties
+            <span>
+              {activeGroup.units.length} unit
+              {activeGroup.units.length === 1 ? "" : "s"}
             </span>
           </div>
-
-          <div className="hostel-directory-scroll">
-            <div className="hostel-directory-table">
-              <div className="hostel-directory-header" role="row">
-                <span>Property</span>
-                <span>Units</span>
-                <span>Gender</span>
-                <span>Status</span>
-                <span>Access / Wi-Fi</span>
-                <span>Parking</span>
-                <span>Action</span>
-              </div>
-
-              <div className="hostel-directory-body">
-                {hostelSummaries.map((summary) => {
-                  const property = summary.property;
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Unit</th>
+                  <th>Agreement / owner</th>
+                  <th>Gender</th>
+                  <th>Status</th>
+                  <th>Access / Wi-Fi</th>
+                  <th>Surrender</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {activeGroup.units.map((u) => {
+                  const o = ownerByUnit.get(u.id);
+                  const accessCardCount = data.accessCards.filter(
+                    (c) => c.unitId === u.id,
+                  ).length;
+                  const wifiCount = data.services.filter(
+                    (s) => s.unitId === u.id && s.serviceType === "wifi",
+                  ).length;
 
                   return (
-                    <article
-                      key={property.id}
-                      className="hostel-directory-row"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`View units in ${property.name}`}
-                      onClick={() => {
-                        setSelectedHostelCode(property.code);
-                        setQuery("");
-                        setGenderFilter("all");
-                        setStatusFilter("all");
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setSelectedHostelCode(property.code);
-                          setQuery("");
-                          setGenderFilter("all");
-                          setStatusFilter("all");
-                        }
-                      }}
-                    >
-                      <div className="hostel-directory-property">
-                        <span
-                          className="hostel-directory-badge"
-                          aria-hidden="true"
-                        >
-                          {directoryInitials(property.name)}
+                    <tr key={u.id}>
+                      <td>
+                        <strong>{u.unitCode}</strong>
+                        <small>{u.address || "Address not set"}</small>
+                      </td>
+                      <td>
+                        {o ? (
+                          <>
+                            <strong>{o.ownerName || "Owner not set"}</strong>
+                            <small>
+                              {titleCase(
+                                o.agreementType || "Agreement not set",
+                              )}
+                            </small>
+                          </>
+                        ) : (
+                          <>
+                            <strong>Owner not set</strong>
+                            <small>No agreement record</small>
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`gender-pill ${u.gender}`}>
+                          {genderLabel(u.gender)}
                         </span>
-                        <div>
-                          <strong>{property.name}</strong>
-                          <small>{property.address || "Address not set"}</small>
-                        </div>
-                      </div>
-
-                      <div className="hostel-directory-number">
-                        <strong>{summary.unitCount}</strong>
+                      </td>
+                      <td>
+                        <StatusPill status={u.status} />
+                      </td>
+                      <td>
+                        <strong>{accessCardCount}</strong>
                         <small>
-                          {summary.unitCount === 1 ? "unit" : "units"}
+                          {wifiCount} Wi-Fi account{wifiCount === 1 ? "" : "s"}
                         </small>
-                      </div>
-
-                      <div className="hostel-directory-copy">
-                        <strong>{summary.genderSummary}</strong>
-                        <small>Unit allocation</small>
-                      </div>
-
-                      <div className="hostel-directory-copy">
-                        <span
-                          className={`hostel-directory-status ${
-                            summary.activeUnits ? "available" : "inactive"
-                          }`}
-                        >
-                          {summary.activeUnits ? "Available" : "Inactive"}
-                        </span>
+                      </td>
+                      <td>
+                        {u.surrenderDate ? dateLabel(u.surrenderDate) : "-"}
                         <small>
-                          {summary.activeUnits} active of {summary.unitCount}
+                          {u.surrenderDate ? "Surrender date" : "Not planned"}
                         </small>
-                      </div>
-
-                      <div className="hostel-directory-services">
-                        <span>
-                          <b>{summary.accessCardCount}</b>
-                          <small>cards</small>
-                        </span>
-                        <span>
-                          <b>{summary.wifiCount}</b>
-                          <small>Wi-Fi</small>
-                        </span>
-                      </div>
-
-                      <div className="hostel-directory-copy">
-                        <strong>{summary.parkingCount}</strong>
-                        <small>registered lots</small>
-                      </div>
-
-                      <div className="hostel-directory-action">
-                        <span className="hostel-directory-open">
-                          View units <b aria-hidden="true">→</b>
-                        </span>
-                      </div>
-                    </article>
+                      </td>
+                      <td>
+                        <button
+                          className="secondary compact"
+                          onClick={() => {
+                            setUnit(u);
+                            setSelectedRoom(null);
+                            setDrawerTab("general");
+                          }}
+                        >
+                          Open unit
+                        </button>
+                      </td>
+                    </tr>
                   );
                 })}
-
-                {!hostelSummaries.length && (
-                  <div className="hostel-directory-empty">
-                    <span>HP</span>
-                    <strong>No hostels added</strong>
-                    <p>Add a hostel before creating unit records.</p>
-                  </div>
+                {!activeGroup.units.length && (
+                  <tr>
+                    <td colSpan={7}>
+                      <em>
+                        No units match this view in {activeGroup.hostel.name}.
+                      </em>
+                    </td>
+                  </tr>
                 )}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </section>
-      ) : (
-        <div className="hostel-unit-stage">
-          <div className="hostel-unit-navigation">
-            <button
-              type="button"
-              className="hostel-back-button"
-              onClick={() => {
-                setSelectedHostelCode(null);
-                setQuery("");
-                setGenderFilter("all");
-                setStatusFilter("all");
-              }}
-            >
-              <span aria-hidden="true">←</span> All hostels
-            </button>
-            <span>
-              Hostel directory <b>/</b> {selectedHostel.name}
-            </span>
-          </div>
-
-          <section className="selected-hostel-card">
-            <div className="selected-hostel-main">
-              <span className="selected-hostel-badge" aria-hidden="true">
-                {directoryInitials(selectedHostel.name)}
-              </span>
-              <div>
-                <small>SELECTED HOSTEL</small>
-                <h3>{selectedHostel.name}</h3>
-                <p>{selectedHostel.address || "Address not set"}</p>
-              </div>
-            </div>
-
-            <div className="selected-hostel-stats">
-              <span>
-                <small>Units</small>
-                <strong>{selectedHostelSummary?.unitCount || 0}</strong>
-              </span>
-              <span>
-                <small>Active</small>
-                <strong>{selectedHostelSummary?.activeUnits || 0}</strong>
-              </span>
-              <span>
-                <small>Access cards</small>
-                <strong>{selectedHostelSummary?.accessCardCount || 0}</strong>
-              </span>
-              <span>
-                <small>Wi-Fi</small>
-                <strong>{selectedHostelSummary?.wifiCount || 0}</strong>
-              </span>
-            </div>
-          </section>
-
-          <section className="unit-directory">
-            <div className="unit-directory-heading">
-              <div>
-                <small>UNIT INFORMATION</small>
-                <h3>Units in {selectedHostel.name}</h3>
-                <p>
-                  Search and filter only the units under this hostel.
-                </p>
-              </div>
-              <span>
-                {filtered.length} of {selectedHostelUnits.length} shown
-              </span>
-            </div>
-
-            <div className="unit-directory-toolbar unit-directory-toolbar--nested">
-              <label className="unit-directory-search">
-                <span>Search units</span>
-                <div className="unit-directory-control">
-                  <span
-                    className="unit-directory-search-icon"
-                    aria-hidden="true"
-                  />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Unit, owner or address"
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      className="unit-directory-clear"
-                      onClick={() => setQuery("")}
-                      aria-label="Clear unit search"
-                    >
-                      x
-                    </button>
-                  )}
-                </div>
-              </label>
-
-              <label className="unit-directory-filter">
-                <span>Gender</span>
-                <div className="unit-directory-control">
-                  <select
-                    value={genderFilter}
-                    onChange={(event) => setGenderFilter(event.target.value)}
-                  >
-                    <option value="all">All genders</option>
-                    <option value="female">Female</option>
-                    <option value="male">Male</option>
-                    <option value="mixed">Special / mixed</option>
-                    <option value="unspecified">Not set</option>
-                  </select>
-                </div>
-              </label>
-
-              <label className="unit-directory-filter">
-                <span>Status</span>
-                <div className="unit-directory-control">
-                  <select
-                    value={statusFilter}
-                    onChange={(event) => setStatusFilter(event.target.value)}
-                  >
-                    <option value="all">All statuses</option>
-                    <option value="active">Active</option>
-                    <option value="return-planned">To surrender</option>
-                    <option value="surrendered">Surrendered</option>
-                  </select>
-                </div>
-              </label>
-            </div>
-
-            <div className="unit-directory-summary">
-              <div>
-                <strong>{filtered.length}</strong>
-                <span>
-                  {filtered.length === 1 ? "unit shown" : "units shown"}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="unit-filter-reset"
-                disabled={
-                  !query && genderFilter === "all" && statusFilter === "all"
-                }
-                onClick={() => {
-                  setQuery("");
-                  setGenderFilter("all");
-                  setStatusFilter("all");
-                }}
-              >
-                Reset filters
-              </button>
-            </div>
-
-            <div className="unit-directory-scroll">
-              <div className="unit-directory-table">
-                <div className="unit-directory-header" role="row">
-                  <span>Unit</span>
-                  <span>Agreement / owner</span>
-                  <span>Gender</span>
-                  <span>Status</span>
-                  <span>Access / Wi-Fi</span>
-                  <span>Surrender</span>
-                  <span>Action</span>
-                </div>
-
-                <div className="unit-directory-body">
-                  {filtered.map((u) => {
-                    const o = ownerByUnit.get(u.id);
-                    const accessCardCount = data.accessCards.filter(
-                      (c) => c.unitId === u.id,
-                    ).length;
-                    const wifiCount = data.services.filter(
-                      (s) =>
-                        s.unitId === u.id && s.serviceType === "wifi",
-                    ).length;
-
-                    return (
-                      <article className="unit-directory-row" key={u.id}>
-                        <div className="unit-directory-property">
-                          <span
-                            className="unit-directory-badge"
-                            aria-hidden="true"
-                          >
-                            {unitInitials(u.unitCode)}
-                          </span>
-
-                          <div className="unit-directory-property-copy">
-                            <div className="unit-directory-name-line">
-                              <strong>{u.unitCode}</strong>
-                              <code>{u.hostelName}</code>
-                            </div>
-                            <small>{u.address || "Address not set"}</small>
-                          </div>
-                        </div>
-
-                        <div className="unit-directory-owner">
-                          {o ? (
-                            <>
-                              <strong>{o.ownerName || "Owner not set"}</strong>
-                              <small>
-                                {titleCase(
-                                  o.agreementType || "Agreement not set",
-                                )}
-                              </small>
-                            </>
-                          ) : (
-                            <>
-                              <strong>Owner not set</strong>
-                              <small>No agreement record</small>
-                            </>
-                          )}
-                        </div>
-
-                        <div className="unit-directory-gender">
-                          <span className={`gender-pill ${u.gender}`}>
-                            {genderLabel(u.gender)}
-                          </span>
-                        </div>
-
-                        <div className="unit-directory-status-cell">
-                          <span
-                            className={`unit-directory-status ${u.status}`}
-                          >
-                            {titleCase(u.status)}
-                          </span>
-                        </div>
-
-                        <div className="unit-directory-services">
-                          <span>
-                            <b>{accessCardCount}</b>
-                            <small>cards</small>
-                          </span>
-                          <span>
-                            <b>{wifiCount}</b>
-                            <small>Wi-Fi</small>
-                          </span>
-                        </div>
-
-                        <div className="unit-directory-surrender">
-                          <strong>
-                            {u.surrenderDate
-                              ? dateLabel(u.surrenderDate)
-                              : "-"}
-                          </strong>
-                          <small>
-                            {u.surrenderDate
-                              ? "Surrender date"
-                              : "Not planned"}
-                          </small>
-                        </div>
-
-                        <div className="unit-directory-action">
-                          <button
-                            type="button"
-                            className="unit-directory-open"
-                            onClick={() => {
-                              setUnit(u);
-                              setSelectedRoom(null);
-                              setDrawerTab("general");
-                            }}
-                          >
-                            Open unit
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-
-                  {!filtered.length && (
-                    <div className="unit-directory-empty">
-                      <span>UN</span>
-                      <strong>No matching units</strong>
-                      <p>
-                        Try another unit number, owner name, gender or status.
-                      </p>
-                      <button
-                        type="button"
-                        className="secondary compact"
-                        onClick={() => {
-                          setQuery("");
-                          setGenderFilter("all");
-                          setStatusFilter("all");
-                        }}
-                      >
-                        Clear filters
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* <section className="split-registers">
-            <article className="panel">
-              <div className="section-heading">
-                <div>
-                  <small>ACCESS CARDS · {selectedHostel.name}</small>
-                  <h3>{listedCards.length} registered cards</h3>
-                </div>
-              </div>
-              <div className="compact-list">
-                {listedCards.map((c) => (
-                  <span key={c.id}>
-                    <code>{c.cardCode}</code>
-                    <b>
-                      {c.hostelName} / {c.unitCode}
-                    </b>
-                    <small>{titleCase(c.status)}</small>
-                  </span>
-                ))}
-                {!listedCards.length && (
-                  <p className="empty-copy">No cards registered yet.</p>
-                )}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="section-heading">
-                <div>
-                  <small>WI-FI ACCOUNTS · {selectedHostel.name}</small>
-                  <h3>{listedServices.length} service accounts</h3>
-                </div>
-              </div>
-              <div className="compact-list">
-                {listedServices.map((s) => {
-                  const u = data.units.find((x) => x.id === s.unitId);
-                  return (
-                    <span key={s.id}>
-                      <b>
-                        {u?.hostelName} / {u?.unitCode}
-                      </b>
-                      <small>
-                        {s.provider || "Provider not set"} ·{" "}
-                        {s.accountReference || "No account"} ·{" "}
-                        {titleCase(s.status)}
-                      </small>
-                    </span>
-                  );
-                })}
-                {!listedServices.length && (
-                  <p className="empty-copy">
-                    No Wi-Fi service accounts registered yet.
-                  </p>
-                )}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="section-heading">
-                <div>
-                  <small>PARKING LOTS · {selectedHostel.name}</small>
-                  <h3>{listedParking.length} parking lots</h3>
-                </div>
-              </div>
-              <div className="compact-list">
-                {listedParking.map((lot) => {
-                  const lotUnit = data.units.find(
-                    (item) => item.id === lot.unitId,
-                  );
-                  const rental = data.parkingRentals.find(
-                    (item) =>
-                      item.parkingLotId === lot.id &&
-                      item.status === "active",
-                  );
-                  return (
-                    <span key={lot.id}>
-                      <code>{lot.lotNumber}</code>
-                      <b>
-                        {lot.hostelName || lotUnit?.hostelName} /{" "}
-                        {lotUnit?.unitCode || "No unit"}
-                      </b>
-                      <small>
-                        {rental
-                          ? `${rental.tenantName} · Rented`
-                          : titleCase(lot.status)}
-                      </small>
-                    </span>
-                  );
-                })}
-                {!listedParking.length && (
-                  <p className="empty-copy">
-                    No parking lots registered for this hostel.
-                  </p>
-                )}
-              </div>
-            </article>
-          </section> */}
-        </div>
+      )}
+      {!activeGroup && unitsByHostel.length > 0 && (
+        <section className="panel">
+          <em>Select a hostel above to view its units.</em>
+        </section>
       )}
       {unit && (
         <div
@@ -1365,6 +931,19 @@ export function UnitsModule({
                   )}
                 </section>
                 <section className="drawer-section">
+                  <div className="section-title">
+                    <div>
+                      <small>ROOMS</small>
+                      <h3>{rooms.length} room{rooms.length === 1 ? "" : "s"}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={() => setModal("room")}
+                    >
+                      + Add room
+                    </button>
+                  </div>
                   <div className="room-list">
                     {rooms.map((room) => (
                       <article key={room.id}>
@@ -1509,7 +1088,7 @@ export function UnitsModule({
             data={data}
             save={save}
             busy={busy}
-            defaultHostelId={selectedHostel?.id}
+            defaultHostelId={activeGroup?.hostel.id}
             onDone={() => setModal("")}
           />
         </Modal>
@@ -1835,7 +1414,7 @@ export function UnitsModule({
           </form>
         </Modal>
       )}
-    </>
+    </div>
   );
 }
 
@@ -2360,11 +1939,16 @@ function OwnerAgreement({
           <input name="ownerName" placeholder="e.g. John Doe" defaultValue={owner?.ownerName || ""} />
         </label>
         <label>
-          Owner IC / passport / registration no.
+          IC
           <input
             name="ownerIdentityNo"
             placeholder="e.g. 010101-01-0101"
-            defaultValue={owner?.ownerIdentityNo || ""}
+            defaultValue={formatIC(owner?.ownerIdentityNo || "")}
+            onChange={(event) => {
+              event.currentTarget.value = formatIC(event.currentTarget.value);
+            }}
+            pattern="\d{6}-\d{2}-\d{4}"
+            title="Enter the full IC number in the format 010101-01-0101"
           />
         </label>
         <label>

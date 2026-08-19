@@ -43,6 +43,48 @@
       "when": 1786613672821,
       "tag": "0005_drop_owner_parking_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786888436215,
+      "tag": "0006_aspiring_fabian_cortez",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786926384266,
+      "tag": "0007_fluffy_sauron",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786935326485,
+      "tag": "0008_majestic_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786951587691,
+      "tag": "0009_greedy_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787040362525,
+      "tag": "0010_reflective_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787057026614,
+      "tag": "0011_sparkling_ultragirl",
+      "breakpoints": true
     }
   ]
 }
