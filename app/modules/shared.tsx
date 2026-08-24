@@ -37,10 +37,33 @@ export type Data = {
   reminderTemplates: Row[];
   currentUser: Row;
   importProgress: { assignments: number; expected: number };
+  settings: { roomTransferFee: number };
 };
 export type HostelTab = "availability" | "reservations" | "pricing" | "occupancy";
 
 export const today = new Date().toISOString().slice(0, 10);
+// House rule: a student's security deposit is always this many months of
+// their agreed room rent, so it has to be recomputed anywhere the rent
+// changes (new reservation, room change) rather than typed in by hand.
+export const DEPOSIT_MONTHS = 3;
+export const depositFor = (monthlyRental: number) =>
+  Number(monthlyRental || 0) * DEPOSIT_MONTHS;
+// The charge types editable through the reservation Payment step's
+// breakdown form — blankCharges (that form's initial state) is derived
+// from exactly this list, so anything added to chargeLabels below without
+// also going here stays display-only and can't be typed into that form.
+export const RESERVATION_BREAKDOWN_CHARGE_TYPES = [
+  "first-month-rental",
+  "deposit",
+  "admin-fee",
+  "access-card-deposit",
+  "access-card-handling",
+  "stamping-fee",
+  "cleaning-package",
+  "bedding-set",
+  "advance-rental",
+  "advance-utility",
+] as const;
 export const chargeLabels: Record<string, string> = {
   "first-month-rental": "First month advance rental",
   deposit: "Deposit",
@@ -52,9 +75,12 @@ export const chargeLabels: Record<string, string> = {
   "bedding-set": "Bedding set",
   "advance-rental": "Advance rental",
   "advance-utility": "Advance utility fee",
+  // Added only by reservation-room-change, never through the Payment step
+  // breakdown — see RESERVATION_BREAKDOWN_CHARGE_TYPES above.
+  "room-transfer-fee": "Room transfer fee",
 };
 export const blankCharges = Object.fromEntries(
-  Object.keys(chargeLabels).map((key) => [key, 0]),
+  RESERVATION_BREAKDOWN_CHARGE_TYPES.map((key) => [key, 0]),
 ) as Record<string, number>;
 export const NATIONALITIES = [
   "Malaysian",
@@ -197,6 +223,7 @@ export const uploadAttachment = async (
   contextType: string,
   recordId: number,
   uploadedBy = "Administrator",
+  fileName?: string,
 ) => {
   const upload = await compressImageFile(file);
   const form = new FormData();
@@ -204,9 +231,39 @@ export const uploadAttachment = async (
   form.set("contextType", contextType);
   form.set("recordId", String(recordId));
   form.set("uploadedBy", uploadedBy);
+  if (fileName) form.set("fileName", fileName);
   const response = await fetch("/api/files", { method: "POST", body: form });
   const result = (await response.json()) as { error?: string; id?: number };
   if (!response.ok) throw new Error(result.error || "Unable to upload file");
+  return result;
+};
+// Reuses an already-uploaded file's storage object under a second
+// context/record — e.g. mirroring a reservation payment slip onto its
+// linked Finance invoice payment — without uploading the bytes twice.
+export const linkAttachment = async (
+  attachmentId: number,
+  contextType: string,
+  recordId: number,
+  uploadedBy = "Administrator",
+) => {
+  const form = new FormData();
+  form.set("linkAttachmentId", String(attachmentId));
+  form.set("contextType", contextType);
+  form.set("recordId", String(recordId));
+  form.set("uploadedBy", uploadedBy);
+  const response = await fetch("/api/files", { method: "POST", body: form });
+  const result = (await response.json()) as { error?: string; id?: number };
+  if (!response.ok) throw new Error(result.error || "Unable to link file");
+  return result;
+};
+export const renameAttachment = async (attachmentId: number, fileName: string) => {
+  const response = await fetch(`/api/files?id=${attachmentId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fileName }),
+  });
+  const result = (await response.json()) as { error?: string; ok?: boolean };
+  if (!response.ok) throw new Error(result.error || "Unable to rename file");
   return result;
 };
 
@@ -505,6 +562,50 @@ export function DemographicFields({
   );
 }
 
+export const COURSE_LEVELS = ["foundation", "diploma", "degree", "other"] as const;
+export const COURSE_LEVEL_LABELS: Record<string, string> = {
+  foundation: "Foundation",
+  diploma: "Diploma",
+  degree: "Degree",
+  other: "Other",
+};
+
+// Courses grouped by programme level so staff pick from a list instead of
+// retyping the full course name each time. Falls back to showing whatever
+// free-text value a student/reservation already has, in case it predates
+// this list. Shared by Student Information's Academic information section
+// and the Hostel Information reservation form, so both pick from the same
+// schools/courses tables instead of one of them being free text.
+export function CourseOptions({
+  courses,
+  current,
+}: {
+  courses: Row[];
+  current?: string;
+}) {
+  return (
+    <>
+      <option value="">Not set</option>
+      {COURSE_LEVELS.map((level) => {
+        const levelCourses = courses.filter((c) => c.level === level);
+        if (!levelCourses.length) return null;
+        return (
+          <optgroup key={level} label={COURSE_LEVEL_LABELS[level]}>
+            {levelCourses.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+      {current && !courses.some((c) => c.name === current) && (
+        <option value={current}>{current}</option>
+      )}
+    </>
+  );
+}
+
 // Shared by the Parking module's "New parking rental" modal and Unit
 // Information's "Record parking" button, so a rental created from either
 // place uses the identical fields/logic and shows up correctly in both.
@@ -625,7 +726,7 @@ export function ParkingRentalForm({
               })
               .map((student) => ({
                 value: student.id,
-                label: `${student.fullName} · ${student.roomCode} · ${student.hostelName}/${student.unitCode}`,
+                label: `${student.fullName} · ${student.roomCode} · ${student.hostelName}`,
               }))}
             onValueChange={setSelectedStudentId}
             placeholder="Type student name or room code"

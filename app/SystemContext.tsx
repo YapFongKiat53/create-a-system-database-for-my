@@ -86,6 +86,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
         error?: string;
         ok?: boolean;
         id?: number;
+        linkedPaymentId?: number;
       };
       if (!response.ok)
         throw new Error(result.error || "Unable to save record");
@@ -94,7 +95,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       await load(scopedModulesForAction(action) ?? undefined);
       setNotice(success);
       window.setTimeout(() => setNotice(""), 3000);
-      return result as { ok: boolean; id?: number };
+      return result as { ok: boolean; id?: number; linkedPaymentId?: number };
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Unable to save record",

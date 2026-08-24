@@ -3,6 +3,9 @@
 
 import { useMemo, useState } from "react";
 import {
+  COURSE_LEVELS,
+  COURSE_LEVEL_LABELS,
+  CourseOptions,
   DemographicFields,
   Modal,
   SearchIcon,
@@ -11,14 +14,13 @@ import {
   blockOf,
   dateLabel,
   formValues,
-  genderLabel,
   money,
   paginationItems,
   titleCase,
 } from "./shared";
 import type { Data, Row } from "./shared";
 
-type DirectoryTab = "active" | "moved-out" | "agency";
+type DirectoryTab = "all" | "active" | "moved-out" | "agency";
 type CompletionFilter = "all" | "complete" | "incomplete";
 type SelectedStudentRef = {
   studentId: string | number;
@@ -116,41 +118,6 @@ function studentMatchesHostel(student: Row, hostel: Row) {
 
 function isUnassignedStudent(student: Row, hostels: Row[]) {
   return !hostels.some((hostel) => studentMatchesHostel(student, hostel));
-}
-
-const COURSE_LEVELS = ["foundation", "diploma", "degree", "other"] as const;
-const COURSE_LEVEL_LABELS: Record<string, string> = {
-  foundation: "Foundation",
-  diploma: "Diploma",
-  degree: "Degree",
-  other: "Other",
-};
-
-// Courses grouped by programme level so staff pick from a list instead of
-// retyping the full course name each time. Falls back to showing whatever
-// free-text value a student already has, in case it predates this list.
-function CourseOptions({ courses, current }: { courses: Row[]; current?: string }) {
-  return (
-    <>
-      <option value="">Not set</option>
-      {COURSE_LEVELS.map((level) => {
-        const levelCourses = courses.filter((c) => c.level === level);
-        if (!levelCourses.length) return null;
-        return (
-          <optgroup key={level} label={COURSE_LEVEL_LABELS[level]}>
-            {levelCourses.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </optgroup>
-        );
-      })}
-      {current && !courses.some((c) => c.name === current) && (
-        <option value={current}>{current}</option>
-      )}
-    </>
-  );
 }
 
 // Cascading hostel → unit → type/category/bathroom room picker for the
@@ -309,7 +276,7 @@ function RoomPickerFields({
           </option>
           {options.map((bed) => (
             <option key={bed.id} value={bed.id}>
-              {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(bed.currentRental)}`}
+              {bed.legacyCode}
             </option>
           ))}
         </select>
@@ -400,7 +367,7 @@ export function StudentsModule({
   busy: boolean;
 }) {
   const [selectedHostelKey, setSelectedHostelKey] = useState<string | null>(
-    null,
+    "all",
   );
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
@@ -484,7 +451,11 @@ export function StudentsModule({
   }, [data.hostels, data.students]);
 
   const selectedHostel = useMemo(() => {
-    if (!selectedHostelKey || selectedHostelKey === UNASSIGNED_HOSTEL_KEY)
+    if (
+      !selectedHostelKey ||
+      selectedHostelKey === "all" ||
+      selectedHostelKey === UNASSIGNED_HOSTEL_KEY
+    )
       return null;
 
     return (
@@ -496,6 +467,8 @@ export function StudentsModule({
 
   const selectedHostelStudents = useMemo(() => {
     if (!selectedHostelKey) return [];
+
+    if (selectedHostelKey === "all") return data.students;
 
     if (selectedHostelKey === UNASSIGNED_HOSTEL_KEY) {
       return data.students.filter((item) =>
@@ -541,11 +514,13 @@ export function StudentsModule({
     return selectedHostelStudents
       .filter((item) => {
         const tabMatch =
-          directoryTab === "agency"
-            ? isAgencyLinked(item)
-            : directoryTab === "active"
-              ? isActiveProfile(item)
-              : isMovedOutOrInactive(item);
+          directoryTab === "all"
+            ? true
+            : directoryTab === "agency"
+              ? isAgencyLinked(item)
+              : directoryTab === "active"
+                ? isActiveProfile(item)
+                : isMovedOutOrInactive(item);
 
         const unitMatch =
           unitFilter === "all" || String(item.unitCode || "") === unitFilter;
@@ -648,9 +623,11 @@ export function StudentsModule({
   );
 
   const selectedHostelName =
-    selectedHostelKey === UNASSIGNED_HOSTEL_KEY
-      ? "Unassigned profiles"
-      : selectedHostel?.name || "Student directory";
+    selectedHostelKey === "all"
+      ? "All hostels"
+      : selectedHostelKey === UNASSIGNED_HOSTEL_KEY
+        ? "Unassigned profiles"
+        : selectedHostel?.name || "Student directory";
 
   return (
     <div className="table-v2">
@@ -710,6 +687,13 @@ export function StudentsModule({
 
         <section className="panel student-filter-panel">
           <div className="workspace-tabs">
+            <button
+              type="button"
+              className={selectedHostelKey === "all" ? "active" : ""}
+              onClick={() => selectHostel("all")}
+            >
+              All ({data.students.length})
+            </button>
             {hostelDirectory.map(({ key, hostel, students }) => (
               <button
                 key={key}
@@ -747,6 +731,16 @@ export function StudentsModule({
 
             <section className="panel student-filter-panel">
               <div className="workspace-tabs">
+                <button
+                  type="button"
+                  className={directoryTab === "all" ? "active" : ""}
+                  onClick={() => {
+                    setDirectoryTab("all");
+                    setPage(1);
+                  }}
+                >
+                  All
+                </button>
                 <button
                   type="button"
                   className={directoryTab === "active" ? "active" : ""}

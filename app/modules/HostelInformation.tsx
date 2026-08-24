@@ -3,8 +3,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  CourseOptions,
+  DEPOSIT_MONTHS,
   Empty,
   MALAYSIAN_STATES,
+  RESERVATION_BREAKDOWN_CHARGE_TYPES,
   Modal,
   NATIONALITIES,
   RACES,
@@ -16,10 +19,13 @@ import {
   chargeLabels,
   commitsInventory,
   dateLabel,
+  depositFor,
   formatIC,
   formValues,
   genderLabel,
+  linkAttachment,
   money,
+  renameAttachment,
   reservationWeight,
   titleCase,
   today,
@@ -142,13 +148,18 @@ export function HostelModule({
   const [convertReservation, setConvertReservation] = useState<Row | null>(
     null,
   );
+  const [changeRoomReservation, setChangeRoomReservation] =
+    useState<Row | null>(null);
+  const [manageReservation, setManageReservation] = useState<Row | null>(
+    null,
+  );
   const [chargeOpen, setChargeOpen] = useState(false);
   const [charges, setCharges] = useState<Record<string, number>>(blankCharges);
   const [reservationKind, setReservationKind] = useState("individual");
   const [reservationQuery, setReservationQuery] = useState("");
   const [reservationHostelFilter, setReservationHostelFilter] = useState("all");
   const [reservationStatusTab, setReservationStatusTab] = useState<
-    "reserved" | "converted" | "cancelled"
+    "all" | "reserved" | "converted" | "cancelled"
   >("reserved");
   // Converted reservations still collect balance payments, so staff need to
   // slice them by payment progress the same way Finance does for invoices.
@@ -174,11 +185,10 @@ export function HostelModule({
       (permission: Row) => permission.moduleKey === moduleKey,
     )?.canView;
   const canUseSales = Boolean(permissionFor("hostels-sales"));
-  const canUseRates = Boolean(permissionFor("hostels-rates"));
   const canUseOccupancy = Boolean(permissionFor("hostels-occupancy"));
   const allowedHostelTabs: HostelTab[] = [
     ...(canUseSales ? (["availability", "reservations"] as HostelTab[]) : []),
-    ...(canUseSales || canUseRates ? (["pricing"] as HostelTab[]) : []),
+    ...(canUseSales ? (["pricing"] as HostelTab[]) : []),
     ...(canUseSales || canUseOccupancy ? (["occupancy"] as HostelTab[]) : []),
   ];
   const currentHostelTab = allowedHostelTabs.includes(tab)
@@ -360,6 +370,7 @@ export function HostelModule({
   // Converted/cancelled reservations no longer need action — keeping them
   // out of the default "Reserved" view is what the status tabs are for.
   const reservationCounts = {
+    all: data.reservations.length,
     reserved: data.reservations.filter((r) => r.status === "reserved")
       .length,
     converted: data.reservations.filter((r) => r.status === "converted")
@@ -384,6 +395,12 @@ export function HostelModule({
     full: convertedReservations.filter((r) => r.paymentStatus === "full")
       .length,
   };
+  // Temporary room changes (Change room's optional "expected return date")
+  // land here once that date has arrived, so staff can confirm whether the
+  // student actually moved back or the room change became permanent.
+  const pendingRoomReturns = convertedReservations.filter(
+    (r) => r.expectedReturnDate && r.expectedReturnDate <= today,
+  );
   const filteredReservations = data.reservations.filter((reservation) => {
     const search = reservationQuery.trim().toLowerCase();
     const matchesPayment =
@@ -391,7 +408,8 @@ export function HostelModule({
       reservationPaymentFilter === "all" ||
       (reservation.paymentStatus || "unpaid") === reservationPaymentFilter;
     return (
-      reservation.status === reservationStatusTab &&
+      (reservationStatusTab === "all" ||
+        reservation.status === reservationStatusTab) &&
       matchesPayment &&
       (reservationHostelFilter === "all" ||
         String(reservation.preferredHostelId || "") ===
@@ -512,7 +530,7 @@ export function HostelModule({
 
   const [activeAvailabilityHostel, setActiveAvailabilityHostel] = useState<
     string | null
-  >(null);
+  >("all");
   const [roomSearchQuery, setRoomSearchQuery] = useState("");
   const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied' | 'unavailable'
   const [roomGenderFilter, setRoomGenderFilter] = useState("all");
@@ -565,19 +583,34 @@ export function HostelModule({
     roomStatusFilter,
   ]);
 
+  const isAllHostelsAvailability = activeAvailabilityHostel === "all";
   const activeAvailabilityGroup = bedsByHostel.find(
     (group) => group.hostel.code === activeAvailabilityHostel,
+  );
+  // "All" flattens every hostel's beds into one combined list rather than
+  // picking a single group — everything downstream (category breakdown,
+  // the unit table) works off this instead of activeAvailabilityGroup.beds.
+  const activeAvailabilityBeds = useMemo(
+    () =>
+      isAllHostelsAvailability
+        ? bedsByHostel.flatMap((group) => group.beds)
+        : (activeAvailabilityGroup?.beds ?? []),
+    [isAllHostelsAvailability, bedsByHostel, activeAvailabilityGroup],
   );
 
   // Rooms grouped by unit so the table shows one row per unit — each
   // room becomes a colored chip instead of its own row.
   const unitsInActiveGroup = useMemo(() => {
-    if (!activeAvailabilityGroup) return [];
-    const map = new Map<number, { unit: Row; beds: Row[] }>();
-    for (const bed of activeAvailabilityGroup.beds) {
+    if (!activeAvailabilityBeds.length) return [];
+    const map = new Map<
+      number,
+      { unit: Row; beds: Row[]; hostelName: string }
+    >();
+    for (const bed of activeAvailabilityBeds) {
       const unit = data.units.find((u) => u.id === bed.unitId);
       if (!unit) continue;
-      if (!map.has(unit.id)) map.set(unit.id, { unit, beds: [] });
+      if (!map.has(unit.id))
+        map.set(unit.id, { unit, beds: [], hostelName: bed.hostelName || "" });
       map.get(unit.id)!.beds.push(bed);
     }
     return [...map.values()].sort((a, b) =>
@@ -585,18 +618,18 @@ export function HostelModule({
         numeric: true,
       }),
     );
-  }, [activeAvailabilityGroup, data.units]);
+  }, [activeAvailabilityBeds, data.units]);
 
   // Quick per-category vacancy count for the selected hostel — how many
   // Room A/B/C/D are still available right now, split by gender so staff
   // can see male vs female availability at a glance.
   const categoryAvailability = useMemo(() => {
-    if (!activeAvailabilityGroup) return [];
+    if (!activeAvailabilityBeds.length) return [];
     const counts = new Map<
       string,
       { total: number; male: number; female: number; other: number }
     >();
-    for (const bed of activeAvailabilityGroup.beds) {
+    for (const bed of activeAvailabilityBeds) {
       if (!isRoomAvailable(bed)) continue;
       const label = bed.roomLabel || "Other";
       const entry = counts.get(label) || {
@@ -612,7 +645,7 @@ export function HostelModule({
       counts.set(label, entry);
     }
     return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [activeAvailabilityGroup]);
+  }, [activeAvailabilityBeds]);
 
   const [blockedNotice, setBlockedNotice] = useState("");
   const showBlockedNotice = (bed: Row) => {
@@ -703,12 +736,12 @@ export function HostelModule({
               </span>
             </button>
           )}
-          {(canUseSales || canUseRates) && (
+          {canUseSales && (
             <button
               className={currentHostelTab === "pricing" ? "active" : ""}
               onClick={() => setTab("pricing")}
             >
-              {canUseSales ? "Room pricing & rates" : "Operational rates"}
+              Room pricing & rates
             </button>
           )}
           {/* {(canUseSales || canUseOccupancy) && (
@@ -727,6 +760,17 @@ export function HostelModule({
             )}
             <section className="directory-filters">
               <div className="workspace-tabs">
+                <button
+                  className={isAllHostelsAvailability ? "active" : ""}
+                  onClick={() => setActiveAvailabilityHostel("all")}
+                >
+                  All (
+                  {bedsByHostel.reduce(
+                    (sum, group) => sum + group.beds.length,
+                    0,
+                  )}
+                  )
+                </button>
                 {bedsByHostel.map(({ hostel, beds: hostelBeds }) => (
                   <button
                     key={hostel.id}
@@ -784,17 +828,25 @@ export function HostelModule({
               </div>
             </section>
 
-            {activeAvailabilityGroup && (
+            {(activeAvailabilityGroup || isAllHostelsAvailability) && (
               <section className="directory-table-container">
                 <div className="section-heading">
                   <div>
                     <small>HOSTEL</small>
-                    <h3>{activeAvailabilityGroup.hostel.name}</h3>
-                    <p>{activeAvailabilityGroup.hostel.address}</p>
+                    <h3>
+                      {isAllHostelsAvailability
+                        ? "All hostels"
+                        : activeAvailabilityGroup!.hostel.name}
+                    </h3>
+                    <p>
+                      {isAllHostelsAvailability
+                        ? "Every property combined."
+                        : activeAvailabilityGroup!.hostel.address}
+                    </p>
                   </div>
                   <span>
-                    {activeAvailabilityGroup.beds.length} room
-                    {activeAvailabilityGroup.beds.length === 1 ? "" : "s"}
+                    {activeAvailabilityBeds.length} room
+                    {activeAvailabilityBeds.length === 1 ? "" : "s"}
                   </span>
                 </div>
                 {categoryAvailability.length > 0 && (
@@ -867,14 +919,17 @@ export function HostelModule({
                   <table>
                     <thead>
                       <tr>
+                        {isAllHostelsAvailability && <th>Hostel</th>}
                         <th>Unit</th>
                         <th>Gender</th>
                         <th>Rooms</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {unitsInActiveGroup.map(({ unit, beds: unitBeds }) => (
+                      {unitsInActiveGroup.map(
+                        ({ unit, beds: unitBeds, hostelName }) => (
                         <tr key={unit.id}>
+                          {isAllHostelsAvailability && <td>{hostelName}</td>}
                           <td>
                             <strong>{unit.unitCode}</strong>
                             <small>
@@ -919,7 +974,7 @@ export function HostelModule({
                       ))}
                       {!unitsInActiveGroup.length && (
                         <tr>
-                          <td colSpan={3}>
+                          <td colSpan={isAllHostelsAvailability ? 4 : 3}>
                             <em>No rooms match this view.</em>
                           </td>
                         </tr>
@@ -929,11 +984,13 @@ export function HostelModule({
                 </div>
               </section>
             )}
-            {!activeAvailabilityGroup && bedsByHostel.length > 0 && (
-              <section className="directory-table-container">
-                <em>Select a hostel above to view its rooms.</em>
-              </section>
-            )}
+            {!activeAvailabilityGroup &&
+              !isAllHostelsAvailability &&
+              bedsByHostel.length > 0 && (
+                <section className="directory-table-container">
+                  <em>Select a hostel above to view its rooms.</em>
+                </section>
+              )}
           </>
         )}
         {currentHostelTab === "reservations" && (
@@ -1017,6 +1074,13 @@ export function HostelModule({
             <div className="workspace-tabs">
               <button
                 type="button"
+                className={reservationStatusTab === "all" ? "active" : ""}
+                onClick={() => setReservationStatusTab("all")}
+              >
+                All ({reservationCounts.all})
+              </button>
+              <button
+                type="button"
                 className={reservationStatusTab === "reserved" ? "active" : ""}
                 onClick={() => setReservationStatusTab("reserved")}
               >
@@ -1030,6 +1094,9 @@ export function HostelModule({
                 onClick={() => setReservationStatusTab("converted")}
               >
                 Converted ({reservationCounts.converted})
+                {pendingRoomReturns.length > 0 && (
+                  <span>{pendingRoomReturns.length}</span>
+                )}
               </button>
               <button
                 type="button"
@@ -1042,53 +1109,71 @@ export function HostelModule({
               </button>
             </div>
 
-            {reservationStatusTab === "converted" && (
-              <div className="workspace-tabs workspace-tabs-secondary">
-                <button
-                  type="button"
-                  className={reservationPaymentFilter === "all" ? "active" : ""}
-                  onClick={() => setReservationPaymentFilter("all")}
+            {reservationStatusTab === "converted" &&
+              pendingRoomReturns.length > 0 && (
+                <section
+                  className="panel"
+                  style={{
+                    background: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                  }}
                 >
-                  All ({convertedPaymentCounts.all})
-                </button>
-                <button
-                  type="button"
-                  className={
-                    reservationPaymentFilter === "partial" ? "active" : ""
-                  }
-                  onClick={() => setReservationPaymentFilter("partial")}
-                >
-                  Partial ({convertedPaymentCounts.partial})
-                </button>
-                <button
-                  type="button"
-                  className={
-                    reservationPaymentFilter === "unpaid" ? "active" : ""
-                  }
-                  onClick={() => setReservationPaymentFilter("unpaid")}
-                >
-                  Unpaid ({convertedPaymentCounts.unpaid})
-                </button>
-                <button
-                  type="button"
-                  className={
-                    reservationPaymentFilter === "admin-fee" ? "active" : ""
-                  }
-                  onClick={() => setReservationPaymentFilter("admin-fee")}
-                >
-                  Admin Fee ({convertedPaymentCounts["admin-fee"]})
-                </button>
-                <button
-                  type="button"
-                  className={
-                    reservationPaymentFilter === "full" ? "active" : ""
-                  }
-                  onClick={() => setReservationPaymentFilter("full")}
-                >
-                  Full Payment ({convertedPaymentCounts.full})
-                </button>
-              </div>
-            )}
+                  <strong style={{ fontSize: '13px', color: '#92400e' }}>
+                    {pendingRoomReturns.length} temporary room{" "}
+                    {pendingRoomReturns.length === 1 ? "change needs" : "changes need"}{" "}
+                    a decision
+                  </strong>
+                  {pendingRoomReturns.map((r) => (
+                    <div
+                      key={r.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <span>
+                        <strong>{r.studentName}</strong> · {r.assignedCode} ·
+                        expected back {dateLabel(r.expectedReturnDate)}
+                      </span>
+                      <span style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          disabled={busy}
+                          onClick={() => setChangeRoomReservation(r)}
+                        >
+                          Moved back
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          disabled={busy}
+                          onClick={() =>
+                            save(
+                              {
+                                action: "assignment-clear-return-date",
+                                assignmentId: r.assignmentId,
+                              },
+                              "Room change confirmed as permanent",
+                            )
+                          }
+                        >
+                          Staying
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </section>
+              )}
 
             {/* Filters */}
             <section
@@ -1132,6 +1217,39 @@ export function HostelModule({
                   </select>
                 </div>
               </label>
+
+              {reservationStatusTab === "converted" && (
+                <label className="reservation-field">
+                  <span>Payment status</span>
+
+                  <div className="reservation-input-control">
+                    <select
+                      value={reservationPaymentFilter}
+                      onChange={(event) =>
+                        setReservationPaymentFilter(
+                          event.target.value as typeof reservationPaymentFilter,
+                        )
+                      }
+                    >
+                      <option value="all">
+                        All ({convertedPaymentCounts.all})
+                      </option>
+                      <option value="partial">
+                        Partial ({convertedPaymentCounts.partial})
+                      </option>
+                      <option value="unpaid">
+                        Unpaid ({convertedPaymentCounts.unpaid})
+                      </option>
+                      <option value="admin-fee">
+                        Admin fee ({convertedPaymentCounts["admin-fee"]})
+                      </option>
+                      <option value="full">
+                        Full payment ({convertedPaymentCounts.full})
+                      </option>
+                    </select>
+                  </div>
+                </label>
+              )}
             </section>
 
             {/* Reservation cards */}
@@ -1150,11 +1268,14 @@ export function HostelModule({
                       totalPayable - totalPaid,
                       0,
                     );
-
-                    const preferredUnitCode = r.preferredUnitId
-                      ? data.units.find((unit) => unit.id === r.preferredUnitId)
-                        ?.unitCode
-                      : null;
+                    // A room change can leave the student having paid more
+                    // than the new room costs (e.g. they moved to a cheaper
+                    // room) — surfaced separately rather than folded into
+                    // balanceRequired, which stays clamped at 0.
+                    const creditBalance = Math.max(
+                      totalPaid - totalPayable,
+                      0,
+                    );
 
                     const paymentStatusClass = String(
                       r.paymentStatus || "unpaid",
@@ -1167,14 +1288,6 @@ export function HostelModule({
                         ? "Admin fee"
                         : titleCase(r.paymentStatus || "unpaid");
 
-                    const commitmentClass = isCancelled
-                      ? "cancelled"
-                      : isConverted
-                        ? "assigned"
-                        : r.inventoryCommitted
-                          ? "committed"
-                          : "enquiry";
-
                     const commitmentTitle = isCancelled
                       ? "Cancelled"
                       : isConverted
@@ -1183,24 +1296,15 @@ export function HostelModule({
                           ? "Included in sales balance"
                           : "Enquiry only";
 
-                    const commitmentDescription = isCancelled
-                      ? `Cancelled ${dateLabel(r.cancelledAt)} — no longer holds a room`
-                      : isConverted
-                        ? "Reservation converted to an actual room assignment"
-                        : r.inventoryCommitted
-                          ? "This reservation reduces sellable availability"
-                          : "This enquiry does not reduce room availability";
-
                     return (
                       <article
                         key={r.id}
                         className={`reservation-card ${isConverted ? "is-converted" : ""}`}
-                        // 1. 核心调整：让最外层大卡片的内边距变小，并统一缩减内部区块的垂直间距
                         style={{
                           padding: '16px',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '16px'
+                          gap: '10px'
                         }}
                       >
                         {/* Card header */}
@@ -1218,7 +1322,6 @@ export function HostelModule({
                           </div>
 
                           <div className="reservation-card-title" style={{ margin: '4px 0' }}>
-                            {/* 2. 稍微调小一点学生名字的字号和上下边距 */}
                             <h4 style={{ margin: 0, fontSize: '1.25rem' }}>{r.studentName}</h4>
 
                             {isConverted && (
@@ -1243,450 +1346,70 @@ export function HostelModule({
                           </p>
                         </header>
 
-                        {/* Preferences */}
-                        <div className="reservation-preferences" style={{ gap: '6px' }}>
-                          <span className="reservation-chip">
-                            {r.preferredHostelName || "Hostel not selected"}
-                          </span>
-
-                          {preferredUnitCode && (
-                            <span className="reservation-chip">
-                              Unit {preferredUnitCode}
-                            </span>
-                          )}
-
-                          <span className="reservation-chip">
-                            {genderLabel(r.preferredGender)} student
-                          </span>
-
-                          <span className="reservation-chip">
-                            {r.roomCategory === "any"
-                              ? "Any category"
-                              : `Room ${r.roomCategory}`}
-                          </span>
-
-                          <span className="reservation-chip">
-                            {r.roomType === "any"
-                              ? "Any room type"
-                              : titleCase(r.roomType)}
-                          </span>
-                        </div>
-
-                        {/* Reservation state */}
-                        <div
-                          className={`reservation-commitment ${commitmentClass}`}
-                          // 3. 缩小状态框（绿框/灰框）的内部留白
-                          style={{ padding: '12px 16px', gap: '12px' }}
-                        >
-                          <div className="reservation-commitment-icon">
-                            {isConverted || r.inventoryCommitted ? (
-                              <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="m6.5 12.5 3.5 3.5 7.5-8" />
-                              </svg>
-                            ) : (
-                              <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="M12 10v6M12 7h.01" />
-                              </svg>
-                            )}
-                          </div>
-
-                          <div>
-                            <strong style={{ fontSize: '14px' }}>{commitmentTitle}</strong>
-                            <span style={{ fontSize: '13px' }}>{commitmentDescription}</span>
-                          </div>
-                        </div>
-
-                        {/* Payment summary */}
-                        <div
-                          className="reservation-money-summary"
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                            gap: '4px',
-                            textAlign: 'center'
-                          }}
-                        >
-                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
-                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total payable</span>
-                            <strong style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPayable)}</strong>
-                          </div>
-
-                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
-                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total paid</span>
-                            <strong className="paid" style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPaid)}</strong>
-                          </div>
-
-                          <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
-                            <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Balance required</span>
-                            <strong
-                              style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}
-                              className={
-                                balanceRequired > 0 ? "outstanding" : "settled"
-                              }
-                            >
-                              {money(balanceRequired)}
+                        {/* Room + money — one compact line each, everything
+                            else (preferences, payment history, quick-add
+                            payment, Edit/Cancel/Delete) lives behind Manage
+                            so the card stays scannable at a glance. */}
+                        <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
+                          {commitmentTitle}
+                        </p>
+                        <p style={{ margin: 0, fontSize: '13px' }}>
+                          Payable <strong>{money(totalPayable)}</strong> · Paid{" "}
+                          <strong>{money(totalPaid)}</strong> ·{" "}
+                          {creditBalance > 0 ? (
+                            <strong style={{ color: '#166534' }}>
+                              Credit {money(creditBalance)}
                             </strong>
-                          </div>
-                        </div>
-
-                        {/* Payment history */}
-                        <section className="reservation-payment-history">
-                          <div className="reservation-subheading" style={{ marginBottom: '8px' }}>
-                            <span>Payment history</span>
-
-                            <span>
-                              {(r.payments || []).length}{" "}
-                              {(r.payments || []).length === 1
-                                ? "payment"
-                                : "payments"}
-                            </span>
-                          </div>
-
-                          {(r.payments || []).length > 0 ? (
-                            <div
-                              className="reservation-payment-list"
-                              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-                            >
-                              {(r.payments || []).map((payment: Row) => (
-                                <div
-                                  key={payment.id}
-                                  className="reservation-payment-item"
-                                  style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '8px',
-                                    padding: '10px 12px',
-                                    borderRadius: '8px',
-                                    border: '1px solid #e5e7eb',
-                                    backgroundColor: '#fafafa'
-                                  }}
-                                >
-                                  {/* 上半部分：付款详情 */}
-                                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                                    <div className="reservation-payment-date-icon">
-                                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                                        <rect x="4" y="5" width="16" height="15" rx="2" />
-                                        <path d="M8 3v4M16 3v4M4 10h16" />
-                                      </svg>
-                                    </div>
-
-                                    <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{dateLabel(payment.paidAt)}</span>
-                                    <i />
-                                    <strong style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{money(payment.amount)}</strong>
-
-                                    {payment.reference && (
-                                      <>
-                                        <i />
-                                        <span style={{ color: '#6b7280', fontSize: '12px', wordBreak: 'break-word' }}>
-                                          {payment.reference}
-                                        </span>
-                                      </>
-                                    )}
-
-                                    {data.attachments
-                                      .filter(
-                                        (attachment) =>
-                                          attachment.contextType === "payment-proof" &&
-                                          attachment.recordId === payment.id,
-                                      )
-                                      .map((attachment) => (
-                                        <a
-                                          key={attachment.id}
-                                          href={`/api/files?id=${attachment.id}`}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          style={{ fontSize: '12px', color: '#008861', fontWeight: 600, whiteSpace: 'nowrap' }}
-                                        >
-                                          View payment slip
-                                        </a>
-                                      ))}
-                                  </div>
-
-                                  {/* 下半部分：操作按钮 */}
-                                  <div
-                                    className="reservation-payment-actions"
-                                    style={{
-                                      display: 'flex',
-                                      justifyContent: 'flex-end',
-                                      gap: '8px',
-                                      borderTop: '1px dashed #e5e7eb',
-                                      paddingTop: '8px'
-                                    }}
-                                  >
-                                    <button
-                                      type="button"
-                                      className="reservation-btn reservation-btn-secondary"
-                                      style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
-                                      disabled={busy}
-                                      onClick={() => {
-                                        const newAmount = prompt("Enter new amount (RM) for this payment:", payment.amount);
-
-                                        if (newAmount !== null && newAmount.trim() !== "" && !isNaN(Number(newAmount))) {
-                                          save(
-                                            {
-                                              action: "payment-update",
-                                              reservationId: r.id,
-                                              paymentId: payment.id,
-                                              amount: Number(newAmount),
-                                            },
-                                            "Payment amount updated"
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      Edit
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      className="reservation-btn reservation-btn-danger"
-                                      style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
-                                      disabled={busy}
-                                      onClick={() => {
-                                        const confirmed = confirm(`Are you sure you want to delete this payment of ${money(payment.amount)}?`);
-
-                                        if (confirmed) {
-                                          save(
-                                            {
-                                              action: "payment-delete",
-                                              reservationId: r.id,
-                                              paymentId: payment.id,
-                                            },
-                                            "Payment deleted"
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
                           ) : (
-                            <div className="reservation-no-payments">
-                              No payments have been recorded for this reservation.
-                            </div>
+                            <strong
+                              style={{
+                                color: balanceRequired > 0 ? '#b91c1c' : '#166534',
+                              }}
+                            >
+                              {balanceRequired > 0
+                                ? `Owes ${money(balanceRequired)}`
+                                : "Settled"}
+                            </strong>
                           )}
-                        </section>
+                        </p>
 
-                        {/* Quick payment and actions — converted reservations
-                            keep collecting the balance owed even after the
-                            room assignment is finalised. */}
                         {(r.status === "reserved" ||
                           r.status === "converted") && (
-                          <div className="reservation-card-footer" style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <form
-                              className="reservation-quick-payment"
-                              onSubmit={async (event) => {
-                                event.preventDefault();
-
-                                const form = event.currentTarget;
-
-                                const result = await save(
-                                  {
-                                    action: "reservation-payment",
-                                    reservationId: r.id,
-                                    ...formValues(event),
-                                  },
-                                  "Payment added",
-                                );
-
-                                if (result) {
-                                  const file = (
-                                    form.elements.namedItem(
-                                      "paymentProof",
-                                    ) as HTMLInputElement
-                                  ).files?.[0];
-                                  if (file && result.id) {
-                                    await uploadAttachment(
-                                      file,
-                                      "payment-proof",
-                                      result.id,
-                                      data.currentUser?.displayName,
-                                    );
-                                    await load();
-                                  }
-                                  form.reset();
-                                }
-                              }}
-                              // 彻底采用安全的三层纵向结构，给每个输入框充足的宽度
-                              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-                            >
-                              {/* 第一行：Payment Type */}
-                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment type</span>
-                                <select
-                                  name="paymentStatus"
-                                  defaultValue="partial"
-                                  disabled={busy}
-                                  onChange={(event) => {
-                                    const form = event.currentTarget.form;
-                                    const amountInput = form?.elements.namedItem(
-                                      "paymentAmount",
-                                    ) as HTMLInputElement | null;
-                                    if (!amountInput) return;
-                                    const type = event.currentTarget.value;
-                                    if (type === "admin-fee") {
-                                      amountInput.value = String(
-                                        r.nationality === "International"
-                                          ? STANDARD_ADMIN_FEE.International
-                                          : STANDARD_ADMIN_FEE.Malaysian,
-                                      );
-                                      amountInput.readOnly = true;
-                                    } else if (type === "full") {
-                                      amountInput.value = String(balanceRequired);
-                                      amountInput.readOnly = true;
-                                    } else {
-                                      amountInput.value = "";
-                                      amountInput.readOnly = false;
-                                    }
-                                  }}
-                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
-                                >
-                                  <option value="admin-fee">Admin fee paid</option>
-                                  <option value="partial">Partial payment</option>
-                                  <option value="full">Full payment</option>
-                                </select>
-                              </label>
-
-                              {/* 第二行：Amount */}
-                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Amount</span>
-                                <input
-                                  name="paymentAmount"
-                                  type="number"
-                                  min="0.01"
-                                  step="0.01"
-                                  inputMode="decimal"
-                                  placeholder="RM 0.00"
-                                  required
-                                  disabled={busy}
-                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
-                                />
-                              </label>
-
-                              {/* 第三行：Payment Reference */}
-                              <label className="reservation-reference-field" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment reference</span>
-                                <input
-                                  name="paymentReference"
-                                  placeholder="Receipt number, bank reference..."
-                                  disabled={busy}
-                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
-                                />
-                              </label>
-
-                              {/* 第四行：Payment slip */}
-                              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment slip (optional)</span>
-                                <input
-                                  name="paymentProof"
-                                  type="file"
-                                  accept="image/*,.pdf"
-                                  disabled={busy}
-                                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
-                                />
-                              </label>
-
-                              {/* 添加付款按钮：稍微控制高度，让它不那么巨型 */}
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                            {r.status === "reserved" && (
                               <button
-                                type="submit"
-                                className="reservation-btn reservation-btn-add-payment"
+                                type="button"
+                                className="reservation-btn reservation-btn-convert"
+                                style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                 disabled={busy}
-                                style={{ width: '100%', padding: '8px', fontSize: '12px', fontWeight: 600, justifyContent: 'center', marginTop: '2px' }}
+                                onClick={() => setConvertReservation(r)}
                               >
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  aria-hidden="true"
-                                  className="reservation-button-icon"
-                                  style={{ width: '12px', height: '12px' }}
-                                >
-                                  <path d="M12 5v14M5 12h14" />
-                                </svg>
-
-                                {busy ? "Saving..." : "Add payment"}
+                                Convert assignment
                               </button>
-                            </form>
+                            )}
 
-                            {/* 底部操作按钮区域：恢复并排，释放纵向空间 */}
-                            <div className="reservation-card-actions" style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '2px' }}>
-                              <div className="reservation-main-actions" style={{ display: 'flex', gap: '6px', width: '100%' }}>
+                            {r.status === "converted" &&
+                              r.reservationType !== "group" && (
                                 <button
                                   type="button"
-                                  className="reservation-btn reservation-btn-secondary"
+                                  className="reservation-btn reservation-btn-convert"
                                   style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                   disabled={busy}
-                                  onClick={() => openReservation(null, r)}
+                                  onClick={() => setChangeRoomReservation(r)}
                                 >
-                                  Edit reservation
+                                  Change room
                                 </button>
+                              )}
 
-                                {r.status === "reserved" && (
-                                  <button
-                                    type="button"
-                                    className="reservation-btn reservation-btn-convert"
-                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                                    disabled={busy}
-                                    onClick={() => setConvertReservation(r)}
-                                  >
-                                    Convert assignment
-                                  </button>
-                                )}
-                              </div>
-
-                              <div className="reservation-main-actions" style={{ display: 'flex', gap: '6px', width: '100%' }}>
-                                {r.status === "reserved" && (
-                                  <button
-                                    type="button"
-                                    className="reservation-btn reservation-btn-cancel"
-                                    style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
-                                    disabled={busy}
-                                    onClick={() => {
-                                      const confirmed = confirm(
-                                        `Cancel reservation ${r.referenceNo}? The room is released and payment history is kept for your records.`,
-                                      );
-
-                                      if (confirmed) {
-                                        save(
-                                          {
-                                            action: "reservation-cancel",
-                                            reservationId: r.id,
-                                          },
-                                          "Reservation cancelled",
-                                        );
-                                      }
-                                    }}
-                                  >
-                                    Cancel
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  className="reservation-btn reservation-btn-danger"
-                                  style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
-                                  disabled={busy}
-                                  onClick={() => {
-                                    const confirmed = confirm(
-                                      `Permanently delete reservation ${r.referenceNo}? This also erases its payment history.`,
-                                    );
-
-                                    if (confirmed) {
-                                      save(
-                                        {
-                                          action: "reservation-delete",
-                                          reservationId: r.id,
-                                        },
-                                        "Reservation deleted",
-                                      );
-                                    }
-                                  }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
+                            <button
+                              type="button"
+                              className="reservation-btn reservation-btn-secondary"
+                              style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                              disabled={busy}
+                              onClick={() => setManageReservation(r)}
+                            >
+                              Manage
+                            </button>
                           </div>
                         )}
                       </article>
@@ -1755,6 +1478,58 @@ export function HostelModule({
                     <div className="hero-discount">%</div>
                   </div>
                 </div>
+
+                {/* Room transfer fee */}
+                <section
+                  className="pricing-card"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    gap: '16px',
+                    flexWrap: 'wrap',
+                    marginBottom: '16px',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: '220px' }}>
+                    <small style={{ fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', fontSize: '11px' }}>
+                      Room transfer fee
+                    </small>
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#4b5563' }}>
+                      Default amount offered when changing a converted
+                      reservation&apos;s room. Staff can still waive it or
+                      edit the amount per case.
+                    </p>
+                  </div>
+                  <form
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      await save(
+                        {
+                          action: "system-setting-update",
+                          settingKey: "room-transfer-fee",
+                          ...formValues(event),
+                        },
+                        "Room transfer fee updated",
+                      );
+                    }}
+                  >
+                    <label>
+                      Amount (RM)
+                      <input
+                        name="settingValue"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={data.settings.roomTransferFee}
+                        style={{ width: '140px' }}
+                      />
+                    </label>
+                    <button className="secondary compact" disabled={busy}>
+                      Save
+                    </button>
+                  </form>
+                </section>
 
                 {/* Pricing control card */}
                 <section className="pricing-card pricing-editor">
@@ -2174,12 +1949,6 @@ export function HostelModule({
                 </section>
               </>
             )}
-
-            {canUseRates && (
-              <div className="pricing-rates-section">
-                <HostelRates data={data} save={save} busy={busy} />
-              </div>
-            )}
           </div>
         )}
         {currentHostelTab === "occupancy" && (
@@ -2379,7 +2148,6 @@ export function HostelModule({
             charges={charges}
             setCharges={setCharges}
             totalCharges={totalCharges}
-            effectiveRate={effectiveRate}
             openCharges={() => setChargeOpen(true)}
             cancel={() => setReservationOpen(false)}
             complete={() => {
@@ -2423,19 +2191,26 @@ export function HostelModule({
           onClose={() => setChargeOpen(false)}
         >
           <div className="charge-grid">
-            {Object.entries(chargeLabels).map(([key, label]) => (
+            {RESERVATION_BREAKDOWN_CHARGE_TYPES.map((key) => (
               <label key={key}>
-                {label}
+                {chargeLabels[key]}
                 <input
                   type="number"
                   min="0"
                   value={charges[key] || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const amount = Number(e.target.value || 0);
                     setCharges((current) => ({
                       ...current,
-                      [key]: Number(e.target.value || 0),
-                    }))
-                  }
+                      [key]: amount,
+                      // Deposit is defined as a multiple of the agreed rent,
+                      // so it follows the rent here too instead of leaving a
+                      // stale figure from the previous rate behind.
+                      ...(key === "first-month-rental"
+                        ? { deposit: depositFor(amount) }
+                        : {}),
+                    }));
+                  }}
                   placeholder="0"
                 />
               </label>
@@ -2470,6 +2245,44 @@ export function HostelModule({
           />
         </Modal>
       )}
+      {changeRoomReservation && (
+        <Modal
+          title="Change room"
+          kicker="CONVERTED RESERVATION"
+          description="Move this reservation to a different room. The old room becomes vacant and any difference from what's already been paid is worked out automatically."
+          onClose={() => setChangeRoomReservation(null)}
+        >
+          <ChangeRoomForm
+            data={data}
+            save={save}
+            busy={busy}
+            reservation={changeRoomReservation}
+            onDone={() => setChangeRoomReservation(null)}
+          />
+        </Modal>
+      )}
+      {manageReservation && (
+        <Modal
+          title={manageReservation.studentName}
+          kicker={manageReservation.referenceNo}
+          description="Payment history, preferences and the less-common actions for this reservation."
+          onClose={() => setManageReservation(null)}
+          wide
+        >
+          <ReservationManageDetails
+            data={data}
+            save={save}
+            busy={busy}
+            load={load}
+            reservation={manageReservation}
+            onEditReservation={() => {
+              setManageReservation(null);
+              openReservation(null, manageReservation);
+            }}
+            onDone={() => setManageReservation(null)}
+          />
+        </Modal>
+      )}
     </>
   );
 }
@@ -2493,10 +2306,31 @@ function ConvertAssignmentForm({
   const [hostelId, setHostelId] = useState(
     String(convertReservation.preferredHostelId || ""),
   );
-  const vacantBeds = data.bedSpaces.filter(
+  const [block, setBlock] = useState("");
+  const [roomType, setRoomType] = useState("any");
+  const [bedSpaceId, setBedSpaceId] = useState(
+    String(convertReservation.provisionalBedSpaceId || ""),
+  );
+  // Same narrowing as the Change room picker: hostel, then room type, then
+  // block, and only rooms matching the student's gender are ever offered.
+  const genderFits = (bed: Row) =>
+    ["unspecified", "mixed"].includes(convertReservation.preferredGender) ||
+    convertReservation.preferredGender === bed.gender;
+  const hostelBeds = data.bedSpaces.filter(
     (bed) =>
       bed.status === "vacant" &&
-      (!hostelId || String(bed.hostelId) === hostelId),
+      (!hostelId || String(bed.hostelId) === hostelId) &&
+      genderFits(bed),
+  );
+  const blockOptions = [
+    ...new Set(hostelBeds.map((bed) => blockOf(bed.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const vacantBeds = hostelBeds.filter(
+    (bed) =>
+      (!block || blockOf(bed.unitCode) === block) &&
+      (roomType === "any" || bed.roomType === roomType),
   );
   // A reservation almost always converts into the exact room it already
   // holds — only special cases (the room got taken, or the student wants a
@@ -2504,8 +2338,16 @@ function ConvertAssignmentForm({
   const reservedBed = data.bedSpaces.find(
     (bed) => bed.id === convertReservation.provisionalBedSpaceId,
   );
+  // Judge the reserved room on the same terms it was booked under. The
+  // reservation form offers rooms that are vacant OR that free up by the
+  // check-in date (the outgoing tenant's agreement has ended), so demanding
+  // "vacant right now" here would drop staff into the room picker for a
+  // room this reservation already holds — the room stays the default.
   const reservedBedAvailable = Boolean(
-    reservedBed && reservedBed.status === "vacant",
+    reservedBed &&
+      (reservedBed.status === "vacant" ||
+        (reservedBed.availableFrom &&
+          reservedBed.availableFrom <= convertReservation.targetMoveInDate)),
   );
   const reservedUnit = data.units.find(
     (unit) => unit.id === convertReservation.preferredUnitId,
@@ -2590,11 +2432,20 @@ function ConvertAssignmentForm({
                 </strong>
               ) : (
                 <strong>
-                  {reservedBed!.legacyCode} · {reservedBed!.hostelName}/
-                  {reservedBed!.unitCode} · Room {reservedBed!.roomLabel}
+                  {reservedBed!.hostelName} · {reservedBed!.legacyCode}
                 </strong>
               )}
             </div>
+            {/* Held on an upcoming vacancy: the outgoing tenant's agreement
+                has ended but nobody has checked them out, so flag it rather
+                than let it look like a clash. */}
+            {convertReservation.reservationType !== "group" &&
+              reservedBed!.status !== "vacant" && (
+                <small style={{ color: '#92400e', fontWeight: 600 }}>
+                  Frees up {dateLabel(reservedBed!.availableFrom)} — the
+                  previous tenant still needs checking out.
+                </small>
+              )}
           </div>
           <button
             type="button"
@@ -2650,13 +2501,40 @@ function ConvertAssignmentForm({
         </>
       ) : (
         <>
-          <label className="wide">
+          {/* Normally the reserved room is shown ready to confirm. Landing
+              here without the staff pressing "Change room" means that room
+              is gone, so say which one and why rather than silently
+              presenting an empty picker. */}
+          {reservedBed && !reservedBedAvailable && (
+            <div
+              className="wide"
+              style={{
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                fontSize: '13px',
+                color: '#991b1b',
+              }}
+            >
+              The reserved room <strong>{reservedBed.legacyCode}</strong> is no
+              longer available ({titleCase(reservedBed.status)}) — choose
+              another room below.
+            </div>
+          )}
+          <label>
             Hostel
             <select
+              required
               value={hostelId}
-              onChange={(event) => setHostelId(event.target.value)}
+              onChange={(event) => {
+                setHostelId(event.target.value);
+                setBlock("");
+                setRoomType("any");
+                setBedSpaceId("");
+              }}
             >
-              <option value="">All hostels</option>
+              <option value="">Select hostel</option>
               {data.hostels.map((hostel) => (
                 <option key={hostel.id} value={hostel.id}>
                   {hostel.name}
@@ -2664,43 +2542,60 @@ function ConvertAssignmentForm({
               ))}
             </select>
           </label>
-          <label className="wide">
-            Actual room code
-            <SearchSelect
-              key={hostelId}
-              name="bedSpaceId"
-              required
-              defaultValue={
-                vacantBeds.some(
-                  (bed) =>
-                    String(bed.id) ===
-                    String(convertReservation.provisionalBedSpaceId),
-                )
-                  ? convertReservation.provisionalBedSpaceId
-                  : undefined
-              }
-              options={vacantBeds.map((bed) => ({
-                value: bed.id,
-                label: `${bed.legacyCode} · ${bed.hostelName}/${bed.unitCode} · Room ${bed.roomLabel}`,
-              }))}
-              placeholder={
-                hostelId
-                  ? "Type room code or unit"
-                  : "Select a hostel first, or search all hostels"
-              }
-            />
+          <label>
+            Room type
             <select
-              hidden
-              disabled
+              value={roomType}
+              disabled={!hostelId}
+              onChange={(event) => {
+                setRoomType(event.target.value);
+                setBedSpaceId("");
+              }}
+            >
+              <option value="any">Any room type</option>
+              <option value="single">Single</option>
+              <option value="sharing">Twin</option>
+            </select>
+          </label>
+          {blockOptions.length > 0 && (
+            <label>
+              Block
+              <select
+                value={block}
+                disabled={!hostelId}
+                onChange={(event) => {
+                  setBlock(event.target.value);
+                  setBedSpaceId("");
+                }}
+              >
+                <option value="">All blocks in this hostel</option>
+                {blockOptions.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="wide">
+            Actual room code {hostelId && `— ${vacantBeds.length} available`}
+            <select
               name="bedSpaceId"
               required
-              defaultValue={convertReservation.provisionalBedSpaceId || ""}
+              disabled={!hostelId}
+              value={bedSpaceId}
+              onChange={(event) => setBedSpaceId(event.target.value)}
             >
-              <option value="">Select room code manually</option>
+              <option value="">
+                {!hostelId
+                  ? "Select a hostel first"
+                  : vacantBeds.length
+                    ? "Select an available room"
+                    : "No free rooms match these choices"}
+              </option>
               {vacantBeds.map((bed) => (
                 <option key={bed.id} value={bed.id}>
-                  {bed.legacyCode} · {bed.hostelName} / {bed.unitCode} · Room{" "}
-                  {bed.roomLabel}
+                  {bed.legacyCode}
                 </option>
               ))}
             </select>
@@ -2729,6 +2624,966 @@ function ConvertAssignmentForm({
   );
 }
 
+// A fresh instance mounts every time the "Change room" modal opens (the
+// caller only renders it while changeRoomReservation is set). Monthly
+// rental / access card deposit auto-fill from the newly picked room's own
+// rates the same way reservation-convert does server-side, except this
+// needs to happen client-side so the paid-vs-new-total delta can be
+// previewed live before the staff member confirms.
+function ChangeRoomForm({
+  data,
+  save,
+  busy,
+  reservation,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  reservation: Row;
+  onDone: () => void;
+}) {
+  const currentBed = data.bedSpaces.find(
+    (bed: Row) => bed.id === reservation.assignedBedSpaceId,
+  );
+  const [hostelId, setHostelId] = useState(
+    String(currentBed?.hostelId || reservation.preferredHostelId || ""),
+  );
+  const [block, setBlock] = useState("");
+  const [roomType, setRoomType] = useState("any");
+  const [bedSpaceId, setBedSpaceId] = useState("");
+  const genderFits = (bed: Row) =>
+    ["unspecified", "mixed"].includes(reservation.preferredGender) ||
+    reservation.preferredGender === bed.gender;
+  const hostelBeds = data.bedSpaces.filter(
+    (bed: Row) =>
+      bed.status === "vacant" &&
+      (!hostelId || String(bed.hostelId) === hostelId) &&
+      genderFits(bed),
+  );
+  const blockOptions = [
+    ...new Set(hostelBeds.map((bed: Row) => blockOf(bed.unitCode))),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const vacantBeds = hostelBeds.filter(
+    (bed: Row) =>
+      (!block || blockOf(bed.unitCode) === block) &&
+      (roomType === "any" || bed.roomType === roomType),
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const effectiveRate = (bed: Row) =>
+    bed.promotionRate !== null &&
+    bed.promotionRate !== undefined &&
+    (!bed.promotionStartDate || bed.promotionStartDate <= today) &&
+    (!bed.promotionEndDate || bed.promotionEndDate >= today)
+      ? bed.promotionRate
+      : bed.currentRental;
+  const charges: Row[] = reservation.charges || [];
+  // Sums every row of the type, not just the first — a charge the student
+  // part-paid before a room change is stored as a paid row plus a top-up
+  // row, and the agreed figure is the two together.
+  const chargeAmount = (type: string) =>
+    charges
+      .filter((c) => c.chargeType === type)
+      .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  const otherChargesTotal = charges
+    .filter(
+      (c) =>
+        !["first-month-rental", "deposit", "access-card-deposit"].includes(
+          c.chargeType,
+        ),
+    )
+    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  // Captured once and never mutated, purely so the "what's changing" list
+  // below can compare against the room this reservation is leaving.
+  const originalMonthlyRental = chargeAmount("first-month-rental");
+  const originalSecurityDeposit = chargeAmount("deposit");
+  const originalAccessCardDeposit = chargeAmount("access-card-deposit");
+  const [monthlyRental, setMonthlyRental] = useState(originalMonthlyRental);
+  const [securityDeposit, setSecurityDeposit] = useState(
+    originalSecurityDeposit,
+  );
+  // The deposit is rent × DEPOSIT_MONTHS by default and follows the rent
+  // automatically, so staff never retype it for an ordinary room change.
+  // Touching the deposit field flips this and stops the auto-recalculation,
+  // which is the escape hatch for a one-off agreed amount.
+  const [depositOverridden, setDepositOverridden] = useState(false);
+  const applyMonthlyRental = (amount: number) => {
+    setMonthlyRental(amount);
+    if (!depositOverridden) setSecurityDeposit(depositFor(amount));
+  };
+  const [accessCardDeposit, setAccessCardDeposit] = useState(
+    originalAccessCardDeposit,
+  );
+  const [chargeTransferFee, setChargeTransferFee] = useState(false);
+  const [roomTransferFee, setRoomTransferFee] = useState(
+    data.settings.roomTransferFee,
+  );
+  const newTotalPayable =
+    otherChargesTotal +
+    Number(monthlyRental || 0) +
+    Number(securityDeposit || 0) +
+    Number(accessCardDeposit || 0) +
+    (chargeTransferFee ? Number(roomTransferFee || 0) : 0);
+  const amountPaid = Number(reservation.amountPaid || 0);
+  const delta = amountPaid - newTotalPayable;
+  const priceChanges = [
+    { label: "Room rent", from: originalMonthlyRental, to: monthlyRental },
+    { label: "Deposit", from: originalSecurityDeposit, to: securityDeposit },
+    {
+      label: "Access card deposit",
+      from: originalAccessCardDeposit,
+      to: accessCardDeposit,
+    },
+    // A transfer fee is a brand-new charge rather than a changed one, so it
+    // has no "from" — but it still moves what the student owes, and leaving
+    // it out would make the totals below not add up.
+    ...(chargeTransferFee
+      ? [{ label: "Room transfer fee", from: 0, to: Number(roomTransferFee || 0) }]
+      : []),
+  ].filter((row) => row.from !== row.to);
+  const netPriceChange = priceChanges.reduce(
+    (sum, row) => sum + (row.to - row.from),
+    0,
+  );
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "reservation-room-change",
+            reservationId: reservation.id,
+            ...formValues(e),
+            roomTransferFee: chargeTransferFee ? roomTransferFee : 0,
+          },
+          "Room changed",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <div
+        className="wide"
+        style={{
+          background: '#f9fafb',
+          padding: '16px',
+          borderRadius: '8px',
+          border: '1px solid #e5e7eb',
+          marginBottom: '8px',
+          fontSize: '14px',
+          color: '#4b5563',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span>Current room:</span>
+          <strong style={{ color: '#111827' }}>
+            {reservation.assignedCode || "Not set"}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Already paid:</span>
+          <strong style={{ color: '#111827' }}>{money(amountPaid)}</strong>
+        </div>
+      </div>
+
+      <label>
+        Hostel
+        <select
+          required
+          value={hostelId}
+          onChange={(event) => {
+            setHostelId(event.target.value);
+            setBlock("");
+            setRoomType("any");
+            setBedSpaceId("");
+          }}
+        >
+          <option value="">Select hostel</option>
+          {data.hostels.map((hostel: Row) => (
+            <option key={hostel.id} value={hostel.id}>
+              {hostel.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Room type
+        <select
+          value={roomType}
+          disabled={!hostelId}
+          onChange={(event) => {
+            setRoomType(event.target.value);
+            setBedSpaceId("");
+          }}
+        >
+          <option value="any">Any room type</option>
+          <option value="single">Single</option>
+          <option value="sharing">Twin</option>
+        </select>
+      </label>
+      {blockOptions.length > 0 && (
+        <label>
+          Block
+          <select
+            value={block}
+            disabled={!hostelId}
+            onChange={(event) => {
+              setBlock(event.target.value);
+              setBedSpaceId("");
+            }}
+          >
+            <option value="">All blocks in this hostel</option>
+            {blockOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="wide">
+        New room code {hostelId && `— ${vacantBeds.length} available`}
+        <select
+          name="bedSpaceId"
+          required
+          disabled={!hostelId}
+          value={bedSpaceId}
+          onChange={(event) => {
+            setBedSpaceId(event.target.value);
+            const bed = data.bedSpaces.find(
+              (b: Row) => String(b.id) === event.target.value,
+            );
+            if (!bed) return;
+            applyMonthlyRental(Number(effectiveRate(bed) || 0));
+            if (bed.legacyAccessCardDeposit !== null && bed.legacyAccessCardDeposit !== undefined)
+              setAccessCardDeposit(Number(bed.legacyAccessCardDeposit));
+          }}
+        >
+          <option value="">
+            {!hostelId
+              ? "Select a hostel first"
+              : vacantBeds.length
+                ? "Select an available room"
+                : "No free rooms match these choices"}
+          </option>
+          {vacantBeds.map((bed: Row) => (
+            <option key={bed.id} value={bed.id}>
+              {bed.legacyCode}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        New monthly rental
+        <input
+          name="monthlyRental"
+          type="number"
+          min="0"
+          step="0.01"
+          value={monthlyRental}
+          onChange={(event) => applyMonthlyRental(Number(event.target.value))}
+        />
+      </label>
+      <label>
+        New security deposit
+        <input
+          name="securityDeposit"
+          type="number"
+          min="0"
+          step="0.01"
+          value={securityDeposit}
+          onChange={(event) => {
+            setDepositOverridden(true);
+            setSecurityDeposit(Number(event.target.value));
+          }}
+        />
+        <small style={{ fontWeight: 400, color: '#6b7280' }}>
+          {depositOverridden ? (
+            <>
+              Manually set — no longer following the rent.{" "}
+              <button
+                type="button"
+                className="reservation-btn reservation-btn-secondary"
+                style={{ padding: '1px 6px', fontSize: '11px', minHeight: 'unset', borderRadius: '4px' }}
+                onClick={() => {
+                  setDepositOverridden(false);
+                  setSecurityDeposit(depositFor(monthlyRental));
+                }}
+              >
+                Reset to {DEPOSIT_MONTHS}× rent
+              </button>
+            </>
+          ) : (
+            `Automatically ${DEPOSIT_MONTHS}× the monthly rental. Edit only for a specially agreed amount.`
+          )}
+        </small>
+      </label>
+      <label>
+        New access card deposit
+        <input
+          name="accessCardDeposit"
+          type="number"
+          min="0"
+          step="0.01"
+          value={accessCardDeposit}
+          onChange={(event) => setAccessCardDeposit(Number(event.target.value))}
+        />
+      </label>
+      {bedSpaceId && priceChanges.length > 0 && (
+        <div
+          className="wide"
+          style={{
+            background: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            fontSize: '13px',
+            color: '#4b5563',
+          }}
+        >
+          <strong style={{ display: 'block', marginBottom: '6px', color: '#92400e' }}>
+            What changes with this room
+          </strong>
+          {priceChanges.map((row) => (
+            <div
+              key={row.label}
+              style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}
+            >
+              <span>{row.label}</span>
+              <span>
+                {money(row.from)} → <strong>{money(row.to)}</strong>{" "}
+                <span style={{ color: row.to > row.from ? '#991b1b' : '#166534' }}>
+                  ({row.to > row.from ? "+" : ""}
+                  {money(row.to - row.from)})
+                </span>
+              </span>
+            </div>
+          ))}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              borderTop: '1px solid #fde68a',
+              marginTop: '6px',
+              paddingTop: '6px',
+              fontWeight: 700,
+            }}
+          >
+            <span>Total payable change</span>
+            <span style={{ color: netPriceChange > 0 ? '#991b1b' : '#166534' }}>
+              {netPriceChange > 0 ? "+" : ""}
+              {money(netPriceChange)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <label
+        className="wide"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          flexDirection: 'row',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={chargeTransferFee}
+          onChange={(event) => setChargeTransferFee(event.target.checked)}
+          style={{ width: 'auto' }}
+        />
+        Charge a room transfer fee for this move
+      </label>
+      {chargeTransferFee && (
+        <label>
+          Room transfer fee
+          <input
+            name="roomTransferFeeAmount"
+            type="number"
+            min="0"
+            step="0.01"
+            value={roomTransferFee}
+            onChange={(event) => setRoomTransferFee(Number(event.target.value))}
+          />
+        </label>
+      )}
+
+      <label className="wide">
+        Expected return date (optional)
+        <input name="expectedReturnDate" type="date" />
+        <small style={{ fontWeight: 400, color: '#6b7280' }}>
+          Only fill this in for a temporary move (e.g. a maintenance issue in
+          their usual room). Leave blank for a permanent room change — a
+          date here flags this room for a follow-up check once it arrives.
+        </small>
+      </label>
+
+      <div
+        className="wide"
+        style={{
+          borderRadius: '8px',
+          padding: '14px 16px',
+          fontSize: '14px',
+          fontWeight: 600,
+          background:
+            delta > 0 ? '#f0fdf4' : delta < 0 ? '#fef2f2' : '#f9fafb',
+          border: `1px solid ${delta > 0 ? '#bbf7d0' : delta < 0 ? '#fecaca' : '#e5e7eb'}`,
+          color: delta > 0 ? '#166534' : delta < 0 ? '#991b1b' : '#374151',
+        }}
+      >
+        {delta > 0
+          ? `Credit: ${money(delta)} already paid in excess of the new room's total (${money(newTotalPayable)})`
+          : delta < 0
+            ? `Balance required: ${money(-delta)} more needed to cover the new room's total (${money(newTotalPayable)})`
+            : `No change — already paid matches the new room's total (${money(newTotalPayable)})`}
+      </div>
+
+      <div className="form-actions wide" style={{ marginTop: '8px' }}>
+        <button type="button" className="secondary" onClick={onDone}>
+          Cancel
+        </button>
+        <button className="primary" disabled={busy}>
+          Confirm room change
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// The "Manage" modal for one reservation card — everything that isn't the
+// primary at-a-glance info (name, room, money, primary action) lives here:
+// preferences, the fuller status description, payment history, the
+// quick-add-payment form, and Edit reservation / Cancel / Delete. A fresh
+// instance mounts each time the modal opens, same pattern as the other
+// per-reservation forms in this file.
+function ReservationManageDetails({
+  data,
+  save,
+  busy,
+  load,
+  reservation: r,
+  onEditReservation,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
+  reservation: Row;
+  onEditReservation: () => void;
+  onDone: () => void;
+}) {
+  const isConverted = r.status === "converted";
+  const isCancelled = r.status === "cancelled";
+  const totalPayable = Number(r.totalPayable || 0);
+  const totalPaid = Number(r.amountPaid || 0);
+  const balanceRequired = Math.max(totalPayable - totalPaid, 0);
+  const [selectedChargeIds, setSelectedChargeIds] = useState<number[]>([]);
+  const selectedChargesTotal = (r.charges || [])
+    .filter((charge: Row) => selectedChargeIds.includes(charge.id))
+    .reduce((sum: number, charge: Row) => sum + Number(charge.amount || 0), 0);
+  const creditBalance = Math.max(totalPaid - totalPayable, 0);
+  const preferredUnitCode = r.preferredUnitId
+    ? data.units.find((unit: Row) => unit.id === r.preferredUnitId)?.unitCode
+    : null;
+  const commitmentClass = isCancelled
+    ? "cancelled"
+    : isConverted
+      ? "assigned"
+      : r.inventoryCommitted
+        ? "committed"
+        : "enquiry";
+  const commitmentTitle = isCancelled
+    ? "Cancelled"
+    : isConverted
+      ? `Assigned: ${r.assignedCode || "Unit confirmed"}`
+      : r.inventoryCommitted
+        ? "Included in sales balance"
+        : "Enquiry only";
+  const commitmentDescription = isCancelled
+    ? `Cancelled ${dateLabel(r.cancelledAt)} — no longer holds a room`
+    : isConverted
+      ? "Reservation converted to an actual room assignment"
+      : r.inventoryCommitted
+        ? "This reservation reduces sellable availability"
+        : "This enquiry does not reduce room availability";
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Preferences */}
+      <div className="reservation-preferences" style={{ gap: '6px' }}>
+        <span className="reservation-chip">
+          {r.preferredHostelName || "Hostel not selected"}
+        </span>
+        {preferredUnitCode && (
+          <span className="reservation-chip">Unit {preferredUnitCode}</span>
+        )}
+        <span className="reservation-chip">
+          {genderLabel(r.preferredGender)} student
+        </span>
+        <span className="reservation-chip">
+          {r.roomCategory === "any" ? "Any category" : `Room ${r.roomCategory}`}
+        </span>
+        <span className="reservation-chip">
+          {r.roomType === "any" ? "Any room type" : titleCase(r.roomType)}
+        </span>
+      </div>
+
+      {/* Reservation state */}
+      <div
+        className={`reservation-commitment ${commitmentClass}`}
+        style={{ padding: '12px 16px', gap: '12px' }}
+      >
+        <div className="reservation-commitment-icon">
+          {isConverted || r.inventoryCommitted ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m6.5 12.5 3.5 3.5 7.5-8" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 10v6M12 7h.01" />
+            </svg>
+          )}
+        </div>
+        <div>
+          <strong style={{ fontSize: '14px' }}>{commitmentTitle}</strong>
+          <span style={{ fontSize: '13px' }}>{commitmentDescription}</span>
+        </div>
+      </div>
+
+      {/* Payment summary */}
+      <div
+        className="reservation-money-summary"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: '4px',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+          <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total payable</span>
+          <strong style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPayable)}</strong>
+        </div>
+        <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+          <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Total paid</span>
+          <strong className="paid" style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPaid)}</strong>
+        </div>
+        <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
+          <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Balance required</span>
+          <strong
+            style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}
+            className={balanceRequired > 0 ? "outstanding" : "settled"}
+          >
+            {money(balanceRequired)}
+          </strong>
+        </div>
+      </div>
+
+      {creditBalance > 0 && (
+        <div
+          className="reservation-credit-note"
+          style={{
+            fontSize: '12px',
+            fontWeight: 600,
+            color: '#166534',
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '6px',
+            padding: '6px 10px',
+          }}
+        >
+          Credit: {money(creditBalance)} paid in excess (e.g. after moving to a cheaper room)
+        </div>
+      )}
+
+      {/* Payment history */}
+      <section className="reservation-payment-history">
+        <div className="reservation-subheading" style={{ marginBottom: '8px' }}>
+          <span>Payment history</span>
+          <span>
+            {(r.payments || []).length}{" "}
+            {(r.payments || []).length === 1 ? "payment" : "payments"}
+          </span>
+        </div>
+
+        {(r.payments || []).length > 0 ? (
+          <div
+            className="reservation-payment-list"
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+          >
+            {(r.payments || []).map((payment: Row) => (
+              <div
+                key={payment.id}
+                className="reservation-payment-item"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#fafafa',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div className="reservation-payment-date-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="4" y="5" width="16" height="15" rx="2" />
+                      <path d="M8 3v4M16 3v4M4 10h16" />
+                    </svg>
+                  </div>
+                  <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{dateLabel(payment.paidAt)}</span>
+                  <i />
+                  <strong style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>{money(payment.amount)}</strong>
+                  {payment.reference && (
+                    <>
+                      <i />
+                      <span style={{ color: '#6b7280', fontSize: '12px', wordBreak: 'break-word' }}>
+                        {payment.reference}
+                      </span>
+                    </>
+                  )}
+                  {data.attachments
+                    .filter(
+                      (attachment: Row) =>
+                        attachment.contextType === "payment-proof" &&
+                        attachment.recordId === payment.id,
+                    )
+                    .map((attachment: Row) => (
+                      <span key={attachment.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <a
+                          href={`/api/files?id=${attachment.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: '12px', color: '#008861', fontWeight: 600, whiteSpace: 'nowrap' }}
+                        >
+                          {attachment.fileName || "View payment slip"}
+                        </a>
+                        <button
+                          type="button"
+                          className="reservation-btn reservation-btn-secondary"
+                          style={{ padding: '1px 6px', fontSize: '11px', minHeight: 'unset', borderRadius: '4px' }}
+                          disabled={busy}
+                          onClick={async () => {
+                            const newName = prompt(
+                              "Rename this payment slip:",
+                              attachment.fileName,
+                            );
+                            if (newName && newName.trim()) {
+                              await renameAttachment(attachment.id, newName.trim());
+                              await load();
+                            }
+                          }}
+                        >
+                          Rename
+                        </button>
+                      </span>
+                    ))}
+                </div>
+                <div
+                  className="reservation-payment-actions"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    gap: '8px',
+                    borderTop: '1px dashed #e5e7eb',
+                    paddingTop: '8px',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="reservation-btn reservation-btn-secondary"
+                    style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
+                    disabled={busy}
+                    onClick={() => {
+                      const newAmount = prompt("Enter new amount (RM) for this payment:", payment.amount);
+                      if (newAmount !== null && newAmount.trim() !== "" && !isNaN(Number(newAmount))) {
+                        save(
+                          {
+                            action: "payment-update",
+                            reservationId: r.id,
+                            paymentId: payment.id,
+                            amount: Number(newAmount),
+                          },
+                          "Payment amount updated",
+                        );
+                      }
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="reservation-btn reservation-btn-danger"
+                    style={{ padding: '4px 12px', fontSize: '12px', minHeight: 'unset', borderRadius: '4px' }}
+                    disabled={busy}
+                    onClick={() => {
+                      const confirmed = confirm(`Are you sure you want to delete this payment of ${money(payment.amount)}?`);
+                      if (confirmed) {
+                        save(
+                          {
+                            action: "payment-delete",
+                            reservationId: r.id,
+                            paymentId: payment.id,
+                          },
+                          "Payment deleted",
+                        );
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="reservation-no-payments">
+            No payments have been recorded for this reservation.
+          </div>
+        )}
+      </section>
+
+      {/* Quick payment — hidden once fully paid, since there's nothing left
+          to collect. */}
+      {(r.status === "reserved" || r.status === "converted") &&
+        r.paymentStatus !== "full" && (
+          <form
+            className="reservation-quick-payment"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = event.currentTarget;
+              if (!selectedChargeIds.length) {
+                window.alert("Select at least one charge to record this payment for.");
+                return;
+              }
+              const chargeLabelsSelected = (r.charges || [])
+                .filter((charge: Row) => selectedChargeIds.includes(charge.id))
+                .map((charge: Row) => chargeLabels[charge.chargeType] || charge.chargeType);
+              const proofLabel = (
+                (form.elements.namedItem("paymentProofLabel") as HTMLInputElement)
+                  ?.value || ""
+              ).trim();
+              const result = await save(
+                {
+                  action: "reservation-payment",
+                  reservationId: r.id,
+                  chargeIds: selectedChargeIds,
+                  ...formValues(event),
+                  paymentNotes: chargeLabelsSelected.join(", "),
+                },
+                "Payment added",
+              );
+              if (result) {
+                const file = (
+                  form.elements.namedItem("paymentProof") as HTMLInputElement
+                ).files?.[0];
+                if (file && result.id) {
+                  const uploaded = await uploadAttachment(
+                    file,
+                    "payment-proof",
+                    result.id,
+                    data.currentUser?.displayName,
+                    proofLabel ||
+                      (chargeLabelsSelected.length
+                        ? `${chargeLabelsSelected.join(" + ")} — ${r.studentName}`
+                        : undefined),
+                  );
+                  if (uploaded.id && result.linkedPaymentId) {
+                    await linkAttachment(
+                      uploaded.id,
+                      "payment-proof",
+                      result.linkedPaymentId,
+                      data.currentUser?.displayName,
+                    );
+                  }
+                  await load();
+                }
+                form.reset();
+                setSelectedChargeIds([]);
+              }
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+          >
+            {(r.charges || []).length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
+                  Charges covered by this payment
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '8px', backgroundColor: '#fff' }}>
+                  {(r.charges || []).map((charge: Row) => {
+                    const isPaid = Boolean(charge.paidAt);
+                    return (
+                      <label
+                        key={charge.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', opacity: isPaid ? 0.6 : 1 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isPaid || selectedChargeIds.includes(charge.id)}
+                          disabled={isPaid || busy}
+                          onChange={(event) => {
+                            const checked = event.currentTarget.checked;
+                            setSelectedChargeIds(
+                              checked
+                                ? [...selectedChargeIds, charge.id]
+                                : selectedChargeIds.filter((id) => id !== charge.id),
+                            );
+                          }}
+                        />
+                        <span style={{ flex: 1 }}>
+                          {chargeLabels[charge.chargeType] || charge.chargeType}
+                          {charge.notes && (
+                            <em
+                              style={{
+                                color: '#92400e',
+                                fontStyle: 'normal',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                marginLeft: '6px',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {charge.notes}
+                            </em>
+                          )}
+                        </span>
+                        <strong>{money(charge.amount)}</strong>
+                        {isPaid && (
+                          <span style={{ color: '#166534', fontWeight: 700, fontSize: '11px' }}>
+                            ✓ Paid
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                {selectedChargesTotal > 0 && (
+                  <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Amount for this payment: <strong>{money(selectedChargesTotal)}</strong>
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p style={{ fontSize: '12px', color: '#6b7280' }}>
+                No charges recorded for this reservation yet — edit the
+                reservation to add charges before recording a payment.
+              </p>
+            )}
+            <label className="reservation-reference-field" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment reference</span>
+              <input
+                name="paymentReference"
+                placeholder="Receipt number, bank reference..."
+                disabled={busy}
+                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment slip</span>
+              <input
+                name="paymentProof"
+                type="file"
+                accept="image/*,.pdf"
+                required
+                disabled={busy}
+                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payslip name (optional)</span>
+              <input
+                name="paymentProofLabel"
+                placeholder="e.g. Deposit + Admin fee receipt"
+                disabled={busy}
+                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
+              />
+            </label>
+            <button
+              type="submit"
+              className="reservation-btn reservation-btn-add-payment"
+              disabled={busy || !selectedChargeIds.length}
+              style={{ width: '100%', padding: '8px', fontSize: '12px', fontWeight: 600, justifyContent: 'center', marginTop: '2px' }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                className="reservation-button-icon"
+                style={{ width: '12px', height: '12px' }}
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              {busy ? "Saving..." : "Add payment"}
+            </button>
+          </form>
+        )}
+
+      {/* Edit / Cancel / Delete */}
+      <div className="reservation-card-actions" style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '2px', borderTop: '1px solid #e5e7eb' }}>
+        <div className="reservation-main-actions" style={{ display: 'flex', gap: '6px', width: '100%' }}>
+          <button
+            type="button"
+            className="reservation-btn reservation-btn-secondary"
+            style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+            disabled={busy}
+            onClick={onEditReservation}
+          >
+            Edit reservation
+          </button>
+          {r.status === "reserved" && (
+            <button
+              type="button"
+              className="reservation-btn reservation-btn-cancel"
+              style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
+              disabled={busy}
+              onClick={() => {
+                const confirmed = confirm(
+                  `Cancel reservation ${r.referenceNo}? The room is released and payment history is kept for your records.`,
+                );
+                if (confirmed) {
+                  save(
+                    { action: "reservation-cancel", reservationId: r.id },
+                    "Reservation cancelled",
+                  );
+                  onDone();
+                }
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            className="reservation-btn reservation-btn-danger"
+            style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
+            disabled={busy}
+            onClick={() => {
+              const confirmed = confirm(
+                `Permanently delete reservation ${r.referenceNo}? This also erases its payment history.`,
+              );
+              if (confirmed) {
+                save(
+                  { action: "reservation-delete", reservationId: r.id },
+                  "Reservation deleted",
+                );
+                onDone();
+              }
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReservationEditor({
   data,
   save,
@@ -2739,7 +3594,6 @@ function ReservationEditor({
   charges,
   setCharges,
   totalCharges,
-  effectiveRate,
   openCharges,
   cancel,
   complete,
@@ -2755,7 +3609,6 @@ function ReservationEditor({
     update: (current: Record<string, number>) => Record<string, number>,
   ) => void;
   totalCharges: number;
-  effectiveRate: (bed: Row) => number | null;
   openCharges: () => void;
   cancel: () => void;
   complete: () => void;
@@ -2831,7 +3684,7 @@ function ReservationEditor({
     standardRate !== undefined
       ? {
           "first-month-rental": standardRate,
-          deposit: standardRate * 3,
+          deposit: depositFor(standardRate),
           "admin-fee":
             STANDARD_ADMIN_FEE[nationality] || STANDARD_ADMIN_FEE.Malaysian,
           "access-card-deposit":
@@ -3034,6 +3887,14 @@ function ReservationEditor({
           </select>
         </label>
         <label>
+          Date of birth
+          <input
+            name="dateOfBirth"
+            type="date"
+            defaultValue={editingReservation?.dateOfBirth || ""}
+          />
+        </label>
+        <label>
           Phone number
           <input
             name="contactNumber"
@@ -3091,6 +3952,26 @@ function ReservationEditor({
                 : "Enter the full IC number in the format 010101-01-0101"
             }
           />
+        </label>
+        <label>
+          School
+          <select name="school" defaultValue={editingReservation?.school || ""}>
+            <option value="">Not set</option>
+            {data.schools.map((school: Row) => (
+              <option key={school.id} value={school.name}>
+                {school.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Course enrolled
+          <select name="course" defaultValue={editingReservation?.course || ""}>
+            <CourseOptions
+              courses={data.courses}
+              current={editingReservation?.course}
+            />
+          </select>
         </label>
         {nationality === "Malaysian" && (
           <label>
@@ -3340,7 +4221,7 @@ function ReservationEditor({
                 </option>
                 {options.map((bed) => (
                   <option key={bed.id} value={bed.id}>
-                    {`${bed.legacyCode} · ${bed.unitCode} · ${genderLabel(bed.gender)} · ${money(effectiveRate(bed))}`}
+                    {bed.legacyCode}
                   </option>
                 ))}
               </select>
@@ -3422,46 +4303,19 @@ function ReservationEditor({
             </button>
           </div>
         )}
-        <label>
-          Payment status
-          <select
-            name="paymentStatus"
-            defaultValue={editingReservation?.paymentStatus || "unpaid"}
-            onChange={(event) => {
-              const form = event.currentTarget.form;
-              const amountInput = form?.elements.namedItem(
-                "paymentAmount",
-              ) as HTMLInputElement | null;
-              if (!amountInput) return;
-              const type = event.currentTarget.value;
-              if (type === "admin-fee") {
-                amountInput.value = String(
-                  nationality === "International"
-                    ? STANDARD_ADMIN_FEE.International
-                    : STANDARD_ADMIN_FEE.Malaysian,
-                );
-                amountInput.readOnly = true;
-              } else if (type === "full") {
-                amountInput.value = String(totalCharges);
-                amountInput.readOnly = true;
-              } else {
-                amountInput.value = "0";
-                amountInput.readOnly = false;
-              }
-            }}
-          >
-            <option value="unpaid">Unpaid enquiry</option>
-            <option value="admin-fee">Admin fee paid</option>
-            <option value="partial">Partial payment</option>
-            <option value="full">Full payment</option>
-          </select>
-        </label>
-        {!editingReservation && (
-          <label>
-            Initial payment amount
-            <input name="paymentAmount" type="number" min="0" defaultValue="0" />
-          </label>
-        )}
+        {/* No payment status or initial-payment field here on purpose: this
+            step only agrees what the student will owe. Money is recorded
+            afterwards from the reservation's Manage screen, by ticking the
+            charges a payment covers and attaching its slip — that flow is
+            what marks charges paid and drives the status. */}
+        <p
+          className="wide"
+          style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}
+        >
+          Payment is recorded after the reservation is saved — open{" "}
+          <strong>Manage</strong> on the reservation and tick the charges the
+          payment covers.
+        </p>
         <label className="wide">
           Sales notes
           <input
@@ -3509,88 +4363,3 @@ function RateDisplay({ bed, date }: { bed: Row; date: string }) {
   );
 }
 
-function HostelRates({
-  data,
-  save,
-  busy,
-}: {
-  data: Data;
-  save: any;
-  busy: boolean;
-}) {
-  return (
-    <div className="operational-rates">
-      <div className="section-heading">
-        <div>
-          <small>HOSTEL OPERATIONAL RATES</small>
-          <h3>Student electricity rates, addresses and owner charges</h3>
-          <p>
-            Electricity uses three decimal places and the final student charge
-            is rounded up to the next Ringgit. Cleaning and water-dispenser fees
-            feed the monthly owner P&amp;L.
-          </p>
-        </div>
-      </div>
-      <div className="rate-card-grid">
-        {data.hostels.map((h) => (
-          <form
-            key={h.id}
-            onSubmit={(e) => {
-              e.preventDefault();
-              save(
-                { action: "hostel-rates", hostelId: h.id, ...formValues(e) },
-                `${h.name} rates updated`,
-              );
-            }}
-          >
-            <h4>{h.name}</h4>
-            <label>
-              Student electricity / kWh
-              <input
-                name="electricityRate"
-                type="number"
-                min="0"
-                step="0.001"
-                required
-                defaultValue={Number(h.electricityRate || 0).toFixed(3)}
-              />
-            </label>
-            <small className="field-note">
-              Example: 33 kWh × {Number(h.electricityRate || 0).toFixed(3)} is
-              billed as {money(Math.ceil(33 * Number(h.electricityRate || 0)))}
-            </small>
-            <label>
-              Property address
-              <textarea
-                name="address"
-                required
-                defaultValue={h.address || ""}
-              />
-            </label>
-            <label>
-              Owner cleaning fee / month
-              <input
-                name="monthlyCleaningFee"
-                type="number"
-                min="0"
-                defaultValue={h.monthlyCleaningFee}
-              />
-            </label>
-            <label>
-              Owner water dispenser / month
-              <input
-                name="monthlyWaterDispenserFee"
-                type="number"
-                min="0"
-                defaultValue={h.monthlyWaterDispenserFee}
-              />
-            </label>
-            <button className="secondary compact" disabled={busy}>
-              Save rates
-            </button>
-          </form>
-        ))}
-      </div>
-    </div>
-  );
-}

@@ -4,7 +4,11 @@ import { appRoles, appUsers, rolePermissions, userSessions } from "./schema";
 
 export const SESSION_COOKIE = "hostel_session";
 const SESSION_DAYS = 7;
-const PBKDF2_ITERATIONS = 120_000;
+// Cloudflare Workers' WebCrypto PBKDF2 implementation rejects any iteration
+// count above 100,000 (NotSupportedError) — this is the platform's hard
+// ceiling, not a tunable security choice, so it can't be raised even though
+// current OWASP guidance recommends more for new applications.
+const PBKDF2_ITERATIONS = 100_000;
 
 const encoder = new TextEncoder();
 

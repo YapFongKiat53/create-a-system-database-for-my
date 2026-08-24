@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { getDb, type PgTx } from "../../../db";
 import {
   getSessionUser,
@@ -38,6 +49,7 @@ import {
   ticketMessages,
   reminderTemplates,
   rolePermissions,
+  systemSettings,
   unitOwnerDetails,
   unitServices,
   userSessions,
@@ -107,6 +119,28 @@ const chargeTypes = [
   "advance-rental",
   "advance-utility",
 ] as const;
+const chargeLabels: Record<string, string> = {
+  "first-month-rental": "First month advance rental",
+  deposit: "Deposit",
+  "admin-fee": "Admin fee",
+  "access-card-deposit": "Access card deposit",
+  "access-card-handling": "Access card handling fee",
+  "stamping-fee": "Stamping fee",
+  "cleaning-package": "Cleaning package",
+  "bedding-set": "Bedding set",
+  "advance-rental": "Advance rental",
+  "advance-utility": "Advance utility fee",
+  // Not in chargeTypes: this one is added by reservation-room-change, not
+  // edited through the reservation Payment step's charge breakdown.
+  "room-transfer-fee": "Room transfer fee",
+};
+// A room change can raise a charge the student already settled (deposit
+// 2,250 -> 3,000). Rather than flipping the whole line back to unpaid and
+// losing sight of the 2,250, the settled part stays paid and the increase
+// becomes its own line — same charge type, so Finance still files it under
+// deposit — carrying one of these notes to explain where it came from.
+const CHARGE_TOPUP_NOTE = "Room change top-up";
+const CHARGE_BALANCE_NOTE = "Remaining balance";
 
 function chunks<T>(values: T[], size: number) {
   const result: T[][] = [];
@@ -507,9 +541,12 @@ async function loadScopedModules(
 
 function moduleForAction(action: string) {
   if (action === "reservation-finance-review") return "finance";
-  if (/^(reservation|bulk-room-price|promotion-end)/.test(action))
+  if (
+    /^(reservation|bulk-room-price|promotion-end|system-setting-update)/.test(
+      action,
+    )
+  )
     return "hostels-sales";
-  if (action === "hostel-rates") return "hostels-rates";
   if (/^bed-/.test(action)) return "units-general";
   if (/^(unit-|access-card|room-|service-)/.test(action))
     return action === "unit-owner" ? "units-owner" : "units-general";
@@ -1067,9 +1104,18 @@ async function replaceReservationCharges(
     }
   } else if (raw && typeof raw === "object")
     values = raw as Record<string, unknown>;
-  await db.execute(
-    sql`DELETE FROM reservation_charges WHERE reservation_id = ${reservationId}`,
-  );
+  // Only touches the charge types this breakdown form actually edits —
+  // charges added by other flows (e.g. reservation-room-change's
+  // room-transfer-fee) aren't in chargeTypes and must survive an unrelated
+  // edit to this reservation instead of silently vanishing.
+  await db
+    .delete(reservationCharges)
+    .where(
+      and(
+        eq(reservationCharges.reservationId, reservationId),
+        inArray(reservationCharges.chargeType, [...chargeTypes]),
+      ),
+    );
   const rows = chargeTypes
     .map((type) => ({ type, amount: asNumber(values[type], 0) }))
     .filter((row) => row.amount > 0);
@@ -1079,36 +1125,367 @@ async function replaceReservationCharges(
         sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount) VALUES (${reservationId}, ${row.type}, ${row.amount})`,
       ),
     );
-  return rows.reduce((sum, row) => sum + row.amount, 0);
-}
-
-async function addReservationPayment(
-  db: ReturnType<typeof getDb>,
-  reservationId: number,
-  body: Record<string, unknown>,
-) {
-  const amount = asNumber(body.paymentAmount ?? body.amountPaid, 0);
-  let paymentId: number | undefined;
-  if (amount > 0 || asText(body.paymentReference)) {
-    const inserted = await db
-      .insert(reservationPayments)
-      .values({
-        reservationId,
-        amount,
-        reference: asText(body.paymentReference),
-        paymentMethod: asText(body.paymentMethod, "bank-transfer"),
-        paidAt: asNullableText(body.paidAt) || nowIso(),
-        notes: asText(body.paymentNotes),
-      })
-      .returning({ id: reservationPayments.id });
-    paymentId = inserted[0]?.id;
-  }
-  const total = (
+  const totalRow = (
     await db.execute<{ total: number }>(
-      sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+      sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_charges WHERE reservation_id = ${reservationId}`,
     )
   )[0];
-  return { amountPaid: Number(total?.total || 0), paymentId };
+  return Number(totalRow?.total || 0);
+}
+
+
+// Records a payment for a specific set of still-unpaid reservation_charges
+// rows — the amount is derived from those charges server-side (never
+// trusted from the client) and each one gets locked (paid_at/payment_id
+// set) so its checkbox in the Manage screen can't be unchecked afterwards.
+// Only a room change (which deletes and reinserts the room-tied charges) or
+// deleting this payment (payment-delete) can undo the lock.
+async function addChargeLinkedReservationPayment(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+  chargeIds: number[],
+  body: Record<string, unknown>,
+) {
+  if (!chargeIds.length)
+    throw new Error("Select at least one charge to record this payment for");
+  const charges = await db
+    .select({ id: reservationCharges.id, amount: reservationCharges.amount })
+    .from(reservationCharges)
+    .where(
+      and(
+        eq(reservationCharges.reservationId, reservationId),
+        inArray(reservationCharges.id, chargeIds),
+        isNull(reservationCharges.paidAt),
+      ),
+    );
+  if (charges.length !== chargeIds.length)
+    throw new Error(
+      "One or more selected charges are already paid or no longer exist",
+    );
+  const amount = charges.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  const inserted = await db
+    .insert(reservationPayments)
+    .values({
+      reservationId,
+      amount,
+      reference: asText(body.paymentReference),
+      paymentMethod: asText(body.paymentMethod, "bank-transfer"),
+      paidAt: nowIso(),
+      notes: asText(body.paymentNotes),
+    })
+    .returning({ id: reservationPayments.id });
+  const paymentId = inserted[0]?.id;
+  await db
+    .update(reservationCharges)
+    .set({ paidAt: nowIso(), paymentId })
+    .where(inArray(reservationCharges.id, chargeIds));
+  return { paymentId, amount };
+}
+
+// Covers still-unpaid charges out of money already received that isn't
+// tied to a charge yet — the leftover a room change creates when it drops
+// the old room's charges and inserts the new room's at a different price.
+// Charges paid through the normal checkbox flow keep their explicit
+// paymentId link and are never touched here; auto-covered ones are marked
+// with paymentId NULL so they can be recomputed if a payment is deleted.
+// Folds same-type leftovers back into one line per paid/unpaid bucket.
+// Without it, repeated room changes and pay/delete cycles keep splitting
+// the same charge and leave a trail of fragments behind.
+async function consolidateAutoCharges(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+) {
+  const mergeable = await db
+    .select()
+    .from(reservationCharges)
+    .where(
+      and(
+        eq(reservationCharges.reservationId, reservationId),
+        // Charges settled through the checkbox flow carry a paymentId and
+        // are left alone — payment-delete unlocks them by that link, so
+        // merging them would break it. Only auto-covered and still-unpaid
+        // rows, which no single payment owns, are safe to fold together.
+        isNull(reservationCharges.paymentId),
+      ),
+    )
+    .orderBy(asc(reservationCharges.id));
+  const groups = new Map<string, typeof mergeable>();
+  for (const row of mergeable) {
+    const key = `${row.chargeType}:${row.paidAt ? "paid" : "unpaid"}`;
+    groups.set(key, [...(groups.get(key) || []), row]);
+  }
+  for (const rows of groups.values()) {
+    if (rows.length < 2) continue;
+    const merged = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    await db
+      .update(reservationCharges)
+      .set({
+        amount: merged,
+        // A merged paid line is just "this charge, settled" — the per-slice
+        // top-up/balance notes no longer describe anything once combined.
+        notes: rows[0].paidAt ? "" : rows[0].notes,
+      })
+      .where(eq(reservationCharges.id, rows[0].id));
+    await db.delete(reservationCharges).where(
+      inArray(
+        reservationCharges.id,
+        rows.slice(1).map((row) => row.id),
+      ),
+    );
+  }
+}
+
+async function autoAllocatePaidCharges(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+) {
+  await consolidateAutoCharges(db, reservationId);
+  const charges = await db
+    .select()
+    .from(reservationCharges)
+    .where(eq(reservationCharges.reservationId, reservationId))
+    .orderBy(asc(reservationCharges.id));
+  const moneyRow = (
+    await db.execute<{ total: number }>(
+      sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+    )
+  )[0];
+  const alreadyCovered = charges
+    .filter((charge) => charge.paidAt)
+    .reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
+  let credit = Number(moneyRow?.total || 0) - alreadyCovered;
+  for (const charge of charges) {
+    if (charge.paidAt) continue;
+    const amount = Number(charge.amount || 0);
+    if (amount <= 0 || credit <= 0) continue;
+    if (credit >= amount) {
+      credit -= amount;
+      await db
+        .update(reservationCharges)
+        .set({ paidAt: nowIso(), paymentId: null })
+        .where(eq(reservationCharges.id, charge.id));
+      continue;
+    }
+    // Credit covers only part of this charge. Split it so the money still
+    // lands on a real line instead of floating unattached: the covered part
+    // becomes a paid row, the rest a separate outstanding row with its own
+    // tick box. Keeps "sum of unticked charges" equal to what's still owed.
+    const covered = credit;
+    credit = 0;
+    await db
+      .update(reservationCharges)
+      .set({ amount: covered, paidAt: nowIso(), paymentId: null })
+      .where(eq(reservationCharges.id, charge.id));
+    await db.insert(reservationCharges).values({
+      reservationId,
+      chargeType: charge.chargeType,
+      amount: amount - covered,
+      notes: CHARGE_BALANCE_NOTE,
+    });
+  }
+  // Splitting above can leave the paid side of a charge in two pieces
+  // (the part covered before, plus the slice just covered) — fold them.
+  await consolidateAutoCharges(db, reservationId);
+}
+
+// The single source of truth for a reservation's amountPaid/paymentStatus
+// once its charges carry per-item paid_at locks: always the sum of the
+// currently-paid charges, never a running total tracked separately. Called
+// after anything that can change which charges are paid — recording a
+// payment, deleting/editing one, or a room change replacing charges.
+async function recomputeReservationPaymentStatus(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+) {
+  const reservation = (
+    await db
+      .select({ totalPayable: reservations.totalPayable })
+      .from(reservations)
+      .where(eq(reservations.id, reservationId))
+  )[0];
+  // Money actually received — never the sum of currently-locked charges.
+  // A room change replaces the room-tied charges and drops their locks, but
+  // the student's money obviously didn't disappear with them; deriving from
+  // the payment records is what keeps it on the reservation as credit or a
+  // shortfall instead of silently resetting the reservation to "unpaid".
+  const paidRow = (
+    await db.execute<{ total: number }>(
+      sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+    )
+  )[0];
+  const amountPaid = Number(paidRow?.total || 0);
+  const totalPayable = Number(reservation?.totalPayable || 0);
+  const paymentStatus =
+    amountPaid <= 0
+      ? "unpaid"
+      : totalPayable > 0 && amountPaid >= totalPayable
+        ? "full"
+        : "partial";
+  await db
+    .update(reservations)
+    .set({
+      amountPaid,
+      paymentStatus,
+      inventoryCommitted: paymentStatus !== "unpaid",
+      paymentUpdatedAt: nowIso(),
+    })
+    .where(eq(reservations.id, reservationId));
+  return { amountPaid, paymentStatus };
+}
+
+// Brings a converted reservation's one-time "move-in costs" invoice back in
+// line with the reservation itself: creates it if it's missing, mirrors any
+// payment Finance hasn't seen yet, rebuilds the itemised lines from the
+// current charges and restates the totals. Everything that can move the
+// money (conversion, a payment, a deletion, a room change) calls this, so
+// Finance and Hostel Information can't drift apart.
+async function syncMoveInInvoice(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+  actorName: string,
+) {
+  const assignment = (
+    await db.execute<{ id: number; student_id: number }>(
+      sql`SELECT id, student_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active' ORDER BY id DESC LIMIT 1`,
+    )
+  )[0];
+  if (!assignment) return;
+  const reservation = (
+    await db.select().from(reservations).where(eq(reservations.id, reservationId))
+  )[0];
+  if (!reservation) return;
+
+  const charges = await db
+    .select()
+    .from(reservationCharges)
+    .where(eq(reservationCharges.reservationId, reservationId))
+    .orderBy(asc(reservationCharges.id));
+  const billable = charges.filter((charge) => Number(charge.amount) > 0);
+  const totalAmount = billable.reduce(
+    (sum, charge) => sum + Number(charge.amount),
+    0,
+  );
+
+  let invoice = (
+    await db.execute<{ id: number }>(
+      sql`SELECT id FROM billing_invoices WHERE assignment_id = ${assignment.id} AND cycle_id IS NULL ORDER BY id DESC LIMIT 1`,
+    )
+  )[0];
+  if (!invoice) {
+    if (!billable.length) return;
+    invoice = (
+      await db.execute<{ id: number }>(sql`
+        INSERT INTO billing_invoices (invoice_no, cycle_id, student_id, assignment_id, due_date, status, total_amount, amount_paid, invoice_frequency)
+        VALUES (${`INV-MI-${reservationId}`}, NULL, ${assignment.student_id}, ${assignment.id}, ${reservation.targetMoveInDate}, 'unpaid', ${totalAmount}, 0, 'one-time')
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      `)
+    )[0];
+    if (!invoice) return;
+  }
+
+  // Any reservation payment Finance has never been told about — money taken
+  // while the booking was still an enquiry, for instance — becomes a
+  // verified record now so each payment is individually visible there.
+  const unmirrored = await db
+    .select()
+    .from(reservationPayments)
+    .where(
+      and(
+        eq(reservationPayments.reservationId, reservationId),
+        isNull(reservationPayments.linkedInvoicePaymentId),
+      ),
+    )
+    .orderBy(asc(reservationPayments.id));
+  for (const payment of unmirrored) {
+    const mirrored = (
+      await db
+        .insert(billingPaymentRecords)
+        .values({
+          invoiceId: invoice.id,
+          amount: Number(payment.amount),
+          reference: payment.reference,
+          remark: payment.notes,
+          status: "verified",
+          verifiedAt: nowIso(),
+          verifiedBy: actorName,
+          verifiedAmount: Number(payment.amount),
+          actualReference: payment.reference,
+        })
+        .returning({ id: billingPaymentRecords.id })
+    )[0];
+    if (!mirrored) continue;
+    await db
+      .update(billingPaymentRecords)
+      .set({ receiptNo: `RCT-${invoice.id}-${mirrored.id}` })
+      .where(eq(billingPaymentRecords.id, mirrored.id));
+    await db
+      .update(reservationPayments)
+      .set({ linkedInvoicePaymentId: mirrored.id })
+      .where(eq(reservationPayments.id, payment.id));
+  }
+
+  await db
+    .delete(billingItemAdjustments)
+    .where(
+      inArray(
+        billingItemAdjustments.billingItemId,
+        db
+          .select({ id: billingItems.id })
+          .from(billingItems)
+          .where(eq(billingItems.invoiceId, invoice.id)),
+      ),
+    );
+  await db.delete(billingItems).where(eq(billingItems.invoiceId, invoice.id));
+  if (billable.length)
+    await db.insert(billingItems).values(
+      billable.map((charge) => ({
+        invoiceId: invoice!.id,
+        // Plain charge type, so a deposit top-up still files under deposit;
+        // only the description carries the note explaining the split.
+        itemType: charge.chargeType,
+        description: `${chargeLabels[charge.chargeType] ?? charge.chargeType}${
+          charge.notes ? ` — ${charge.notes}` : ""
+        }`,
+        quantity: 1,
+        rate: Number(charge.amount),
+        amount: Number(charge.amount),
+      })),
+    );
+
+  // Reservation money is the source of truth; verified records that mirror
+  // it are already counted, so only invoice-only payments get added on.
+  const extraRow = (
+    await db.execute<{ total: number }>(sql`
+      SELECT COALESCE(SUM(COALESCE(verified_amount, amount)),0) total
+      FROM billing_payment_records
+      WHERE invoice_id = ${invoice.id} AND status = 'verified'
+        AND id NOT IN (
+          SELECT linked_invoice_payment_id FROM reservation_payments
+          WHERE reservation_id = ${reservationId} AND linked_invoice_payment_id IS NOT NULL
+        )
+    `)
+  )[0];
+  const moneyRow = (
+    await db.execute<{ total: number }>(
+      sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+    )
+  )[0];
+  const amountPaid =
+    Number(moneyRow?.total || 0) + Number(extraRow?.total || 0);
+  await db
+    .update(billingInvoices)
+    .set({
+      totalAmount,
+      amountPaid,
+      status:
+        amountPaid <= 0
+          ? "unpaid"
+          : amountPaid >= totalAmount
+            ? "paid"
+            : "partial",
+    })
+    .where(eq(billingInvoices.id, invoice.id));
 }
 
 export async function GET(request: Request) {
@@ -1164,7 +1541,7 @@ export async function GET(request: Request) {
         return Response.json(scopedResult);
       }
     }
-    const db = getDb({ max: 20 });
+    const db = getDb();
     const [
       rawBeds,
       units,
@@ -1175,6 +1552,7 @@ export async function GET(request: Request) {
       reservationRows,
       paymentRows,
       chargeRows,
+      pendingReturnRows,
       studentRows,
       rateRows,
       parkingLotRows,
@@ -1198,6 +1576,7 @@ export async function GET(request: Request) {
       schoolRows,
       courseRows,
       categoryRateRows,
+      settingRows,
     ] = await Promise.all([
       db
         .select({
@@ -1332,6 +1711,19 @@ export async function GET(request: Request) {
         .from(reservationPayments)
         .orderBy(desc(reservationPayments.id)),
       db.select().from(reservationCharges).orderBy(asc(reservationCharges.id)),
+      db
+        .select({
+          id: accommodationAssignments.id,
+          sourceReservationId: accommodationAssignments.sourceReservationId,
+          expectedReturnDate: accommodationAssignments.expectedReturnDate,
+        })
+        .from(accommodationAssignments)
+        .where(
+          and(
+            eq(accommodationAssignments.status, "active"),
+            isNotNull(accommodationAssignments.expectedReturnDate),
+          ),
+        ),
       db
         .select({
           id: studentProfiles.id,
@@ -1688,6 +2080,7 @@ export async function GET(request: Request) {
       db.select().from(schools).orderBy(asc(schools.name)),
       db.select().from(courses).orderBy(asc(courses.name)),
       db.select().from(hostelCategoryRates),
+      db.select().from(systemSettings),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1769,6 +2162,12 @@ export async function GET(request: Request) {
     const propertyById = new Map(
       properties.map((property) => [property.id, property]),
     );
+    const pendingReturnByReservation = new Map(
+      pendingReturnRows.map((row) => [
+        row.sourceReservationId,
+        { assignmentId: row.id, expectedReturnDate: row.expectedReturnDate },
+      ]),
+    );
     const reservationList = reservationRows.map((reservation) => ({
       ...reservation,
       preferredHostelName: reservation.preferredHostelId
@@ -1784,6 +2183,11 @@ export async function GET(request: Request) {
         (row) => row.reservationId === reservation.id,
       ),
       charges: chargeRows.filter((row) => row.reservationId === reservation.id),
+      assignmentId:
+        pendingReturnByReservation.get(reservation.id)?.assignmentId || null,
+      expectedReturnDate:
+        pendingReturnByReservation.get(reservation.id)?.expectedReturnDate ||
+        null,
     }));
     const salesPeople = [
       ...new Set([
@@ -1820,6 +2224,12 @@ export async function GET(request: Request) {
       schools: schoolRows,
       courses: courseRows,
       categoryRates: categoryRateRows,
+      settings: {
+        roomTransferFee: Number(
+          settingRows.find((row) => row.settingKey === "room-transfer-fee")
+            ?.settingValue ?? 200,
+        ),
+      },
       tickets: ticketRows,
       ticketMessages: messageRows,
       meterReadings: readingRows,
@@ -1951,6 +2361,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = asText(body.action);
     let createdId: number | undefined;
+    let linkedPaymentId: number | undefined;
     if (!administrationSeeded) {
       await seedAdministration(db);
       administrationSeeded = true;
@@ -2109,9 +2520,73 @@ export async function POST(request: Request) {
       )
         throw new Error("A valid unit and gender are required");
       const status = asText(body.unitStatus, "active");
+      const unitId = asNumber(body.unitId);
+      // Renaming the unit has to carry its room codes with it: those are
+      // stored as "<unitCode>-<bed>", so leaving them behind would strand
+      // every room under a code its unit no longer has.
+      const existingUnit = (
+        await db.select().from(hostelUnits).where(eq(hostelUnits.id, unitId))
+      )[0];
+      if (!existingUnit) throw new Error("Unit not found");
+      const unitCode = asText(body.unitCode, existingUnit.unitCode).trim();
+      if (!unitCode) throw new Error("Unit code is required");
+      if (unitCode !== existingUnit.unitCode) {
+        const clashingUnit = await db
+          .select({ id: hostelUnits.id })
+          .from(hostelUnits)
+          .where(
+            and(
+              eq(hostelUnits.hostelId, existingUnit.hostelId),
+              eq(hostelUnits.unitCode, unitCode),
+              ne(hostelUnits.id, unitId),
+            ),
+          );
+        if (clashingUnit.length)
+          throw new Error(
+            `Another unit in this hostel is already called ${unitCode}`,
+          );
+        const beds = await db.execute<{ id: number; legacy_code: string }>(sql`
+          SELECT b.id, b.legacy_code FROM bed_spaces b
+          JOIN hostel_rooms r ON r.id = b.room_id
+          WHERE r.unit_id = ${unitId} AND b.legacy_code LIKE ${`${existingUnit.unitCode}-%`}
+        `);
+        const renames = beds.map((bed) => ({
+          id: Number(bed.id),
+          next: `${unitCode}${bed.legacy_code.slice(existingUnit.unitCode.length)}`,
+        }));
+        if (renames.length) {
+          const clashingCodes = await db
+            .select({ legacyCode: bedSpaces.legacyCode })
+            .from(bedSpaces)
+            .where(
+              and(
+                inArray(
+                  bedSpaces.legacyCode,
+                  renames.map((row) => row.next),
+                ),
+                notInArray(
+                  bedSpaces.id,
+                  renames.map((row) => row.id),
+                ),
+              ),
+            );
+          if (clashingCodes.length)
+            throw new Error(
+              `Renaming to ${unitCode} would clash with existing room codes: ${clashingCodes
+                .map((row) => row.legacyCode)
+                .join(", ")}`,
+            );
+          for (const row of renames)
+            await db
+              .update(bedSpaces)
+              .set({ legacyCode: row.next })
+              .where(eq(bedSpaces.id, row.id));
+        }
+      }
       await db
         .update(hostelUnits)
         .set({
+          unitCode,
           gender,
           surrenderDate: ["return-planned", "surrendered"].includes(status)
             ? asNullableText(body.surrenderDate)
@@ -2122,6 +2597,46 @@ export async function POST(request: Request) {
           address: asText(body.address),
         })
         .where(eq(hostelUnits.id, asNumber(body.unitId)));
+    } else if (action === "unit-delete") {
+      const unitId = asNumber(body.unitId);
+      if (!unitId) throw new Error("Unit is required");
+      // Deleting is for units created by mistake. Anything that represents
+      // real history — a tenancy, a reservation, a ticket, a meter reading,
+      // money — blocks it and is named in the error, because surrendering
+      // the unit is the right move there, not erasing it.
+      const bedIds = sql`(SELECT b.id FROM bed_spaces b JOIN hostel_rooms r ON r.id = b.room_id WHERE r.unit_id = ${unitId})`;
+      const counts = (
+        await db.execute<Record<string, number>>(sql`
+          SELECT
+            (SELECT count(*) FROM accommodation_assignments WHERE bed_space_id IN ${bedIds}) AS tenancies,
+            (SELECT count(*) FROM reservations WHERE preferred_unit_id = ${unitId}
+               OR provisional_bed_space_id IN ${bedIds} OR assigned_bed_space_id IN ${bedIds}) AS reservations,
+            (SELECT count(*) FROM maintenance_tickets WHERE unit_id = ${unitId}) AS tickets,
+            (SELECT count(*) FROM meter_readings WHERE bed_space_id IN ${bedIds}) AS meter_readings,
+            (SELECT count(*) FROM parking_lots WHERE unit_id = ${unitId}) AS parking_lots,
+            (SELECT count(*) FROM general_costs WHERE unit_id = ${unitId}) AS costs,
+            (SELECT count(*) FROM announcements WHERE unit_id = ${unitId}) AS announcements
+        `)
+      )[0];
+      const blocking = Object.entries(counts || {})
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => `${value} ${key.replace(/_/g, " ")}`);
+      if (blocking.length)
+        throw new Error(
+          `This unit still has ${blocking.join(", ")}. Set its status to surrendered instead of deleting it.`,
+        );
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`DELETE FROM access_cards WHERE unit_id = ${unitId}`);
+        await tx.execute(sql`DELETE FROM unit_services WHERE unit_id = ${unitId}`);
+        await tx.execute(
+          sql`DELETE FROM unit_owner_details WHERE unit_id = ${unitId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM bed_spaces WHERE room_id IN (SELECT id FROM hostel_rooms WHERE unit_id = ${unitId})`,
+        );
+        await tx.execute(sql`DELETE FROM hostel_rooms WHERE unit_id = ${unitId}`);
+        await tx.execute(sql`DELETE FROM hostel_units WHERE id = ${unitId}`);
+      });
     } else if (action === "unit-owner") {
       if (!body.unitId) throw new Error("A valid unit is required");
       const values = {
@@ -2338,14 +2853,28 @@ export async function POST(request: Request) {
           WHERE ${sql.join(conditions, sql` AND `)}
         )
       `);
-    } else if (action === "hostel-rates") {
+    } else if (action === "system-setting-update") {
+      const settingKey = asText(body.settingKey);
+      if (!settingKey) throw new Error("Setting key is required");
+      const settingValue = asText(body.settingValue);
+      await db
+        .insert(systemSettings)
+        .values({ settingKey, settingValue, updatedAt: nowIso() })
+        .onConflictDoUpdate({
+          target: systemSettings.settingKey,
+          set: { settingValue, updatedAt: nowIso() },
+        });
+    } else if (action === "meter-rates") {
+      // Property address, owner charges and utility rates all live under
+      // Maintenance now — Maintenance owns the meters these rates get
+      // billed against, and the address/cleaning fee moved along with them.
       if (!body.hostelId) throw new Error("Hostel is required");
       await db
         .update(hostelProperties)
         .set({
-          electricityRate: asNumber(body.electricityRate),
           address: asText(body.address),
           monthlyCleaningFee: asNumber(body.monthlyCleaningFee),
+          electricityRate: asNumber(body.electricityRate),
           monthlyWaterDispenserFee: asNumber(body.monthlyWaterDispenserFee),
         })
         .where(eq(hostelProperties.id, asNumber(body.hostelId)));
@@ -2395,7 +2924,12 @@ export async function POST(request: Request) {
         throw new Error(
           "Student / representative name and check-in date are required",
         );
-      const paymentStatus = asText(body.paymentStatus, "unpaid");
+      // paymentStatus / inventoryCommitted / amountPaid are deliberately NOT
+      // part of this object either. The reservation form no longer collects
+      // payment at all — money is recorded afterwards by ticking charges in
+      // Manage — so recomputeReservationPaymentStatus below is the only
+      // thing that sets them, derived from money actually received.
+      //
       // status is deliberately NOT part of this shared object — status
       // transitions (reserved -> converted/cancelled) only ever happen via
       // the dedicated reservation-convert/reservation-cancel actions. The
@@ -2417,19 +2951,19 @@ export async function POST(request: Request) {
         contactNumber: asText(body.contactNumber),
         email: asText(body.email),
         identityNo: asText(body.identityNo),
+        dateOfBirth: asNullableText(body.dateOfBirth),
         nationality: asText(body.nationality),
         nationalityOther: asText(body.nationalityOther),
         state: asText(body.state),
         hometown: asText(body.hometown),
+        school: asText(body.school),
+        course: asText(body.course),
         race: asText(body.race),
         raceOther: asText(body.raceOther),
         religion: asText(body.religion),
         religionOther: asText(body.religionOther),
         targetMoveInDate: asText(body.targetMoveInDate),
         provisionalBedSpaceId: asNullableNumber(body.provisionalBedSpaceId),
-        paymentStatus,
-        inventoryCommitted: paymentStatus !== "unpaid",
-        paymentUpdatedAt: nowIso(),
         notes: asText(body.notes),
       };
       let reservationId = asNumber(body.reservationId);
@@ -2459,22 +2993,21 @@ export async function POST(request: Request) {
         reservationId,
         body.chargeBreakdown,
       );
-      const amountPaid =
-        action === "reservation"
-          ? (await addReservationPayment(db, reservationId, body)).amountPaid
-          : Number(
-              (
-                await db.execute<{ total: number }>(
-                  sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
-                )
-              )[0]?.total || 0,
-            );
+      // Creating or editing a reservation never records money — that only
+      // happens by ticking charges in Manage — so amountPaid is simply
+      // whatever payments already exist, recomputed just below.
+      const amountPaid = Number(
+        (
+          await db.execute<{ total: number }>(
+            sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+          )
+        )[0]?.total || 0,
+      );
       await db
         .update(reservations)
         .set({
           totalPayable,
           amountPaid,
-          paymentReference: asText(body.paymentReference),
         })
         .where(eq(reservations.id, reservationId));
 
@@ -2496,6 +3029,7 @@ export async function POST(request: Request) {
             .set({
               fullName: values.studentName,
               identityNo: values.identityNo,
+              dateOfBirth: values.dateOfBirth,
               gender: values.preferredGender,
               contactNumber: values.contactNumber,
               email: values.email,
@@ -2503,6 +3037,8 @@ export async function POST(request: Request) {
               nationalityOther: values.nationalityOther,
               state: values.state,
               hometown: values.hometown,
+              school: values.school,
+              course: values.course,
               race: values.race,
               raceOther: values.raceOther,
               religion: values.religion,
@@ -2516,8 +3052,15 @@ export async function POST(request: Request) {
           }>(
             sql`SELECT charge_type, amount FROM reservation_charges WHERE reservation_id = ${reservationId}`,
           );
-          const chargeAmount = (type: string) =>
-            charges.find((row) => row.charge_type === type)?.amount;
+          // Sum every row of the type: a charge part-paid before a room
+          // change lives as a paid row plus a top-up row, and undefined
+          // must still mean "no such charge" so the caller skips it.
+          const chargeAmount = (type: string) => {
+            const rows = charges.filter((row) => row.charge_type === type);
+            return rows.length
+              ? rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+              : undefined;
+          };
           const firstMonthRental = chargeAmount("first-month-rental");
           const securityDeposit = chargeAmount("deposit");
           const accessCardDeposit = chargeAmount("access-card-deposit");
@@ -2535,29 +3078,41 @@ export async function POST(request: Request) {
               .where(eq(accommodationAssignments.id, linkedAssignment.id));
         }
       }
+      // Creating or editing a reservation rewrites its charge rows, so
+      // re-apply whatever money is on record to them and push the result to
+      // Finance. Without this an initial payment leaves every charge showing
+      // unpaid, and an edit leaves the invoice billing the pre-edit amounts.
+      await autoAllocatePaidCharges(db, reservationId);
+      await recomputeReservationPaymentStatus(db, reservationId);
+      await syncMoveInInvoice(db, reservationId, currentUser.displayName);
     } else if (action === "reservation-payment") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
-      const { amountPaid, paymentId } = await addReservationPayment(
+      const chargeIds = (
+        Array.isArray(body.chargeIds) ? body.chargeIds : []
+      ).map((id) => Number(id));
+      const { paymentId, amount } = await addChargeLinkedReservationPayment(
         db,
         reservationId,
+        chargeIds,
         body,
       );
-      const paymentStatus = asText(
-        body.paymentStatus,
-        amountPaid > 0 ? "partial" : "unpaid",
-      );
+      await recomputeReservationPaymentStatus(db, reservationId);
       await db
         .update(reservations)
-        .set({
-          paymentStatus,
-          amountPaid,
-          paymentReference: asText(body.paymentReference),
-          inventoryCommitted: paymentStatus !== "unpaid",
-          paymentUpdatedAt: nowIso(),
-        })
+        .set({ paymentReference: asText(body.paymentReference) })
         .where(eq(reservations.id, reservationId));
       createdId = paymentId;
+      // Mirror the money onto the linked move-in invoice (creating it and
+      // back-filling any earlier payment Finance never saw) so the invoice,
+      // its line items and its paid figure all match the reservation.
+      if (amount > 0) await syncMoveInInvoice(db, reservationId, currentUser.displayName);
+      linkedPaymentId = (
+        await db
+          .select({ id: reservationPayments.linkedInvoicePaymentId })
+          .from(reservationPayments)
+          .where(eq(reservationPayments.id, paymentId!))
+      )[0]?.id ?? undefined;
     } else if (action === "reservation-finance-review") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
@@ -2570,30 +3125,51 @@ export async function POST(request: Request) {
       const paymentId = asNumber(body.paymentId);
       if (!reservationId || !paymentId)
         throw new Error("Reservation and payment are required");
+      const payment = (
+        await db
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, paymentId),
+              eq(reservationPayments.reservationId, reservationId),
+            ),
+          )
+      )[0];
+      if (!payment) throw new Error("Payment not found");
+      // Deleting the payment is the correction path for a mistaken entry
+      // (wrong charges selected, wrong slip) — unlock whatever charges it
+      // had locked so they go back to being selectable.
       await db
-        .delete(reservationPayments)
+        .update(reservationCharges)
+        .set({ paidAt: null, paymentId: null })
+        .where(eq(reservationCharges.paymentId, paymentId));
+      // Charges auto-covered from leftover credit (paidAt set, no payment
+      // link) have to be released too — the money backing them may be the
+      // very payment being deleted. autoAllocatePaidCharges below re-covers
+      // whatever the remaining payments still stretch to.
+      await db
+        .update(reservationCharges)
+        .set({ paidAt: null })
         .where(
           and(
-            eq(reservationPayments.id, paymentId),
-            eq(reservationPayments.reservationId, reservationId),
+            eq(reservationCharges.reservationId, reservationId),
+            isNotNull(reservationCharges.paidAt),
+            isNull(reservationCharges.paymentId),
           ),
         );
-      const remaining = (
-        await db.execute<{ total: number }>(
-          sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
-        )
-      )[0];
-      const amountPaid = Number(remaining?.total || 0);
-      const paymentStatus = amountPaid > 0 ? "partial" : "unpaid";
       await db
-        .update(reservations)
-        .set({
-          paymentStatus,
-          amountPaid,
-          inventoryCommitted: paymentStatus !== "unpaid",
-          paymentUpdatedAt: nowIso(),
-        })
-        .where(eq(reservations.id, reservationId));
+        .delete(reservationPayments)
+        .where(eq(reservationPayments.id, paymentId));
+      // Drop the mirrored Finance record too, otherwise it survives as an
+      // orphan with nothing linking it back and gets counted twice.
+      if (payment.linkedInvoicePaymentId)
+        await db
+          .delete(billingPaymentRecords)
+          .where(eq(billingPaymentRecords.id, payment.linkedInvoicePaymentId));
+      await autoAllocatePaidCharges(db, reservationId);
+      await recomputeReservationPaymentStatus(db, reservationId);
+      await syncMoveInInvoice(db, reservationId, currentUser.displayName);
     } else if (action === "payment-update") {
       const reservationId = asNumber(body.reservationId);
       const paymentId = asNumber(body.paymentId);
@@ -2602,31 +3178,32 @@ export async function POST(request: Request) {
         throw new Error(
           "Reservation, payment and a valid amount are required",
         );
+      const payment = (
+        await db
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, paymentId),
+              eq(reservationPayments.reservationId, reservationId),
+            ),
+          )
+      )[0];
+      if (!payment) throw new Error("Payment not found");
       await db
         .update(reservationPayments)
         .set({ amount })
-        .where(
-          and(
-            eq(reservationPayments.id, paymentId),
-            eq(reservationPayments.reservationId, reservationId),
-          ),
-        );
-      const remaining = (
-        await db.execute<{ total: number }>(
-          sql`SELECT COALESCE(SUM(amount), 0) AS total FROM reservation_payments WHERE reservation_id = ${reservationId}`,
-        )
-      )[0];
-      const amountPaid = Number(remaining?.total || 0);
-      const paymentStatus = amountPaid > 0 ? "partial" : "unpaid";
-      await db
-        .update(reservations)
-        .set({
-          paymentStatus,
-          amountPaid,
-          inventoryCommitted: paymentStatus !== "unpaid",
-          paymentUpdatedAt: nowIso(),
-        })
-        .where(eq(reservations.id, reservationId));
+        .where(eq(reservationPayments.id, paymentId));
+      // The correction is to this payment's own recorded amount only — it
+      // doesn't change which charges are ticked, but the mirrored Finance
+      // record and the invoice totals both have to follow it.
+      if (payment.linkedInvoicePaymentId)
+        await db
+          .update(billingPaymentRecords)
+          .set({ amount, verifiedAmount: amount })
+          .where(eq(billingPaymentRecords.id, payment.linkedInvoicePaymentId));
+      await recomputeReservationPaymentStatus(db, reservationId);
+      await syncMoveInInvoice(db, reservationId, currentUser.displayName);
     } else if (action === "reservation-delete") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
@@ -2714,8 +3291,12 @@ export async function POST(request: Request) {
         }>(
           sql`SELECT charge_type, amount FROM reservation_charges WHERE reservation_id = ${reservationId}`,
         );
-        const chargeAmount = (type: string) =>
-          charges.find((row) => row.charge_type === type)?.amount;
+        const chargeAmount = (type: string) => {
+          const rows = charges.filter((row) => row.charge_type === type);
+          return rows.length
+            ? rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+            : undefined;
+        };
         const firstMonthRental = chargeAmount("first-month-rental");
         const monthlyRental =
           firstMonthRental && Number(firstMonthRental) > 0
@@ -2725,8 +3306,8 @@ export async function POST(request: Request) {
         const accessCardDeposit = chargeAmount("access-card-deposit") ?? null;
         const key = `reservation:${reservationId}`;
         await db.execute(sql`
-          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, gender, contact_number, email, nationality, nationality_other, state, hometown, race, race_other, religion, religion_other, salesperson, status)
-          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.identityNo}, ${reservation.preferredGender}, ${reservation.contactNumber}, ${reservation.email}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.state}, ${reservation.hometown}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
+          INSERT INTO student_profiles (source_key, student_code, full_name, identity_no, date_of_birth, gender, contact_number, email, nationality, nationality_other, state, hometown, school, course, race, race_other, religion, religion_other, salesperson, status)
+          VALUES (${key}, ${`STU-${reservationId}`}, ${reservation.studentName}, ${reservation.identityNo}, ${reservation.dateOfBirth}, ${reservation.preferredGender}, ${reservation.contactNumber}, ${reservation.email}, ${reservation.nationality}, ${reservation.nationalityOther}, ${reservation.state}, ${reservation.hometown}, ${reservation.school}, ${reservation.course}, ${reservation.race}, ${reservation.raceOther}, ${reservation.religion}, ${reservation.religionOther}, ${reservation.salesPerson}, 'active')
           ON CONFLICT DO NOTHING
         `);
         const student = (
@@ -2749,7 +3330,150 @@ export async function POST(request: Request) {
             sql`UPDATE reservations SET assigned_bed_space_id = ${bedId}, status = 'converted', converted_at = ${now} WHERE id = ${reservationId}`,
           );
         });
+        // Every charge collected during the reservation's Payment step
+        // (deposit, access card deposit, admin fee, ...) becomes one
+        // itemised line on a one-time "move-in costs" invoice, and any
+        // payment taken before conversion is mirrored across so Finance
+        // sees each one rather than a single opaque figure.
+        await syncMoveInInvoice(db, reservationId, currentUser.displayName);
       }
+    } else if (action === "reservation-room-change") {
+      // Swaps the actual room on an already-converted reservation (e.g. the
+      // student wants a different room after paying and converting, before
+      // move-in settles in). Unlike student-room-change (which retires the
+      // old assignment and starts a fresh one, for an ongoing tenant moving
+      // mid-stay), this updates the existing assignment in place — the
+      // source_reservation_id link the Edit-reservation sync depends on
+      // must survive the room change. The new room's monthly rental /
+      // security deposit / access card deposit replace the old ones in
+      // reservation_charges (other charge types — admin fee, stamping fee,
+      // etc. — are untouched), and totalPayable/paymentStatus are
+      // recomputed so the balance-required / credit figure on the
+      // reservation reflects the new room honestly.
+      const reservationId = asNumber(body.reservationId);
+      const newBedId = asNumber(body.bedSpaceId);
+      if (!reservationId || !newBedId)
+        throw new Error("Reservation and new room are required");
+      const reservation = (
+        await db
+          .select()
+          .from(reservations)
+          .where(eq(reservations.id, reservationId))
+      )[0];
+      if (!reservation) throw new Error("Reservation not found");
+      if (reservation.status !== "converted")
+        throw new Error("Only converted reservations can change rooms");
+      const assignment = (
+        await db.execute<{ id: number; bed_space_id: number }>(
+          sql`SELECT id, bed_space_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active'`,
+        )
+      )[0];
+      if (!assignment)
+        throw new Error("No active room assignment found for this reservation");
+      const oldBedId = Number(assignment.bed_space_id);
+      if (oldBedId === newBedId) throw new Error("Select a different room");
+      const newBed = (
+        await db.select().from(bedSpaces).where(eq(bedSpaces.id, newBedId))
+      )[0];
+      if (!newBed) throw new Error("Selected room not found");
+      if (newBed.status !== "vacant")
+        throw new Error("Selected room is no longer vacant");
+      const monthlyRental = asNumber(body.monthlyRental, 0);
+      const securityDeposit = asNumber(body.securityDeposit, 0);
+      const accessCardDeposit = asNumber(body.accessCardDeposit, 0);
+      const roomTransferFee = asNumber(body.roomTransferFee, 0);
+      const now = nowIso();
+      // What the student has already settled per room-tied charge, so the
+      // replacement below can keep that portion paid and only bill the
+      // increase instead of resetting the whole line to unpaid.
+      const roomTiedTypes = [
+        "first-month-rental",
+        "deposit",
+        "access-card-deposit",
+      ];
+      const paidByType = new Map<string, number>();
+      for (const charge of await db
+        .select()
+        .from(reservationCharges)
+        .where(
+          and(
+            eq(reservationCharges.reservationId, reservationId),
+            inArray(reservationCharges.chargeType, roomTiedTypes),
+          ),
+        ))
+        if (charge.paidAt)
+          paidByType.set(
+            charge.chargeType,
+            (paidByType.get(charge.chargeType) || 0) + Number(charge.amount || 0),
+          );
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${now} WHERE id = ${oldBedId}`,
+        );
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status = 'occupied', updated_at = ${now} WHERE id = ${newBedId}`,
+        );
+        await tx.execute(
+          sql`UPDATE accommodation_assignments SET bed_space_id = ${newBedId}, monthly_rental = ${monthlyRental}, security_deposit = ${securityDeposit}, access_card_deposit = ${accessCardDeposit}, expected_return_date = ${asNullableText(body.expectedReturnDate)} WHERE id = ${assignment.id}`,
+        );
+        await tx.execute(
+          sql`UPDATE reservations SET assigned_bed_space_id = ${newBedId} WHERE id = ${reservationId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM reservation_charges WHERE reservation_id = ${reservationId} AND charge_type IN ('first-month-rental', 'deposit', 'access-card-deposit')`,
+        );
+        const newCharges = [
+          { type: "first-month-rental", amount: monthlyRental },
+          { type: "deposit", amount: securityDeposit },
+          { type: "access-card-deposit", amount: accessCardDeposit },
+        ].filter((row) => row.amount > 0);
+        for (const row of newCharges) {
+          // Never bill more than the new amount, so moving to a cheaper room
+          // shrinks the line to the new price and the surplus shows up as
+          // overall credit rather than an inflated "paid" figure.
+          const alreadyPaid = Math.min(
+            paidByType.get(row.type) || 0,
+            row.amount,
+          );
+          if (alreadyPaid > 0)
+            await tx.execute(
+              sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount, paid_at) VALUES (${reservationId}, ${row.type}, ${alreadyPaid}, ${now})`,
+            );
+          const topUp = row.amount - alreadyPaid;
+          if (topUp > 0)
+            await tx.execute(
+              sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount, notes) VALUES (${reservationId}, ${row.type}, ${topUp}, ${alreadyPaid > 0 ? CHARGE_TOPUP_NOTE : ""})`,
+            );
+        }
+        // A room-transfer fee is charged (or not) per room change, on top
+        // of whatever the reservation already carries — it isn't a
+        // replacement like the three above, so it just adds a new row when
+        // staff opts to charge it.
+        if (roomTransferFee > 0)
+          await tx.execute(
+            sql`INSERT INTO reservation_charges (reservation_id, charge_type, amount) VALUES (${reservationId}, 'room-transfer-fee', ${roomTransferFee})`,
+          );
+      });
+      const totalPayableRow = (
+        await db.execute<{ total: number }>(
+          sql`SELECT COALESCE(SUM(amount),0) total FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+        )
+      )[0];
+      const totalPayable = Number(totalPayableRow?.total || 0);
+      await db
+        .update(reservations)
+        .set({ totalPayable })
+        .where(eq(reservations.id, reservationId));
+      // The room-tied charges were just replaced at the new room's rate, so
+      // they came back unpaid — but the student's money is still on record.
+      // Re-apply it to the new charges so nothing is lost, leaving only the
+      // genuine difference as credit (overpaid) or a shortfall (underpaid).
+      await autoAllocatePaidCharges(db, reservationId);
+      await recomputeReservationPaymentStatus(db, reservationId);
+      // Keep the linked move-in invoice showing the room they're actually
+      // in — otherwise Finance keeps billing the old room's rate and the
+      // over/under-payment shown there contradicts the reservation.
+      await syncMoveInInvoice(db, reservationId, currentUser.displayName);
     } else if (action === "student-update") {
       const studentId = asNumber(body.studentId);
       if (!studentId) throw new Error("Student is required");
@@ -2828,6 +3552,17 @@ export async function POST(request: Request) {
       await db
         .update(accommodationAssignments)
         .set({ renewalAppliedAt: nowIso() })
+        .where(eq(accommodationAssignments.id, assignmentId));
+    } else if (action === "assignment-clear-return-date") {
+      // Resolves a temporary-room-change follow-up as "staying" — the
+      // student never moved back, so the current room becomes permanent
+      // and the pending-decision badge on the Converted tab stops
+      // counting this assignment.
+      const assignmentId = asNumber(body.assignmentId);
+      if (!assignmentId) throw new Error("Assignment is required");
+      await db
+        .update(accommodationAssignments)
+        .set({ expectedReturnDate: null })
         .where(eq(accommodationAssignments.id, assignmentId));
     } else if (action === "student-create") {
       if (!asText(body.fullName)) throw new Error("Full name is required");
@@ -2984,8 +3719,8 @@ export async function POST(request: Request) {
           sql`UPDATE bed_spaces SET status='vacant', updated_at=${changeNow} WHERE id=${old.bedSpaceId}`,
         );
         await tx.execute(sql`
-          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status)
-          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active')
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status, source_reservation_id)
+          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active', ${old.sourceReservationId})
         `);
         await tx.execute(
           sql`UPDATE bed_spaces SET status='occupied', updated_at=${changeNow} WHERE id=${bedId}`,
@@ -3880,6 +4615,43 @@ export async function POST(request: Request) {
       await db.execute(
         sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${item.invoiceId}) WHERE id=${item.invoiceId}`,
       );
+    } else if (action === "billing-item-verify") {
+      const itemId = asNumber(body.itemId);
+      const item = (
+        await db.select().from(billingItems).where(eq(billingItems.id, itemId))
+      )[0];
+      if (!item) throw new Error("Billing item not found");
+      await db
+        .update(billingItems)
+        .set({ verifiedAt: nowIso(), verifiedBy: currentUser.displayName })
+        .where(eq(billingItems.id, itemId));
+    } else if (action === "billing-invoice-update") {
+      const invoiceId = asNumber(body.invoiceId);
+      if (!invoiceId) throw new Error("Invoice is required");
+      await db
+        .update(billingInvoices)
+        .set({ dueDate: asText(body.dueDate) })
+        .where(eq(billingInvoices.id, invoiceId));
+    } else if (action === "billing-invoice-delete") {
+      const invoiceId = asNumber(body.invoiceId);
+      if (!invoiceId) throw new Error("Invoice is required");
+      const itemIds = (
+        await db
+          .select({ id: billingItems.id })
+          .from(billingItems)
+          .where(eq(billingItems.invoiceId, invoiceId))
+      ).map((row) => row.id);
+      if (itemIds.length)
+        await db
+          .delete(billingItemAdjustments)
+          .where(inArray(billingItemAdjustments.billingItemId, itemIds));
+      await db
+        .delete(billingItems)
+        .where(eq(billingItems.invoiceId, invoiceId));
+      await db
+        .delete(billingPaymentRecords)
+        .where(eq(billingPaymentRecords.invoiceId, invoiceId));
+      await db.delete(billingInvoices).where(eq(billingInvoices.id, invoiceId));
     } else if (action === "announcement") {
       if (!asText(body.title) || !asText(body.body))
         throw new Error("Announcement title and message are required");
@@ -4033,7 +4805,10 @@ export async function POST(request: Request) {
     } else {
       return Response.json({ error: "Unsupported action" }, { status: 400 });
     }
-    return Response.json({ ok: true, id: createdId }, { status: 201 });
+    return Response.json(
+      { ok: true, id: createdId, linkedPaymentId },
+      { status: 201 },
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to save record";

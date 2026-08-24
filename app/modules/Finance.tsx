@@ -12,6 +12,7 @@ import {
   formValues,
   money,
   paginationItems,
+  renameAttachment,
   titleCase,
   uploadAttachment,
 } from "./shared";
@@ -64,6 +65,72 @@ const CHARGE_TYPE_META: Record<
     background: "#fee2e2",
     icon: "⏰",
   },
+  "first-month-rental": {
+    label: "First month rental",
+    color: "#0e7490",
+    background: "#cffafe",
+    icon: "🏠",
+  },
+  deposit: {
+    label: "Deposit",
+    color: "#1d4ed8",
+    background: "#dbeafe",
+    icon: "🔒",
+  },
+  "admin-fee": {
+    label: "Admin fee",
+    color: "#6d28d9",
+    background: "#ede9fe",
+    icon: "📄",
+  },
+  "access-card-deposit": {
+    label: "Access card deposit",
+    color: "#1d4ed8",
+    background: "#dbeafe",
+    icon: "🪪",
+  },
+  "access-card-handling": {
+    label: "Access card handling fee",
+    color: "#6d28d9",
+    background: "#ede9fe",
+    icon: "🪪",
+  },
+  "stamping-fee": {
+    label: "Stamping fee",
+    color: "#6d28d9",
+    background: "#ede9fe",
+    icon: "📝",
+  },
+  "cleaning-package": {
+    label: "Cleaning package",
+    color: "#9f1239",
+    background: "#ffe4e6",
+    icon: "🧹",
+  },
+  "bedding-set": {
+    label: "Bedding set",
+    color: "#9f1239",
+    background: "#ffe4e6",
+    icon: "🛏️",
+  },
+  "advance-rental": {
+    label: "Advance rental",
+    color: "#0e7490",
+    background: "#cffafe",
+    icon: "🏠",
+  },
+  "advance-utility": {
+    label: "Advance utility fee",
+    color: "#92400e",
+    background: "#fef3c7",
+    icon: "⚡",
+  },
+  "room-transfer-fee": {
+    label: "Room transfer fee",
+    color: "#6d28d9",
+    background: "#ede9fe",
+    icon: "🔁",
+  },
   other: {
     label: "Other",
     color: "#374151",
@@ -78,10 +145,12 @@ export function FinanceModule({
   data,
   save,
   busy,
+  load,
 }: {
   data: Data;
   save: any;
   busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
 }) {
   const [modal, setModal] = useState("");
   const latest = data.billingCycles[0];
@@ -141,8 +210,29 @@ export function FinanceModule({
     !reservation.financeReviewedAt ||
     (reservation.paymentUpdatedAt &&
       reservation.financeReviewedAt < reservation.paymentUpdatedAt);
+  // Only the charge types that are actually refundable deposits belong
+  // here — admin fee, first month rental, access card handling, etc. are
+  // real income, not money Finance will ever hand back. "Deposit" and
+  // "access card deposit" are the only reservation charge types with that
+  // property (parking's own deposit is tracked separately, see
+  // parkingDepositsHeld below).
+  const isDepositChargeType = (chargeType: string) =>
+    chargeType === "deposit" || chargeType === "access-card-deposit";
+  const depositChargesOf = (reservation: Row) =>
+    (reservation.charges || []).filter((charge: Row) =>
+      isDepositChargeType(charge.chargeType),
+    );
+  const depositPaidOf = (reservation: Row) =>
+    depositChargesOf(reservation)
+      .filter((charge: Row) => charge.paidAt)
+      .reduce((sum: number, charge: Row) => sum + Number(charge.amount || 0), 0);
+  const depositPayableOf = (reservation: Row) =>
+    depositChargesOf(reservation).reduce(
+      (sum: number, charge: Row) => sum + Number(charge.amount || 0),
+      0,
+    );
   const reservationDeposits = data.reservations
-    .filter((reservation) => Number(reservation.amountPaid) > 0)
+    .filter((reservation) => depositPaidOf(reservation) > 0)
     .sort((a, b) =>
       String(b.paymentUpdatedAt || "").localeCompare(
         String(a.paymentUpdatedAt || ""),
@@ -518,8 +608,15 @@ export function FinanceModule({
                   <td>
                     <strong>{money(i.totalAmount, true)}</strong>
                     <small>
-                      Paid {money(i.amountPaid, true)} · Owed{" "}
-                      {money(i.totalAmount - i.amountPaid, true)}
+                      Paid {money(i.amountPaid, true)} ·{" "}
+                      {i.amountPaid > i.totalAmount ? (
+                        <span style={{ color: "#166534", fontWeight: 700 }}>
+                          Overpaid{" "}
+                          {money(i.amountPaid - i.totalAmount, true)}
+                        </span>
+                      ) : (
+                        <>Owed {money(i.totalAmount - i.amountPaid, true)}</>
+                      )}
                     </small>
                   </td>
                   <td>{dateLabel(i.dueDate)}</td>
@@ -635,12 +732,15 @@ export function FinanceModule({
                   (item) => item.id === reservation.preferredHostelId,
                 );
                 const pending = isReservationPendingReview(reservation);
+                const depositPaymentIds = new Set(
+                  depositChargesOf(reservation)
+                    .filter((charge: Row) => charge.paidAt)
+                    .map((charge: Row) => charge.paymentId),
+                );
                 const slips = data.attachments.filter(
                   (attachment) =>
                     attachment.contextType === "payment-proof" &&
-                    (reservation.payments || []).some(
-                      (payment: Row) => payment.id === attachment.recordId,
-                    ),
+                    depositPaymentIds.has(attachment.recordId),
                 );
                 return (
                   <tr key={reservation.id}>
@@ -661,13 +761,9 @@ export function FinanceModule({
                       </small>
                     </td>
                     <td>
-                      <strong>{money(reservation.amountPaid, true)}</strong>
+                      <strong>{money(depositPaidOf(reservation), true)}</strong>
                       <small>
-                        of{" "}
-                        {reservation.totalPayable
-                          ? money(reservation.totalPayable, true)
-                          : "-"}{" "}
-                        payable
+                        of {money(depositPayableOf(reservation), true)} deposit
                       </small>
                     </td>
                     <td>
@@ -697,7 +793,13 @@ export function FinanceModule({
                     </td>
                     <td>{reservation.salesPerson || "-"}</td>
                     <td>
-                      <StatusPill status={reservation.paymentStatus} />
+                      <StatusPill
+                        status={
+                          depositPaidOf(reservation) >= depositPayableOf(reservation)
+                            ? "full"
+                            : "partial"
+                        }
+                      />
                     </td>
                     <td>
                       {pending ? (
@@ -1143,6 +1245,25 @@ export function FinanceModule({
                             Edit
                           </button>
                         )}
+                        {data.currentUser?.roleKey !== "tenant" &&
+                          (x.verifiedAt ? (
+                            <span className="secondary compact" style={{ pointerEvents: "none" }}>
+                              ✓ Verified
+                            </span>
+                          ) : (
+                            <button
+                              className="secondary compact"
+                              disabled={busy}
+                              onClick={() =>
+                                save(
+                                  { action: "billing-item-verify", itemId: x.id },
+                                  "Billing item verified",
+                                )
+                              }
+                            >
+                              Verify
+                            </button>
+                          ))}
                       </p>
                     );
                   })}
@@ -1152,11 +1273,31 @@ export function FinanceModule({
                   <strong>{money(invoice.totalAmount, true)}</strong>
                 </footer>
                 <footer>
-                  <span>Outstanding</span>
-                  <strong>
-                    {money(invoice.totalAmount - invoice.amountPaid, true)}
-                  </strong>
+                  <span>Paid</span>
+                  <strong>{money(invoice.amountPaid, true)}</strong>
                 </footer>
+                {invoice.amountPaid > invoice.totalAmount ? (
+                  <footer style={{ color: "#166534" }}>
+                    <span>Overpaid (credit)</span>
+                    <strong>
+                      {money(invoice.amountPaid - invoice.totalAmount, true)}
+                    </strong>
+                  </footer>
+                ) : (
+                  <footer
+                    style={{
+                      color:
+                        invoice.totalAmount > invoice.amountPaid
+                          ? "#991b1b"
+                          : undefined,
+                    }}
+                  >
+                    <span>Outstanding</span>
+                    <strong>
+                      {money(invoice.totalAmount - invoice.amountPaid, true)}
+                    </strong>
+                  </footer>
+                )}
               </div>
               <div className="button-row">
                 <button className="secondary" onClick={() => window.print()}>
@@ -1168,6 +1309,37 @@ export function FinanceModule({
                 >
                   Submit payment
                 </button>
+                {data.currentUser?.roleKey !== "tenant" && (
+                  <>
+                    <button
+                      className="secondary"
+                      onClick={() => setModal(`edit-invoice:${invoice.id}`)}
+                    >
+                      Edit invoice
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={async () => {
+                        const confirmed = confirm(
+                          `Delete invoice ${invoice.invoiceNo}? This also removes its payment records and cannot be undone.`,
+                        );
+                        if (confirmed) {
+                          const ok = await save(
+                            {
+                              action: "billing-invoice-delete",
+                              invoiceId: invoice.id,
+                            },
+                            "Invoice deleted",
+                          );
+                          if (ok) setModal("");
+                        }
+                      }}
+                    >
+                      Delete invoice
+                    </button>
+                  </>
+                )}
               </div>
               {invoice.payments.length > 0 && (
                 <div className="payment-review">
@@ -1185,15 +1357,33 @@ export function FinanceModule({
                             attachment.recordId === p.id,
                         )
                         .map((attachment) => (
-                          <a
-                            key={attachment.id}
-                            className="secondary compact"
-                            href={`/api/files?id=${attachment.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            View payment slip
-                          </a>
+                          <span key={attachment.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <a
+                              className="secondary compact"
+                              href={`/api/files?id=${attachment.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {attachment.fileName || "View payment slip"}
+                            </a>
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              disabled={busy}
+                              onClick={async () => {
+                                const newName = prompt(
+                                  "Rename this payment slip:",
+                                  attachment.fileName,
+                                );
+                                if (newName && newName.trim()) {
+                                  await renameAttachment(attachment.id, newName.trim());
+                                  await load();
+                                }
+                              }}
+                            >
+                              Rename
+                            </button>
+                          </span>
                         ))}
                       {p.status !== "verified" && (
                         <button
@@ -1427,6 +1617,51 @@ export function FinanceModule({
                 <div className="form-actions wide">
                   <button className="primary" disabled={busy}>
                     Submit change
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          );
+        })()}
+      {modal.startsWith("edit-invoice:") &&
+        (() => {
+          const invoice = data.invoices.find(
+            (i) => i.id === Number(modal.split(":")[1]),
+          );
+          if (!invoice) return null;
+          return (
+            <Modal
+              title="Edit invoice"
+              kicker={invoice.invoiceNo}
+              onClose={() => setModal(`invoice:${invoice.id}`)}
+            >
+              <form
+                className="form-grid"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const ok = await save(
+                    {
+                      action: "billing-invoice-update",
+                      invoiceId: invoice.id,
+                      ...formValues(event),
+                    },
+                    "Invoice updated",
+                  );
+                  if (ok) setModal(`invoice:${invoice.id}`);
+                }}
+              >
+                <label>
+                  Due date
+                  <input
+                    name="dueDate"
+                    type="date"
+                    required
+                    defaultValue={invoice.dueDate}
+                  />
+                </label>
+                <div className="form-actions wide">
+                  <button className="primary" disabled={busy}>
+                    Save changes
                   </button>
                 </div>
               </form>

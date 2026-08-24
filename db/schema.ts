@@ -189,6 +189,12 @@ export const accommodationAssignments = pgTable("accommodation_assignments", {
   // tenancy — clears the "ending soon, no renewal" flag on the room even
   // though the agreement end date itself hasn't moved yet.
   renewalAppliedAt: text("renewal_applied_at"),
+  // Set on a temporary room change (e.g. maintenance issue in their usual
+  // room) to flag when staff should check whether the student actually
+  // moved back to their original room or is staying put. Null means "no
+  // follow-up needed" — either the student was never temporarily moved, or
+  // staff already resolved the follow-up (moved back, or confirmed staying).
+  expectedReturnDate: text("expected_return_date"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
@@ -215,10 +221,13 @@ export const reservations = pgTable("reservations", {
   contactNumber: text("contact_number").notNull().default(""),
   email: text("email").notNull().default(""),
   identityNo: text("identity_no").notNull().default(""),
+  dateOfBirth: text("date_of_birth"),
   nationality: text("nationality").notNull().default(""),
   nationalityOther: text("nationality_other").notNull().default(""),
   state: text("state").notNull().default(""),
   hometown: text("hometown").notNull().default(""),
+  school: text("school").notNull().default(""),
+  course: text("course").notNull().default(""),
   race: text("race").notNull().default(""),
   raceOther: text("race_other").notNull().default(""),
   religion: text("religion").notNull().default(""),
@@ -331,6 +340,13 @@ export const reservationPayments = pgTable("reservation_payments", {
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
   notes: text("notes").notNull().default(""),
+  // The mirrored payment record this created on the reservation's linked
+  // Finance invoice (see reservation-payment action) — kept so deleting or
+  // correcting this payment can keep Finance in sync instead of leaving it
+  // stale, the exact bug this link was added to prevent.
+  linkedInvoicePaymentId: bigint("linked_invoice_payment_id", {
+    mode: "number",
+  }).references(() => billingPaymentRecords.id),
 });
 
 export const reservationCharges = pgTable("reservation_charges", {
@@ -341,6 +357,15 @@ export const reservationCharges = pgTable("reservation_charges", {
   chargeType: text("charge_type").notNull(),
   amount: doublePrecision("amount").notNull().default(0),
   notes: text("notes").notNull().default(""),
+  // Set once this specific charge is covered by a recorded payment — the
+  // checkbox lock in the reservation payment form reads this. Cleared only
+  // by deleting the payment that covers it, or by a room change (which
+  // deletes and reinserts the room-tied charges outright, see
+  // reservation-room-change) — never by unchecking the box directly.
+  paidAt: text("paid_at"),
+  paymentId: bigint("payment_id", { mode: "number" }).references(
+    () => reservationPayments.id,
+  ),
 });
 
 export const studentRateChanges = pgTable("student_rate_changes", {
@@ -510,7 +535,11 @@ export const storedAttachments = pgTable("stored_attachments", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   contextType: text("context_type").notNull(),
   recordId: bigint("record_id", { mode: "number" }).notNull(),
-  objectKey: text("object_key").notNull().unique(),
+  // Not unique: linkAttachment() intentionally lets two rows point at the
+  // same underlying storage object (e.g. mirroring one payment slip onto
+  // both the reservation payment and its linked Finance invoice payment)
+  // instead of uploading the bytes twice.
+  objectKey: text("object_key").notNull(),
   fileName: text("file_name").notNull(),
   contentType: text("content_type")
     .notNull()
@@ -553,9 +582,12 @@ export const billingCycles = pgTable("billing_cycles", {
 export const billingInvoices = pgTable("billing_invoices", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   invoiceNo: text("invoice_no").notNull().unique(),
-  cycleId: bigint("cycle_id", { mode: "number" })
-    .notNull()
-    .references(() => billingCycles.id),
+  // Nullable: a monthly billing-cycle invoice always has one, but a
+  // one-time "move-in costs" invoice (created straight from a converted
+  // reservation's sales-side charges) isn't part of any recurring cycle.
+  cycleId: bigint("cycle_id", { mode: "number" }).references(
+    () => billingCycles.id,
+  ),
   studentId: bigint("student_id", { mode: "number" })
     .notNull()
     .references(() => studentProfiles.id),
@@ -584,6 +616,11 @@ export const billingItems = pgTable(
     quantity: doublePrecision("quantity").notNull().default(1),
     rate: doublePrecision("rate").notNull().default(0),
     amount: doublePrecision("amount").notNull().default(0),
+    // Per-item verification, separate from billing_payment_records' whole-
+    // payment verification — Finance staff confirm each charge line was
+    // actually collected/correct, not just the invoice's total.
+    verifiedAt: text("verified_at"),
+    verifiedBy: text("verified_by").notNull().default(""),
   },
   (table) => [
     // Each invoice can only carry one late-payment-charge line item — this
@@ -727,6 +764,18 @@ export const reminderTemplates = pgTable("reminder_templates", {
   subject: text("subject").notNull(),
   message: text("message").notNull(),
   enabled: boolean("enabled").notNull().default(true),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
+// Small system-wide key/value config editable from the UI — e.g. the
+// standard room transfer fee shown on room-change. Not per-hostel; add a
+// hostelId column here (or a new table) if a fee ever needs to vary by
+// property.
+export const systemSettings = pgTable("system_settings", {
+  settingKey: text("setting_key").primaryKey(),
+  settingValue: text("setting_value").notNull(),
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

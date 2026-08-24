@@ -1,0 +1,1 @@
+ALTER TABLE "stored_attachments" DROP CONSTRAINT "stored_attachments_object_key_unique";

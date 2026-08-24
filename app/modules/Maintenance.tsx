@@ -349,6 +349,14 @@ export function MaintenanceModule({
             Costing & penalties
           </button>
         )}
+        {data.currentUser?.roleKey !== "tenant" && (
+          <button
+            className={tab === "rates" ? "active" : ""}
+            onClick={() => setTab("rates")}
+          >
+            Property & utility rates
+          </button>
+        )}
       </div>
       {tab === "tickets" && (
         <>
@@ -642,6 +650,82 @@ export function MaintenanceModule({
                 })}
               </tbody>
             </table>
+          </div>
+        </section>
+      )}
+      {tab === "rates" && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <small>HOSTEL PROPERTY &amp; UTILITY RATES</small>
+              <h3>Address, owner charges and student electricity/water rates</h3>
+              <p>
+                Electricity uses three decimal places and the final student
+                charge is rounded up to the next Ringgit. Cleaning and
+                water-dispenser fees feed the monthly owner P&amp;L.
+              </p>
+            </div>
+          </div>
+          <div className="rate-card-grid">
+            {data.hostels.map((h) => (
+              <form
+                key={h.id}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  save(
+                    { action: "meter-rates", hostelId: h.id, ...formValues(e) },
+                    `${h.name} rates updated`,
+                  );
+                }}
+              >
+                <h4>{h.name}</h4>
+                <label>
+                  Property address
+                  <textarea
+                    name="address"
+                    required
+                    defaultValue={h.address || ""}
+                  />
+                </label>
+                <label>
+                  Owner cleaning fee / month
+                  <input
+                    name="monthlyCleaningFee"
+                    type="number"
+                    min="0"
+                    defaultValue={h.monthlyCleaningFee}
+                  />
+                </label>
+                <label>
+                  Student electricity / kWh
+                  <input
+                    name="electricityRate"
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    required
+                    defaultValue={Number(h.electricityRate || 0).toFixed(3)}
+                  />
+                </label>
+                <small className="field-note">
+                  Example: 33 kWh × {Number(h.electricityRate || 0).toFixed(3)}{" "}
+                  is billed as{" "}
+                  {money(Math.ceil(33 * Number(h.electricityRate || 0)))}
+                </small>
+                <label>
+                  Owner water dispenser / month
+                  <input
+                    name="monthlyWaterDispenserFee"
+                    type="number"
+                    min="0"
+                    defaultValue={h.monthlyWaterDispenserFee}
+                  />
+                </label>
+                <button className="secondary compact" disabled={busy}>
+                  Save rates
+                </button>
+              </form>
+            ))}
           </div>
         </section>
       )}

@@ -166,9 +166,9 @@ export function ParkingModule({
     string | number | null
   >(null);
   const [rentalSearch, setRentalSearch] = useState("");
-  const [rentalTab, setRentalTab] = useState<"active" | "ended" | "outside">(
-    "active",
-  );
+  const [rentalTab, setRentalTab] = useState<
+    "all" | "active" | "ended" | "outside"
+  >("active");
   const [rentalSort, setRentalSort] = useState("lotNumber");
   const [rentalSortDir, setRentalSortDir] = useState<"asc" | "desc">("asc");
   const [rental, setRental] = useState<Row | null>(null);
@@ -198,11 +198,13 @@ export function ParkingModule({
       const hostelMatch =
         hostelFilter === "all" || String(lot?.hostelId || "") === hostelFilter;
       const tabMatch =
-        rentalTab === "outside"
-          ? r.tenantType === "outside"
-          : rentalTab === "active"
-            ? r.status === "active"
-            : r.status !== "active";
+        rentalTab === "all"
+          ? true
+          : rentalTab === "outside"
+            ? r.tenantType === "outside"
+            : rentalTab === "active"
+              ? r.status === "active"
+              : r.status !== "active";
       const search = rentalSearch.trim().toLowerCase();
       const text =
         `${r.tenantName} ${r.contactNumber} ${r.carPlateNumber} ${r.carModel} ${r.lotNumber} ${r.hostelName} ${r.unitNumber}`.toLowerCase();
@@ -261,6 +263,12 @@ export function ParkingModule({
       </section>
       <section className="panel">
         <div className="workspace-tabs">
+          <button
+            className={rentalTab === "all" ? "active" : ""}
+            onClick={() => setRentalTab("all")}
+          >
+            All ({data.parkingRentals.length})
+          </button>
           <button
             className={rentalTab === "active" ? "active" : ""}
             onClick={() => setRentalTab("active")}

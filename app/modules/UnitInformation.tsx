@@ -358,7 +358,7 @@ export function UnitsModule({
 }) {
   const [query, setQuery] = useState("");
   const [activeHostelCode, setActiveHostelCode] = useState<string | null>(
-    null,
+    "all",
   );
   const [genderFilter, setGenderFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -433,6 +433,8 @@ export function UnitsModule({
   const activeGroup = unitsByHostel.find(
     (group) => group.hostel.code === activeHostelCode,
   );
+  const isAllUnitHostels = activeHostelCode === "all";
+  const activeUnits = isAllUnitHostels ? filtered : (activeGroup?.units ?? []);
 
   const canViewOwner = data.currentUser?.permissions?.some(
     (permission: Row) =>
@@ -461,6 +463,12 @@ export function UnitsModule({
       </section>
       <section className="panel">
         <div className="workspace-tabs">
+          <button
+            className={isAllUnitHostels ? "active" : ""}
+            onClick={() => setActiveHostelCode("all")}
+          >
+            All ({filtered.length})
+          </button>
           {unitsByHostel.map(({ hostel, units: hostelUnits }) => (
             <button
               key={hostel.id}
@@ -515,23 +523,28 @@ export function UnitsModule({
         </div>
       </section>
 
-      {activeGroup && (
+      {(activeGroup || isAllUnitHostels) && (
         <section className="panel">
           <div className="section-heading">
             <div>
               <small>HOSTEL</small>
-              <h3>{activeGroup.hostel.name}</h3>
-              <p>{activeGroup.hostel.address || "Address not set"}</p>
+              <h3>{isAllUnitHostels ? "All hostels" : activeGroup!.hostel.name}</h3>
+              <p>
+                {isAllUnitHostels
+                  ? "Every property combined."
+                  : activeGroup!.hostel.address || "Address not set"}
+              </p>
             </div>
             <span>
-              {activeGroup.units.length} unit
-              {activeGroup.units.length === 1 ? "" : "s"}
+              {activeUnits.length} unit
+              {activeUnits.length === 1 ? "" : "s"}
             </span>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
+                  {isAllUnitHostels && <th>Hostel</th>}
                   <th>Unit</th>
                   <th>Agreement / owner</th>
                   <th>Gender</th>
@@ -542,7 +555,7 @@ export function UnitsModule({
                 </tr>
               </thead>
               <tbody>
-                {activeGroup.units.map((u) => {
+                {activeUnits.map((u) => {
                   const o = ownerByUnit.get(u.id);
                   const accessCardCount = data.accessCards.filter(
                     (c) => c.unitId === u.id,
@@ -553,6 +566,7 @@ export function UnitsModule({
 
                   return (
                     <tr key={u.id}>
+                      {isAllUnitHostels && <td>{u.hostelName}</td>}
                       <td>
                         <strong>{u.unitCode}</strong>
                         <small>{u.address || "Address not set"}</small>
@@ -609,11 +623,12 @@ export function UnitsModule({
                     </tr>
                   );
                 })}
-                {!activeGroup.units.length && (
+                {!activeUnits.length && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={isAllUnitHostels ? 8 : 7}>
                       <em>
-                        No units match this view in {activeGroup.hostel.name}.
+                        No units match this view
+                        {activeGroup ? ` in ${activeGroup.hostel.name}` : ""}.
                       </em>
                     </td>
                   </tr>
@@ -623,7 +638,7 @@ export function UnitsModule({
           </div>
         </section>
       )}
-      {!activeGroup && unitsByHostel.length > 0 && (
+      {!activeGroup && !isAllUnitHostels && unitsByHostel.length > 0 && (
         <section className="panel">
           <em>Select a hostel above to view its units.</em>
         </section>
@@ -688,14 +703,27 @@ export function UnitsModule({
                 >
                   <div className="section-title">
                     <div>
-                      <small>UNIT INFORMATION</small>
-                      <h3>Gender, status and surrender</h3>
+                      <small>EDIT UNIT</small>
+                      <h3>Unit name, gender and status</h3>
                     </div>
                     <button className="primary compact" disabled={busy}>
                       Save
                     </button>
                   </div>
                   <div className="form-grid">
+                    <label>
+                      Unit name / code
+                      <input
+                        name="unitCode"
+                        defaultValue={unit.unitCode}
+                        required
+                      />
+                      <small className="field-note">
+                        Edit the name here, then press Save. Renaming also
+                        renames this unit&apos;s room codes (e.g.{" "}
+                        {unit.unitCode}-A1).
+                      </small>
+                    </label>
                     <label>
                       Unit gender
                       <select name="gender" defaultValue={unit.gender}>
@@ -737,6 +765,39 @@ export function UnitsModule({
                     </label>
                   </div>
                 </form>
+                <section className="drawer-section">
+                  <div className="section-title">
+                    <div>
+                      <small>DELETE UNIT</small>
+                      <h3>Remove {unit.unitCode}</h3>
+                      <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#6b7280' }}>
+                        For units added by mistake. A unit with tenants,
+                        reservations, tickets or meter readings can&apos;t be
+                        deleted — surrender it instead.
+                      </p>
+                    </div>
+                    <button
+                      className="secondary compact"
+                      disabled={busy}
+                      style={{ color: '#991b1b', borderColor: '#fecaca' }}
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            `Delete unit ${unit.unitCode}? This also removes its rooms, room codes, access cards and services. This cannot be undone.`,
+                          )
+                        )
+                          return;
+                        const ok = await save(
+                          { action: "unit-delete", unitId: unit.id },
+                          `Unit ${unit.unitCode} deleted`,
+                        );
+                        if (ok) setUnit(null);
+                      }}
+                    >
+                      Delete unit
+                    </button>
+                  </div>
+                </section>
                 <section className="drawer-section">
                   <div className="section-title">
                     <div>

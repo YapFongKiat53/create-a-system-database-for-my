@@ -1,12 +1,6 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
-
-const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
-  "00000000-0000-4000-8000-000000000000";
-
-const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -14,23 +8,16 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-        },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
-    : [],
+  // The app talks to Postgres (Supabase) via DATABASE_URL, not D1 — this
+  // binding is unused dead weight from the original scaffold and its
+  // database_id is a placeholder that doesn't exist in any real account, so
+  // it's left empty rather than pointed at a database nothing reads from.
+  d1_databases: [],
+  // R2 isn't enabled on the Cloudflare account yet, so the bucket binding is
+  // left empty for now — file uploads (payment slips, etc.) return "File
+  // storage is not available yet" until it's turned on and this is restored
+  // to `r2 ? [{ binding: r2, bucket_name: "hostel-project-files" }] : []`.
+  r2_buckets: [],
 };
 
 export default defineConfig(async () => {

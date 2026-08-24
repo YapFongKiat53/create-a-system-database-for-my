@@ -11,7 +11,9 @@
     "start": "vinext start",
     "test": "vinext build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "build:cpanel": "next build && cp -r .next/static .next/standalone/.next/static && ([ -d public ] && cp -r public .next/standalone/public || true)",
+    "start:cpanel": "node .next/standalone/server.js"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
