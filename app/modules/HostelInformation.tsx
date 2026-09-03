@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ATTACHMENT_ACCEPT,
   CourseOptions,
   DEPOSIT_MONTHS,
   Empty,
@@ -27,6 +28,8 @@ import {
   money,
   renameAttachment,
   reservationWeight,
+  roomOptionLabel,
+  roomOptionsFrom,
   titleCase,
   today,
   uploadAttachment,
@@ -2327,10 +2330,14 @@ function ConvertAssignmentForm({
   ]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const vacantBeds = hostelBeds.filter(
-    (bed) =>
-      (!block || blockOf(bed.unitCode) === block) &&
-      (roomType === "any" || bed.roomType === roomType),
+  // Offer rooms, not individual beds — see roomOptionsFrom().
+  const vacantRooms = roomOptionsFrom(
+    hostelBeds.filter(
+      (bed) =>
+        (!block || blockOf(bed.unitCode) === block) &&
+        (roomType === "any" || bed.roomType === roomType),
+    ),
+    () => true,
   );
   // A reservation almost always converts into the exact room it already
   // holds — only special cases (the room got taken, or the student wants a
@@ -2578,7 +2585,7 @@ function ConvertAssignmentForm({
             </label>
           )}
           <label className="wide">
-            Actual room code {hostelId && `— ${vacantBeds.length} available`}
+            Actual room code {hostelId && `— ${vacantRooms.length} available`}
             <select
               name="bedSpaceId"
               required
@@ -2589,13 +2596,13 @@ function ConvertAssignmentForm({
               <option value="">
                 {!hostelId
                   ? "Select a hostel first"
-                  : vacantBeds.length
+                  : vacantRooms.length
                     ? "Select an available room"
                     : "No free rooms match these choices"}
               </option>
-              {vacantBeds.map((bed) => (
-                <option key={bed.id} value={bed.id}>
-                  {bed.legacyCode}
+              {vacantRooms.map((option) => (
+                <option key={option.roomId} value={option.bed.id}>
+                  {roomOptionLabel(option)}
                 </option>
               ))}
             </select>
@@ -2666,10 +2673,14 @@ function ChangeRoomForm({
   ]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const vacantBeds = hostelBeds.filter(
-    (bed: Row) =>
-      (!block || blockOf(bed.unitCode) === block) &&
-      (roomType === "any" || bed.roomType === roomType),
+  // Offer rooms, not individual beds — see roomOptionsFrom().
+  const vacantRooms = roomOptionsFrom(
+    hostelBeds.filter(
+      (bed: Row) =>
+        (!block || blockOf(bed.unitCode) === block) &&
+        (roomType === "any" || bed.roomType === roomType),
+    ),
+    () => true,
   );
   const today = new Date().toISOString().slice(0, 10);
   const effectiveRate = (bed: Row) =>
@@ -2844,7 +2855,7 @@ function ChangeRoomForm({
         </label>
       )}
       <label className="wide">
-        New room code {hostelId && `— ${vacantBeds.length} available`}
+        New room code {hostelId && `— ${vacantRooms.length} available`}
         <select
           name="bedSpaceId"
           required
@@ -2864,13 +2875,13 @@ function ChangeRoomForm({
           <option value="">
             {!hostelId
               ? "Select a hostel first"
-              : vacantBeds.length
+              : vacantRooms.length
                 ? "Select an available room"
                 : "No free rooms match these choices"}
           </option>
-          {vacantBeds.map((bed: Row) => (
-            <option key={bed.id} value={bed.id}>
-              {bed.legacyCode}
+          {vacantRooms.map((option) => (
+            <option key={option.roomId} value={option.bed.id}>
+              {roomOptionLabel(option)}
             </option>
           ))}
         </select>
@@ -3490,7 +3501,7 @@ function ReservationManageDetails({
               <input
                 name="paymentProof"
                 type="file"
-                accept="image/*,.pdf"
+                accept={ATTACHMENT_ACCEPT}
                 required
                 disabled={busy}
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
@@ -3750,10 +3761,14 @@ function ReservationEditor({
   const categories = [
     ...new Set(blockedBeds.map((bed) => String(bed.roomLabel))),
   ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const options = blockedBeds.filter(
-    (bed) =>
-      (roomType === "any" || bed.roomType === roomType) &&
-      (category === "any" || bed.roomLabel === category),
+  // Offer rooms, not individual beds — see roomOptionsFrom().
+  const options = roomOptionsFrom(
+    blockedBeds.filter(
+      (bed) =>
+        (roomType === "any" || bed.roomType === roomType) &&
+        (category === "any" || bed.roomLabel === category),
+    ),
+    () => true,
   );
 
   const goToHousing = () => {
@@ -4219,9 +4234,9 @@ function ReservationEditor({
                       ? "Select an available room"
                       : "No free rooms match these choices"}
                 </option>
-                {options.map((bed) => (
-                  <option key={bed.id} value={bed.id}>
-                    {bed.legacyCode}
+                {options.map((option) => (
+                  <option key={option.roomId} value={option.bed.id}>
+                    {roomOptionLabel(option)}
                   </option>
                 ))}
               </select>

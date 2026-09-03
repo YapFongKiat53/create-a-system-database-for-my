@@ -133,13 +133,25 @@ export type SessionUser = {
   roleName: string;
 };
 
-/** Resolves the signed-in user from the session cookie, or null. */
+/**
+ * Resolves the signed-in user from the session cookie, or null.
+ *
+ * `db` is optional but callers that already hold a client for this request
+ * should pass it. getDb() opens a brand-new pool every call (see the comment
+ * in db/index.ts for why it must not be cached at module scope), and each new
+ * pool pays a fresh TCP+TLS handshake to the pooler — measured at ~600ms from
+ * Malaysia to the ap-northeast-1 pooler, against ~85ms for a query on an
+ * already-open connection. Reusing the request's own client is not the shared
+ * long-lived pool that comment warns about; the client still dies with the
+ * request.
+ */
 export async function getSessionUser(
   request: Request,
+  client?: ReturnType<typeof getDb>,
 ): Promise<SessionUser | null> {
   const token = readSessionCookie(request);
   if (!token) return null;
-  const db = getDb();
+  const db = client ?? getDb();
   const row = (
     await db
       .select({
@@ -166,8 +178,11 @@ export async function getSessionUser(
   return row;
 }
 
-export async function permissionsForRole(roleId: number) {
-  return getDb()
+export async function permissionsForRole(
+  roleId: number,
+  client?: ReturnType<typeof getDb>,
+) {
+  return (client ?? getDb())
     .select()
     .from(rolePermissions)
     .where(eq(rolePermissions.roleId, roleId));

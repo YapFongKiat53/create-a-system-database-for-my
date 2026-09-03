@@ -3,6 +3,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  ATTACHMENT_ACCEPT,
+  DocumentTile,
   Modal,
   ParkingRentalForm,
   SearchIcon,
@@ -330,7 +332,7 @@ function AddUnitForm({
             Upload signed agreement
             <input
               type="file"
-              accept="application/pdf,image/*,.doc,.docx"
+              accept={ATTACHMENT_ACCEPT}
               onChange={(event) =>
                 setAgreementFile(event.target.files?.[0] || null)
               }
@@ -1558,8 +1560,19 @@ function RoomOverviewPanel({
     "monthlyRate",
     roomValue(room, "salesRate", roomValue(room, "rent", "")),
   );
-  const roomPhotos = attachments.filter(
-    (attachment) => attachment.fileType?.startsWith?.("image/") !== false,
+  // A room's files are no longer photos only — floor plans, inventory lists
+  // and inspection reports land here too. Only the pictures can be shown as
+  // thumbnails; everything else needs a click-through tile.
+  const roomPhotos = attachments.filter((attachment) =>
+    String(attachment.contentType || attachment.fileType || "").startsWith(
+      "image/",
+    ),
+  );
+  const roomDocuments = attachments.filter(
+    (attachment) =>
+      !String(attachment.contentType || attachment.fileType || "").startsWith(
+        "image/",
+      ),
   );
 
   const toggleAmenity = (key: string) => {
@@ -1861,8 +1874,8 @@ function RoomOverviewPanel({
             <section className="room-content-card">
               <div className="room-card-heading">
                 <div>
-                  <small>ROOM PHOTOS</small>
-                  <h3>{roomPhotos.length} uploaded</h3>
+                  <small>ROOM PHOTOS &amp; FILES</small>
+                  <h3>{attachments.length} uploaded</h3>
                 </div>
               </div>
               <div className="room-photo-grid">
@@ -1879,15 +1892,24 @@ function RoomOverviewPanel({
                     />
                   </a>
                 ))}
-                {!roomPhotos.length && (
-                  <div className="room-photo-empty">No room photos yet</div>
+                {!attachments.length && (
+                  <div className="room-photo-empty">
+                    No room photos or files yet
+                  </div>
                 )}
               </div>
+              {roomDocuments.length > 0 && (
+                <div className="room-document-list">
+                  {roomDocuments.map((attachment) => (
+                    <DocumentTile key={attachment.id} attachment={attachment} />
+                  ))}
+                </div>
+              )}
               <label className="room-photo-upload">
-                Add room photo
+                Add photo or file
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={ATTACHMENT_ACCEPT}
                   onChange={(event) =>
                     setPhotoFile(event.target.files?.[0] || null)
                   }
@@ -2226,7 +2248,7 @@ function OwnerAgreement({
           Upload signed agreement
           <input
             type="file"
-            accept="application/pdf,image/*,.doc,.docx"
+            accept={ATTACHMENT_ACCEPT}
             onChange={(event) =>
               setAgreementFile(event.target.files?.[0] || null)
             }

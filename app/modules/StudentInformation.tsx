@@ -11,12 +11,19 @@ import {
   SearchIcon,
   Stat,
   StatusPill,
+  DEPOSIT_MONTHS,
   blockOf,
   dateLabel,
+  depositFor,
+  effectiveRateOn,
   formValues,
   money,
+  nextScheduledRate,
   paginationItems,
+  roomOptionLabel,
+  roomOptionsFrom,
   titleCase,
+  today,
 } from "./shared";
 import type { Data, Row } from "./shared";
 
@@ -28,6 +35,988 @@ type SelectedStudentRef = {
 };
 
 const UNASSIGNED_HOSTEL_KEY = "__unassigned__";
+
+// Moving a sitting tenant. Unlike the reservation-stage room change in Hostel
+// Information, this does not restate the move-in charges: what the student was
+// billed on arrival is history, and the new rent takes over through the next
+// monthly invoice instead. The figures still deserve the same treatment the
+// reservation flow gives them — priced off the room, deposit at the house
+// rate, and the change spelled out before it is confirmed.
+function RoomChangeForm({
+  data,
+  student,
+  save,
+  busy,
+  onDone,
+}: {
+  data: Data;
+  student: Row;
+  save: any;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  const current = effectiveRateOn(data.studentRateChanges, student.assignmentId, {
+    monthlyRental: student.monthlyRental,
+    securityDeposit: student.securityDeposit,
+  });
+  const [bed, setBed] = useState<Row | null>(null);
+  // Staff picked a room, so the summary has to name rooms too — echoing the
+  // internal bed code back at them would contradict the picker they just used.
+  const roomCodeOf = (row: Row | null | undefined) =>
+    row ? `${row.unitCode}-${row.roomLabel}` : null;
+  const currentRoomCode =
+    roomCodeOf(
+      data.bedSpaces.find(
+        (row) => String(row.assignmentId) === String(student.assignmentId),
+      ),
+    ) || student.roomCode;
+  const [effectiveDate, setEffectiveDate] = useState("");
+  const [rental, setRental] = useState("");
+  const [deposit, setDeposit] = useState("");
+  const [depositOverridden, setDepositOverridden] = useState(false);
+  const [accessCardDeposit, setAccessCardDeposit] = useState(
+    student.accessCardDeposit === null || student.accessCardDeposit === undefined
+      ? ""
+      : String(student.accessCardDeposit),
+  );
+
+  // Same promotion-window rule the availability picker and conversion use.
+  const rateOfBed = (row: Row | null) => {
+    if (!row) return null;
+    const promoActive =
+      row.promotionRate !== null &&
+      row.promotionRate !== undefined &&
+      (!row.promotionStartDate || row.promotionStartDate <= today) &&
+      (!row.promotionEndDate || row.promotionEndDate >= today);
+    const rate = promoActive
+      ? row.promotionRate
+      : (row.salesRate ?? row.monthlyRental);
+    return rate === null || rate === undefined ? null : Number(rate);
+  };
+
+  const applyRental = (value: string) => {
+    setRental(value);
+    if (!depositOverridden)
+      setDeposit(value === "" ? "" : String(depositFor(Number(value))));
+  };
+
+  const onPickRoom = (row: Row | null) => {
+    setBed(row);
+    const rate = rateOfBed(row);
+    if (rate !== null) applyRental(String(rate));
+  };
+
+  const rentDelta =
+    rental === "" || current.monthlyRental === null
+      ? null
+      : Number(rental) - Number(current.monthlyRental);
+  const depositDelta =
+    deposit === "" || current.securityDeposit === null
+      ? null
+      : Number(deposit) - Number(current.securityDeposit);
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "student-room-change",
+            studentId: student.id,
+            assignmentId: student.assignmentId,
+            salesperson: student.salesperson,
+            ...formValues(e),
+            monthlyRental: rental,
+            securityDeposit: deposit,
+            accessCardDeposit,
+            effectiveDate,
+          },
+          "Student moved to new room",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <p className="wide rate-form-current">
+        Currently in <b>{currentRoomCode || "no room"}</b> at{" "}
+        <b>{money(current.monthlyRental, true)}</b> with{" "}
+        <b>{money(current.securityDeposit, true)}</b> deposit on record.
+      </p>
+
+      <RoomPickerFields
+        data={data}
+        gender={student.gender}
+        onSelect={onPickRoom}
+      />
+
+      <label>
+        Effective date
+        <input
+          name="effectiveDate"
+          type="date"
+          required
+          value={effectiveDate}
+          onChange={(event) => setEffectiveDate(event.target.value)}
+        />
+      </label>
+      <label>
+        New monthly rental
+        <input
+          type="number"
+          min="0"
+          value={rental}
+          onChange={(event) => applyRental(event.target.value)}
+          placeholder="e.g. 1000"
+        />
+        <small className="field-note">
+          {bed
+            ? rateOfBed(bed) === null
+              ? "This room has no price set — enter one."
+              : "Taken from the room's price. Override if a special rate applies."
+            : "Pick a room and its price fills in."}
+        </small>
+      </label>
+      <label>
+        New security deposit
+        <input
+          type="number"
+          min="0"
+          value={deposit}
+          onChange={(event) => {
+            setDeposit(event.target.value);
+            setDepositOverridden(true);
+          }}
+          placeholder="e.g. 3000"
+        />
+        <small className="field-note">
+          {depositOverridden
+            ? `Manually set — the house rate would be ${money(depositFor(Number(rental || 0)), true)}.`
+            : `Automatically ${DEPOSIT_MONTHS} months of the new rent.`}
+        </small>
+      </label>
+      <label>
+        Access card deposit
+        <input
+          type="number"
+          min="0"
+          value={accessCardDeposit}
+          onChange={(event) => setAccessCardDeposit(event.target.value)}
+          placeholder="e.g. 100"
+        />
+      </label>
+      <label>
+        Old room check-out meter
+        <input name="checkOutMeter" type="number" step="0.01" placeholder="e.g. 1000" />
+        <small className="field-note">
+          Leave blank and this student is charged for the old room&apos;s full
+          meter period, including usage after they left.
+        </small>
+      </label>
+      <label>
+        New room check-in meter
+        <input name="checkInMeter" type="number" step="0.01" placeholder="e.g. 1000" />
+        <small className="field-note">
+          Blank means they share the new room&apos;s whole period, including
+          usage before they arrived.
+        </small>
+      </label>
+      <label>
+        New lease end
+        <input name="leaseEndDate" type="date" />
+      </label>
+      <label className="wide">
+        Reason / remarks
+        <input name="reason" placeholder="e.g. Upgrading to a larger room" />
+      </label>
+
+      {(rentDelta !== null || depositDelta !== null) && (
+        <div className="wide move-summary">
+          <small>WHAT CHANGES</small>
+          <ul>
+            <li>
+              Room <b>{currentRoomCode || "—"}</b> →{" "}
+              <b>{roomCodeOf(bed) || "not selected"}</b>
+            </li>
+            {rentDelta !== null && (
+              <li className={rentDelta > 0 ? "up" : rentDelta < 0 ? "down" : ""}>
+                Rent {money(current.monthlyRental, true)} →{" "}
+                <b>{money(Number(rental), true)}</b>
+                {rentDelta === 0
+                  ? " (no change)"
+                  : rentDelta > 0
+                    ? ` · up ${money(rentDelta, true)} a month`
+                    : ` · down ${money(-rentDelta, true)} a month`}
+              </li>
+            )}
+            {depositDelta !== null && (
+              <li
+                className={
+                  depositDelta > 0 ? "up" : depositDelta < 0 ? "down" : ""
+                }
+              >
+                Deposit on record {money(current.securityDeposit, true)} →{" "}
+                <b>{money(Number(deposit), true)}</b>
+                {depositDelta === 0
+                  ? " (no change)"
+                  : depositDelta > 0
+                    ? ` · up ${money(depositDelta, true)}`
+                    : ` · down ${money(-depositDelta, true)}`}
+              </li>
+            )}
+          </ul>
+          {depositDelta !== null && depositDelta !== 0 && (
+            <p className="field-note">
+              The {money(Math.abs(depositDelta), true)} difference
+              {depositDelta > 0
+                ? " is added to the next monthly invoice as a deposit top-up"
+                : " is credited back on the next monthly invoice"}
+              . The deposit already held stays held — the student is never
+              asked for a second full deposit.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy || !effectiveDate}>
+          Confirm room change
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Deposit tracks rent at the house rate unless someone deliberately breaks
+// the link, matching how every other part of the system derives it. Leaving
+// a field blank carries the current figure forward rather than zeroing it.
+function RateChangeForm({
+  data,
+  student,
+  save,
+  busy,
+  onDone,
+}: {
+  data: Data;
+  student: Row;
+  save: any;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  const current = effectiveRateOn(data.studentRateChanges, student.assignmentId, {
+    monthlyRental: student.monthlyRental,
+    securityDeposit: student.securityDeposit,
+  });
+  const [effectiveDate, setEffectiveDate] = useState("");
+  const [rental, setRental] = useState(
+    current.monthlyRental === null ? "" : String(current.monthlyRental),
+  );
+  const [deposit, setDeposit] = useState(
+    current.securityDeposit === null ? "" : String(current.securityDeposit),
+  );
+  const [depositOverridden, setDepositOverridden] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const applyRental = (value: string) => {
+    setRental(value);
+    if (!depositOverridden)
+      setDeposit(value === "" ? "" : String(depositFor(Number(value))));
+  };
+
+  const rentDelta =
+    rental === "" || current.monthlyRental === null
+      ? null
+      : Number(rental) - Number(current.monthlyRental);
+  const backdated = effectiveDate !== "" && effectiveDate <= today;
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "student-rate-change",
+            assignmentId: student.assignmentId,
+            effectiveDate,
+            monthlyRental: rental,
+            securityDeposit: deposit,
+            reason,
+          },
+          "Rate change scheduled",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <p className="wide rate-form-current">
+        Currently billing at <b>{money(current.monthlyRental, true)}</b> with{" "}
+        <b>{money(current.securityDeposit, true)}</b> deposit on record.
+      </p>
+      <label>
+        Effective date
+        <input
+          name="effectiveDate"
+          type="date"
+          required
+          value={effectiveDate}
+          onChange={(event) => setEffectiveDate(event.target.value)}
+        />
+        <small className="field-note">
+          {backdated
+            ? "This date has passed — the change counts as already in effect and cannot be removed afterwards."
+            : "The first billing cut-off on or after this date uses the new rate."}
+        </small>
+      </label>
+      <label>
+        New monthly rental
+        <input
+          type="number"
+          min="0"
+          value={rental}
+          onChange={(event) => applyRental(event.target.value)}
+          placeholder="e.g. 1000"
+        />
+        {rentDelta !== null && rentDelta !== 0 && (
+          <small
+            className={`field-note ${rentDelta > 0 ? "rate-up" : "rate-down"}`}
+          >
+            {rentDelta > 0 ? "Increase of " : "Decrease of "}
+            {money(Math.abs(rentDelta), true)} per month
+          </small>
+        )}
+      </label>
+      <label>
+        Security deposit
+        <input
+          type="number"
+          min="0"
+          value={deposit}
+          onChange={(event) => {
+            setDeposit(event.target.value);
+            setDepositOverridden(true);
+          }}
+          placeholder="e.g. 3000"
+        />
+        <small className="field-note">
+          {depositOverridden
+            ? `Manually set — the house rate would be ${money(depositFor(Number(rental || 0)), true)}.`
+            : `Automatically ${DEPOSIT_MONTHS} months of the new rent.`}
+        </small>
+      </label>
+      <label className="wide">
+        Reason
+        <input
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Short-term renewal, promotion ended..."
+        />
+      </label>
+      <p className="wide field-note">
+        Only the difference between the deposit held and the new figure is
+        billed — it lands on the next monthly invoice as a deposit top-up, or
+        as a credit if the new figure is lower. The student is never charged a
+        second full deposit.
+      </p>
+      <div className="form-actions wide">
+        <button className="primary" disabled={busy || !effectiveDate}>
+          Schedule change
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// A rate change is scheduled, not applied — it sits beside the tenancy and
+// the monthly billing run picks up whichever one is in effect on the cut-off
+// date. That makes the headline figure here the important one: it is what
+// the next invoice will actually charge, which is not necessarily the rent
+// recorded on the tenancy itself.
+function StudentRateChanges({
+  data,
+  student,
+  save,
+  busy,
+  onAdd,
+}: {
+  data: Data;
+  student: Row;
+  save: any;
+  busy: boolean;
+  onAdd: () => void;
+}) {
+  const changes = data.studentRateChanges
+    .filter(
+      (change) => String(change.assignmentId) === String(student.assignmentId),
+    )
+    .sort((a, b) =>
+      String(b.effectiveDate).localeCompare(String(a.effectiveDate)),
+    );
+  const current = effectiveRateOn(data.studentRateChanges, student.assignmentId, {
+    monthlyRental: student.monthlyRental,
+    securityDeposit: student.securityDeposit,
+  });
+  const upcoming = nextScheduledRate(
+    data.studentRateChanges,
+    student.assignmentId,
+  );
+  // Only the newest change on or before today is the one billing reads; any
+  // older one has been superseded even though it still shows in the history.
+  const liveChangeId = changes.find(
+    (change) => String(change.effectiveDate) <= today,
+  )?.id;
+
+  const removeChange = async (change: Row) => {
+    if (
+      !window.confirm(
+        `Remove the rate change effective ${dateLabel(change.effectiveDate)}? This cannot be undone.`,
+      )
+    )
+      return;
+    await save(
+      { action: "student-rate-change-delete", changeId: change.id },
+      "Scheduled rate change removed",
+    );
+  };
+
+  if (!student.assignmentId)
+    return (
+      <section className="drawer-section">
+        <div className="section-title">
+          <div>
+            <small>RATE CHANGE</small>
+            <h3>Effective-dated rental adjustments</h3>
+          </div>
+        </div>
+        <p className="empty-copy">
+          No active room assignment yet — assign a room first.
+        </p>
+      </section>
+    );
+
+  return (
+    <section className="drawer-section">
+      <div className="section-title">
+        <div>
+          <small>RATE CHANGE</small>
+          <h3>What this student is billed, and when it changes</h3>
+        </div>
+        <button className="secondary compact" onClick={onAdd}>
+          + Rate change
+        </button>
+      </div>
+
+      <div className="rate-now">
+        <div>
+          <small>BILLING AT</small>
+          <b>{money(current.monthlyRental, true)}</b>
+          <span>
+            {current.source === "rate-change"
+              ? `Rate change effective ${dateLabel(current.effectiveDate)}`
+              : "Rate recorded on the tenancy"}
+          </span>
+        </div>
+        <div>
+          <small>DEPOSIT ON RECORD</small>
+          <b>{money(current.securityDeposit, true)}</b>
+          <span>
+            {current.securityDeposit && current.monthlyRental
+              ? `${(Number(current.securityDeposit) / Number(current.monthlyRental)).toFixed(1)} months of rent`
+              : "Not set"}
+          </span>
+        </div>
+        <div>
+          <small>NEXT CHANGE</small>
+          <b>
+            {upcoming ? money(upcoming.monthlyRental, true) : "None scheduled"}
+          </b>
+          <span>
+            {upcoming
+              ? `From ${dateLabel(upcoming.effectiveDate)}`
+              : "Current rate continues"}
+          </span>
+        </div>
+      </div>
+
+      {changes.length ? (
+        <div className="rate-timeline">
+          {changes.map((change) => {
+            const scheduled = String(change.effectiveDate) > today;
+            const live = String(change.id) === String(liveChangeId);
+            return (
+              <div
+                key={change.id}
+                className={`rate-entry${live ? " live" : ""}${scheduled ? " scheduled" : ""}`}
+              >
+                <span className="rate-entry-date">
+                  <b>{dateLabel(change.effectiveDate)}</b>
+                  <small>
+                    {scheduled
+                      ? "Scheduled"
+                      : live
+                        ? "In effect now"
+                        : "Superseded"}
+                  </small>
+                </span>
+                <span className="rate-entry-figures">
+                  <b>
+                    {change.monthlyRental === null
+                      ? "Rent unchanged"
+                      : `${money(change.monthlyRental, true)} rent`}
+                  </b>
+                  <small>
+                    {change.securityDeposit === null
+                      ? "Deposit unchanged"
+                      : `${money(change.securityDeposit, true)} deposit`}
+                    {change.reason ? ` · ${change.reason}` : ""}
+                  </small>
+                </span>
+                {scheduled ? (
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    disabled={busy}
+                    onClick={() => removeChange(change)}
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <span className="muted">Locked</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="empty-copy">
+          No rate changes yet — this student is billed at the rent recorded on
+          their tenancy.
+        </p>
+      )}
+
+      <p className="field-note">
+        A rate change does not rewrite the tenancy or any invoice already
+        issued. The monthly billing run applies whichever change is in effect
+        on its cut-off date. Only a change that has not taken effect yet can be
+        removed.
+      </p>
+    </section>
+  );
+}
+
+// Everything this student has ever been charged and everything they have
+// actually paid, in one place. The figures are read straight from Finance's
+// own records — invoices, their charge lines and their receipts — so this is
+// a per-student view of Finance, never a second set of books. Parking is
+// listed separately because an outside-tenant style rental is billed on its
+// own and never appears as an invoice line.
+function StudentBilling({
+  data,
+  student,
+  openInvoiceId,
+  setOpenInvoiceId,
+}: {
+  data: Data;
+  student: Row;
+  openInvoiceId: string | number | null;
+  setOpenInvoiceId: (id: string | number | null) => void;
+}) {
+  const invoices = data.invoices.filter(
+    (invoice) => String(invoice.studentId) === String(student.id),
+  );
+  // A payment counts as money in hand once Finance has verified it; the
+  // verified figure wins because that is the amount that actually landed.
+  const receivedOn = (invoice: Row) =>
+    (invoice.payments || [])
+      .filter((payment: Row) => payment.status === "verified")
+      .reduce(
+        (sum: number, payment: Row) =>
+          sum + Number(payment.verifiedAmount ?? payment.amount ?? 0),
+        0,
+      );
+  const pendingOn = (invoice: Row) =>
+    (invoice.payments || [])
+      .filter((payment: Row) => payment.status !== "verified")
+      .reduce(
+        (sum: number, payment: Row) => sum + Number(payment.amount || 0),
+        0,
+      );
+
+  const totalBilled = invoices.reduce(
+    (sum, invoice) => sum + Number(invoice.totalAmount || 0),
+    0,
+  );
+  const totalReceived = invoices.reduce(
+    (sum, invoice) => sum + receivedOn(invoice),
+    0,
+  );
+  const totalPending = invoices.reduce(
+    (sum, invoice) => sum + pendingOn(invoice),
+    0,
+  );
+  const balance = totalBilled - totalReceived;
+
+  // Money arrives against one invoice but settles the account as a whole: an
+  // overpayment on an early bill covers a later one. Billing no longer emits a
+  // credit line for that (doing so let the same ringgit reduce the balance
+  // twice), so the surplus is applied here instead — oldest invoice first,
+  // which is both how the money would be applied in practice and what stops a
+  // covered invoice from looking unpaid.
+  const settledOf = new Map<string, number>();
+  let creditPool = totalReceived;
+  for (const invoice of [...invoices].sort(
+    (a, b) => Number(a.id) - Number(b.id),
+  )) {
+    const due = Math.max(0, Number(invoice.totalAmount || 0));
+    const applied = Math.min(creditPool, due);
+    creditPool -= applied;
+    settledOf.set(String(invoice.id), applied);
+  }
+  // Anything left over has not been claimed by any invoice yet.
+  const unappliedCredit = creditPool;
+
+  // Why the rent on an invoice changed. A room change closes one tenancy and
+  // opens another, so the rent and deposit only make sense read against the
+  // room that was actually held at the time.
+  const tenancies = [
+    ...(data.pastTenancies || []).filter(
+      (row) => String(row.studentId) === String(student.id),
+    ),
+    {
+      id: student.assignmentId,
+      roomCode:
+        (() => {
+          const bed = data.bedSpaces.find(
+            (row) => String(row.assignmentId) === String(student.assignmentId),
+          );
+          return bed ? `${bed.unitCode}-${bed.roomLabel}` : student.roomCode;
+        })(),
+      hostelName: student.hostelName,
+      monthlyRental: student.monthlyRental,
+      securityDeposit: student.securityDeposit,
+      checkInDate: student.checkInDate,
+      checkOutDate: null,
+      status: "active",
+    },
+  ]
+    .filter((row) => row.id)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const depositChanges = (data.depositAdjustments || []).filter((row) =>
+    tenancies.some((t) => String(t.id) === String(row.assignmentId)),
+  );
+
+  const parking = data.parkingRentals.filter(
+    (rental) => String(rental.studentId) === String(student.id),
+  );
+
+  const slipsFor = (paymentId: string | number) =>
+    data.attachments.filter(
+      (attachment) =>
+        attachment.contextType === "payment-proof" &&
+        String(attachment.recordId) === String(paymentId),
+    );
+
+  return (
+    <section className="drawer-section">
+      <div className="section-title">
+        <div>
+          <small>BILLING INFORMATION</small>
+          <h3>Everything charged and everything paid</h3>
+        </div>
+      </div>
+
+      <div className="billing-summary">
+        <div>
+          <small>TOTAL BILLED</small>
+          <b>{money(totalBilled, true)}</b>
+          <span>
+            {invoices.length} invoice{invoices.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div>
+          <small>RECEIVED</small>
+          <b className="figure-in">{money(totalReceived, true)}</b>
+          <span>
+            {totalPending
+              ? `${money(totalPending, true)} awaiting verification`
+              : "All payments verified"}
+          </span>
+        </div>
+        <div>
+          <small>{balance < 0 ? "CREDIT" : "OUTSTANDING"}</small>
+          <b className={balance > 0 ? "figure-out" : "figure-in"}>
+            {money(Math.abs(balance), true)}
+          </b>
+          <span>
+            {balance > 0
+              ? "Still owed by the student"
+              : balance < 0
+                ? "Carries to the next invoice"
+                : "Fully settled"}
+          </span>
+        </div>
+      </div>
+
+      {unappliedCredit > 0.005 && (
+        <p className="billing-credit-note">
+          <b>{money(unappliedCredit, true)}</b> of this student&apos;s payments
+          is not claimed by any invoice yet — it settles the next one
+          automatically, so nothing needs to be recorded again.
+        </p>
+      )}
+
+      {invoices.length ? (
+        <div className="billing-invoice-list">
+          {invoices.map((invoice) => {
+            const received = receivedOn(invoice);
+            const pending = pendingOn(invoice);
+            // Settled by the account, not just by payments booked against
+            // this one invoice — otherwise a bill covered by an earlier
+            // overpayment reads as outstanding.
+            const settled = settledOf.get(String(invoice.id)) || 0;
+            const owed = Number(invoice.totalAmount || 0) - settled;
+            const coveredElsewhere = settled - received;
+            const open = String(openInvoiceId) === String(invoice.id);
+            const items = invoice.items || [];
+            const payments = invoice.payments || [];
+            return (
+              <article
+                key={invoice.id}
+                className={`billing-invoice${open ? " open" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="billing-invoice-head"
+                  aria-expanded={open}
+                  onClick={() => setOpenInvoiceId(open ? null : invoice.id)}
+                >
+                  <span className="billing-invoice-id">
+                    <code>{invoice.invoiceNo}</code>
+                    <small>
+                      {invoice.cycleId ? "Monthly billing" : "Move-in costs"}
+                      {invoice.roomCode ? ` · ${invoice.roomCode}` : ""}
+                      {invoice.dueDate
+                        ? ` · Due ${dateLabel(invoice.dueDate)}`
+                        : ""}
+                    </small>
+                  </span>
+                  <span className="billing-invoice-figures">
+                    <b>{money(invoice.totalAmount, true)}</b>
+                    <small>
+                      {money(settled, true)} settled
+                      {coveredElsewhere > 0.005
+                        ? ` (${money(coveredElsewhere, true)} from earlier payments)`
+                        : ""}
+                      {owed > 0.005 ? ` · ${money(owed, true)} owing` : ""}
+                    </small>
+                  </span>
+                  {/* Reads the account position, not the stored status: an
+                      invoice covered by an earlier overpayment is settled even
+                      though no payment was booked against it directly. */}
+                  <StatusPill
+                    status={
+                      owed <= 0.005
+                        ? "paid"
+                        : settled > 0.005
+                          ? "partial"
+                          : "unpaid"
+                    }
+                  />
+                  <span className="billing-chevron" aria-hidden="true">
+                    {open ? "−" : "+"}
+                  </span>
+                </button>
+
+                {open && (
+                  <div className="billing-invoice-body">
+                    <h4>What was charged</h4>
+                    {items.length ? (
+                      <table className="billing-mini-table">
+                        <tbody>
+                          {items.map((item: Row) => (
+                            <tr key={item.id}>
+                              <td>{item.description}</td>
+                              <td className="num">
+                                {money(item.amount, true)}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="billing-total-row">
+                            <td>Invoice total</td>
+                            <td className="num">
+                              {money(invoice.totalAmount, true)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="empty-copy">
+                        No charge lines recorded on this invoice.
+                      </p>
+                    )}
+
+                    <h4>
+                      Payments received
+                      {pending
+                        ? ` · ${money(pending, true)} awaiting verification`
+                        : ""}
+                    </h4>
+                    {payments.length ? (
+                      <div className="billing-payment-list">
+                        {payments.map((payment: Row) => {
+                          const slips = slipsFor(payment.id);
+                          const verified = payment.status === "verified";
+                          return (
+                            <div key={payment.id} className="billing-payment">
+                              <span className="billing-payment-amount">
+                                <b>
+                                  {money(
+                                    verified
+                                      ? (payment.verifiedAmount ??
+                                        payment.amount)
+                                      : payment.amount,
+                                    true,
+                                  )}
+                                </b>
+                                {verified &&
+                                  payment.verifiedAmount !== null &&
+                                  Number(payment.verifiedAmount) !==
+                                    Number(payment.amount) && (
+                                    <small>
+                                      submitted {money(payment.amount, true)}
+                                    </small>
+                                  )}
+                              </span>
+                              <span className="billing-payment-meta">
+                                <b>
+                                  {payment.receiptNo || "Receipt not issued"}
+                                </b>
+                                <small>
+                                  {dateLabel(
+                                    payment.verifiedAt || payment.submittedAt,
+                                  )}
+                                  {payment.actualReference || payment.reference
+                                    ? ` · ${payment.actualReference || payment.reference}`
+                                    : ""}
+                                  {payment.verifiedBy
+                                    ? ` · verified by ${payment.verifiedBy}`
+                                    : ""}
+                                </small>
+                              </span>
+                              <StatusPill status={payment.status} />
+                              {slips.length ? (
+                                <a
+                                  className="secondary compact"
+                                  href={`/api/files?id=${slips[0].id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  View slip
+                                </a>
+                              ) : (
+                                <span className="muted">No slip</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="empty-copy">
+                        Nothing has been paid against this invoice yet.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="empty-copy">
+          No invoices for this student yet. Move-in costs appear here once the
+          reservation is converted; monthly charges appear once a billing cycle
+          is run.
+        </p>
+      )}
+
+      {tenancies.length > 1 && (
+        <>
+          <h4>Rooms held — what each invoice was billed at</h4>
+          <div className="tenancy-timeline">
+            {tenancies.map((row, index) => {
+              const previous = index > 0 ? tenancies[index - 1] : null;
+              const rentDelta =
+                previous && previous.monthlyRental !== null
+                  ? Number(row.monthlyRental || 0) -
+                    Number(previous.monthlyRental || 0)
+                  : null;
+              const change = depositChanges.find(
+                (item) => String(item.assignmentId) === String(row.id),
+              );
+              return (
+                <div
+                  key={row.id}
+                  className={`tenancy-entry${row.status === "active" ? " current" : ""}`}
+                >
+                  <span className="tenancy-when">
+                    <b>{row.roomCode || "Room not set"}</b>
+                    <small>
+                      {dateLabel(row.checkInDate)} →{" "}
+                      {row.checkOutDate
+                        ? dateLabel(row.checkOutDate)
+                        : "current"}
+                    </small>
+                  </span>
+                  <span className="tenancy-figures">
+                    <b>{money(row.monthlyRental, true)} a month</b>
+                    <small>
+                      {money(row.securityDeposit, true)} deposit
+                      {rentDelta !== null && rentDelta !== 0
+                        ? ` · rent ${rentDelta > 0 ? "up" : "down"} ${money(Math.abs(rentDelta), true)}`
+                        : ""}
+                      {change
+                        ? ` · deposit ${Number(change.amount) > 0 ? "top-up" : "refund"} ${money(Math.abs(Number(change.amount)), true)}${change.invoiceNo ? ` on ${change.invoiceNo}` : " on the next invoice"}`
+                        : ""}
+                    </small>
+                  </span>
+                  <StatusPill
+                    status={row.status === "active" ? "active" : "moved-out"}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {parking.length > 0 && (
+        <>
+          <h4>Parking — billed separately</h4>
+          <div className="compact-list">
+            {parking.map((rental) => (
+              <span key={rental.id}>
+                <b>
+                  {money(rental.monthlyRental, true)} ·{" "}
+                  {titleCase(rental.billingFrequency || "monthly")}
+                </b>
+                <small>
+                  {rental.carPlateNumber || "No plate recorded"} ·{" "}
+                  {titleCase(rental.paymentStatus || "not-due")}
+                  {rental.depositAmount
+                    ? ` · deposit ${money(rental.depositAmount, true)} held`
+                    : ""}
+                </small>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      <p className="field-note">
+        These figures come straight from Finance. To record or verify a payment,
+        open the invoice in Finance — this tab is a read-only view.
+      </p>
+    </section>
+  );
+}
 const PAGE_SIZE = 20;
 
 function normaliseStatus(value: unknown, fallback = "") {
@@ -132,9 +1121,13 @@ function isUnassignedStudent(student: Row, hostels: Row[]) {
 function RoomPickerFields({
   data,
   gender,
+  onSelect,
 }: {
   data: Data;
   gender?: string;
+  // Lets a caller price the move off the chosen room without duplicating the
+  // cascade's filtering rules.
+  onSelect?: (bed: Row | null) => void;
 }) {
   const [hostelId, setHostelId] = useState("");
   const [roomType, setRoomType] = useState("any");
@@ -176,10 +1169,15 @@ function RoomPickerFields({
   const categories = [
     ...new Set(blockedBeds.map((bed) => String(bed.roomLabel))),
   ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const options = blockedBeds.filter(
-    (bed) =>
-      (roomType === "any" || bed.roomType === roomType) &&
-      (category === "any" || bed.roomLabel === category),
+  // Rooms, not beds — see roomOptionsFrom(). isSelectable already ran when
+  // hostelBeds was built, so every bed reaching here is takeable.
+  const options = roomOptionsFrom(
+    blockedBeds.filter(
+      (bed) =>
+        (roomType === "any" || bed.roomType === roomType) &&
+        (category === "any" || bed.roomLabel === category),
+    ),
+    () => true,
   );
 
   return (
@@ -265,7 +1263,14 @@ function RoomPickerFields({
           required
           disabled={!hostelId}
           value={bedSpaceId}
-          onChange={(event) => setBedSpaceId(event.target.value)}
+          onChange={(event) => {
+            setBedSpaceId(event.target.value);
+            onSelect?.(
+              options.find(
+                (option) => String(option.bed.id) === event.target.value,
+              )?.bed || null,
+            );
+          }}
         >
           <option value="">
             {!hostelId
@@ -274,9 +1279,9 @@ function RoomPickerFields({
                 ? "Select an available room"
                 : "No free rooms match these choices"}
           </option>
-          {options.map((bed) => (
-            <option key={bed.id} value={bed.id}>
-              {bed.legacyCode}
+          {options.map((option) => (
+            <option key={option.roomId} value={option.bed.id}>
+              {roomOptionLabel(option)}
             </option>
           ))}
         </select>
@@ -385,7 +1390,11 @@ export function StudentsModule({
   const [addAssignRoom, setAddAssignRoom] = useState(false);
   const [editSchool, setEditSchool] = useState<Row | null>(null);
   const [editCourse, setEditCourse] = useState<Row | null>(null);
-  const [drawerRecordsTab, setDrawerRecordsTab] = useState("login");
+  const [drawerRecordsTab, setDrawerRecordsTab] = useState("profile");
+  // Which invoice's charge lines and receipts are expanded in the billing tab.
+  const [openInvoiceId, setOpenInvoiceId] = useState<string | number | null>(
+    null,
+  );
   // Jump back to the first records tab whenever a different student's
   // drawer opens, without the extra render a useEffect would cost here.
   const [drawerRecordsStudentId, setDrawerRecordsStudentId] = useState(
@@ -393,7 +1402,7 @@ export function StudentsModule({
   );
   if (selectedStudentRef?.studentId !== drawerRecordsStudentId) {
     setDrawerRecordsStudentId(selectedStudentRef?.studentId);
-    setDrawerRecordsTab("login");
+    setDrawerRecordsTab("profile");
   }
 
   const tenantRole = data.roles.find((role) => role.roleKey === "tenant");
@@ -905,7 +1914,31 @@ export function StudentsModule({
                               {item.nationality || "Nationality not set"}
                             </small>
                           </td>
-                          <td>{money(item.monthlyRental)}</td>
+                          <td>
+                            {(() => {
+                              // Show what billing will actually charge, not
+                              // the tenancy figure a rate change has already
+                              // superseded.
+                              const rate = effectiveRateOn(
+                                data.studentRateChanges,
+                                item.assignmentId,
+                                {
+                                  monthlyRental: item.monthlyRental,
+                                  securityDeposit: item.securityDeposit,
+                                },
+                              );
+                              return (
+                                <>
+                                  {money(rate.monthlyRental)}
+                                  {rate.source === "rate-change" && (
+                                    <small>
+                                      Rate change {dateLabel(rate.effectiveDate)}
+                                    </small>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </td>
                           <td>
                             <strong className="lease-end">
                               {dateLabel(item.leaseEndDate)}
@@ -1036,6 +2069,46 @@ export function StudentsModule({
               </div>
               <button onClick={() => setSelectedStudentRef(null)}>×</button>
             </div>
+
+            <div className="workspace-tabs sticky-tabs drawer-records-tabs">
+              <button
+                type="button"
+                className={drawerRecordsTab === "profile" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("profile")}
+              >
+                Personal &amp; tenancy
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "login" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("login")}
+              >
+                Tenant login credentials
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "billing" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("billing")}
+              >
+                Billing information
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "rate" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("rate")}
+              >
+                Rate change
+              </button>
+              <button
+                type="button"
+                className={drawerRecordsTab === "room" ? "active" : ""}
+                onClick={() => setDrawerRecordsTab("room")}
+              >
+                Change room
+              </button>
+            </div>
+
+            {drawerRecordsTab === "profile" && (
             <form
               className="drawer-section"
               onSubmit={(e) => {
@@ -1167,6 +2240,28 @@ export function StudentsModule({
                           type="number"
                           defaultValue={student.monthlyRental ?? ""}
                         />
+                        {(() => {
+                          // Editing this field changes the tenancy's base
+                          // rent, which an active rate change overrides — say
+                          // so, or the saved figure looks like it did nothing.
+                          const rate = effectiveRateOn(
+                            data.studentRateChanges,
+                            student.assignmentId,
+                            {
+                              monthlyRental: student.monthlyRental,
+                              securityDeposit: student.securityDeposit,
+                            },
+                          );
+                          if (rate.source !== "rate-change") return null;
+                          return (
+                            <small className="field-note rate-up">
+                              A rate change effective{" "}
+                              {dateLabel(rate.effectiveDate)} overrides this —
+                              billing charges {money(rate.monthlyRental, true)}.
+                              Edit it in the Rate change tab.
+                            </small>
+                          );
+                        })()}
                       </label>
                       <label>
                         Security deposit
@@ -1272,25 +2367,7 @@ export function StudentsModule({
               </div>
 
               <div className="drawer-subsection">
-                <div className="subsection-head">
-                  <h4>Academic information</h4>
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      className="secondary compact"
-                      onClick={() => setModal("schools")}
-                    >
-                      Manage schools
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary compact"
-                      onClick={() => setModal("courses")}
-                    >
-                      Manage courses
-                    </button>
-                  </div>
-                </div>
+
                 <div className="form-grid">
                   <label>
                     School
@@ -1353,37 +2430,7 @@ export function StudentsModule({
                 </div>
               </div>
             </form>
-
-            <div className="workspace-tabs sticky-tabs drawer-records-tabs">
-              <button
-                type="button"
-                className={drawerRecordsTab === "login" ? "active" : ""}
-                onClick={() => setDrawerRecordsTab("login")}
-              >
-                Tenant login credentials
-              </button>
-              <button
-                type="button"
-                className={drawerRecordsTab === "billing" ? "active" : ""}
-                onClick={() => setDrawerRecordsTab("billing")}
-              >
-                Billing information
-              </button>
-              <button
-                type="button"
-                className={drawerRecordsTab === "rate" ? "active" : ""}
-                onClick={() => setDrawerRecordsTab("rate")}
-              >
-                Rate change
-              </button>
-              <button
-                type="button"
-                className={drawerRecordsTab === "room" ? "active" : ""}
-                onClick={() => setDrawerRecordsTab("room")}
-              >
-                Change room
-              </button>
-            </div>
+            )}
 
             {drawerRecordsTab === "login" && (
               <section className="drawer-section">
@@ -1451,85 +2498,22 @@ export function StudentsModule({
             )}
 
             {drawerRecordsTab === "billing" && (
-              <section className="drawer-section">
-                <div className="section-title">
-                  <div>
-                    <small>BILLING INFORMATION</small>
-                    <h3>Current outstanding and payment breakdown</h3>
-                  </div>
-                </div>
-                <div className="compact-list">
-                  {data.invoices
-                    .filter((invoice) => String(invoice.studentId) === String(student.id))
-                    .slice(0, 12)
-                    .map((invoice) => (
-                      <span key={invoice.id}>
-                        <code>{invoice.invoiceNo}</code>
-                        <b>
-                          {(invoice.items || [])
-                            .map((item: Row) => item.description)
-                            .join(", ") || "No items"}
-                        </b>
-                        <small>
-                          {money(
-                            Number(invoice.totalAmount) -
-                            Number(invoice.amountPaid),
-                            true,
-                          )}{" "}
-                          outstanding
-                        </small>
-                      </span>
-                    ))}
-                  {!data.invoices.some(
-                    (invoice) => String(invoice.studentId) === String(student.id),
-                  ) && (
-                      <p className="empty-copy">
-                        No billing records for this student yet.
-                      </p>
-                    )}
-                </div>
-              </section>
+              <StudentBilling
+                data={data}
+                student={student}
+                openInvoiceId={openInvoiceId}
+                setOpenInvoiceId={setOpenInvoiceId}
+              />
             )}
 
             {drawerRecordsTab === "rate" && (
-              <section className="drawer-section">
-                <div className="section-title">
-                  <div>
-                    <small>RATE CHANGE</small>
-                    <h3>Effective-dated rental adjustments</h3>
-                  </div>
-                  {student.assignmentId && (
-                    <button
-                      className="secondary compact"
-                      onClick={() => setModal("rate")}
-                    >
-                      + Rate change
-                    </button>
-                  )}
-                </div>
-                {student.assignmentId ? (
-                  <div className="compact-list">
-                    {data.studentRateChanges
-                      .filter((r) => r.assignmentId === student.assignmentId)
-                      .map((r) => (
-                        <span key={r.id}>
-                          <b>Effective {dateLabel(r.effectiveDate)}</b>
-                          <small>
-                            Rental {money(r.monthlyRental)} · Deposit{" "}
-                            {money(r.securityDeposit)} · {r.reason}
-                          </small>
-                        </span>
-                      ))}
-                    {!data.studentRateChanges.some(
-                      (r) => r.assignmentId === student.assignmentId,
-                    ) && <p className="empty-copy">No scheduled rate changes.</p>}
-                  </div>
-                ) : (
-                  <p className="empty-copy">
-                    No active room assignment yet — assign a room first.
-                  </p>
-                )}
-              </section>
+              <StudentRateChanges
+                data={data}
+                student={student}
+                save={save}
+                busy={busy}
+                onAdd={() => setModal("rate")}
+              />
             )}
 
             {drawerRecordsTab === "room" && (
@@ -2007,50 +2991,18 @@ export function StudentsModule({
 
       {modal === "rate" && student && (
         <Modal
-          title="Effective-dated rate change"
+          title="Schedule a rate change"
           kicker={student.fullName}
+          description="Takes effect on the date you choose. Invoices already issued are never restated."
           onClose={() => setModal("")}
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                {
-                  action: "student-rate-change",
-                  assignmentId: student.assignmentId,
-                  ...formValues(e),
-                },
-                "Rate change scheduled",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label>
-              Effective date
-              <input name="effectiveDate" type="date" required placeholder="e.g. 2026-01-01" />
-            </label>
-            <label>
-              Monthly rental
-              <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
-            </label>
-            <label>
-              Security deposit
-              <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
-            </label>
-            <label className="wide">
-              Reason
-              <input
-                name="reason"
-                placeholder="e.g. Short-term renewal, promotion ended..."
-              />
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Schedule change
-              </button>
-            </div>
-          </form>
+          <RateChangeForm
+            data={data}
+            student={student}
+            save={save}
+            busy={busy}
+            onDone={() => setModal("")}
+          />
         </Modal>
       )}
       {modal === "assign" && student && (
@@ -2076,69 +3028,20 @@ export function StudentsModule({
         <Modal
           title="Manual room change"
           kicker={student.fullName}
-          description="Narrow down by hostel, block and category to find a currently vacant room. The old room becomes vacant and the selected room becomes occupied from the effective date."
+          description="For a tenant moving mid-stay. The old room is released and the new one is taken from the effective date."
           onClose={() => setModal("")}
           wide
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                {
-                  action: "student-room-change",
-                  studentId: student.id,
-                  assignmentId: student.assignmentId,
-                  salesperson: student.salesperson,
-                  ...formValues(e),
-                },
-                "Student moved to new room",
-              );
-              if (ok) {
-                setModal("");
-                setSelectedStudentRef(null);
-              }
+          <RoomChangeForm
+            data={data}
+            student={student}
+            save={save}
+            busy={busy}
+            onDone={() => {
+              setModal("");
+              setSelectedStudentRef(null);
             }}
-          >
-            <RoomPickerFields data={data} gender={student.gender} />
-            <label>
-              Effective date
-              <input name="effectiveDate" type="date" required placeholder="e.g. 2026-01-01" />
-            </label>
-            <label>
-              New monthly rental
-              <input name="monthlyRental" type="number" min="0" placeholder="e.g. 1000" />
-            </label>
-            <label>
-              New security deposit
-              <input name="securityDeposit" type="number" min="0" placeholder="e.g. 1000" />
-            </label>
-            <label>
-              Access card deposit
-              <input name="accessCardDeposit" type="number" min="0" placeholder="e.g. 1000" />
-            </label>
-            <label>
-              Old room check-out meter
-              <input name="checkOutMeter" type="number" step="0.01" placeholder="e.g. 1000"   />
-            </label>
-            <label>
-              New room check-in meter
-              <input name="checkInMeter" type="number" step="0.01" placeholder="e.g. 1000" />
-            </label>
-            <label>
-              New lease end
-              <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
-            </label>
-            <label className="wide">
-              Reason / remarks
-              <input name="reason" placeholder="e.g. Short-term renewal, promotion ended..." />
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Confirm room change
-              </button>
-            </div>
-          </form>
+          />
         </Modal>
       )}
     </div>

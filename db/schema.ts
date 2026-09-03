@@ -382,6 +382,33 @@ export const studentRateChanges = pgTable("student_rate_changes", {
     .default(sql`(CURRENT_TIMESTAMP)::text`),
 });
 
+// A sitting tenant's deposit changes when their rent changes or they move
+// room — but the money already held stays held, so only the difference is
+// ever owed. That difference is recorded here as a signed amount (positive =
+// the student owes a top-up, negative = a refund is due) and picked up by the
+// next billing run, which stamps billedCycleId so it can never be charged
+// twice. Move-in deposits do not appear here: those are collected in full
+// through reservation_charges before the tenancy starts.
+export const depositAdjustments = pgTable("deposit_adjustments", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  assignmentId: bigint("assignment_id", { mode: "number" })
+    .notNull()
+    .references(() => accommodationAssignments.id),
+  previousAmount: doublePrecision("previous_amount").notNull().default(0),
+  newAmount: doublePrecision("new_amount").notNull().default(0),
+  amount: doublePrecision("amount").notNull().default(0),
+  reason: text("reason").notNull().default(""),
+  source: text("source").notNull().default("rate-change"),
+  effectiveDate: text("effective_date").notNull(),
+  billedCycleId: bigint("billed_cycle_id", { mode: "number" }).references(
+    () => billingCycles.id,
+  ),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
 export const parkingLots = pgTable(
   "parking_lots",
   {
@@ -473,6 +500,13 @@ export const maintenanceTickets = pgTable("maintenance_tickets", {
   estimatedCost: doublePrecision("estimated_cost"),
   actualCost: doublePrecision("actual_cost"),
   studentCharge: doublePrecision("student_charge"),
+  // The billing cycle that already charged studentCharge to the student.
+  // Without this the monthly run re-bills every completed ticket in every
+  // subsequent cycle, since "completed and chargeable" stays true forever.
+  // Released back to NULL if that cycle's invoice is deleted.
+  billedCycleId: bigint("billed_cycle_id", { mode: "number" }).references(
+    () => billingCycles.id,
+  ),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

@@ -3,6 +3,8 @@
 
 import { useState } from "react";
 import {
+  ATTACHMENT_ACCEPT,
+  DocumentTile,
   Empty,
   Modal,
   ReportCard,
@@ -12,6 +14,8 @@ import {
   blockOf,
   dateLabel,
   formValues,
+  isImageAttachment,
+  isVideoAttachment,
   money,
   titleCase,
   today,
@@ -20,9 +24,12 @@ import {
 import type { Data, Row } from "./shared";
 
 // Pictures and videos render inline (no click-through needed) and split
-// into their own sections since they're viewed differently. Deleting calls
-// the file store directly rather than going through save()/action dispatch
-// since attachments aren't part of the /api/system action set.
+// into their own sections since they're viewed differently. Anything else —
+// PDF quotations, Excel costings, signed forms — can't be previewed, so it
+// falls into a documents group of click-through tiles rather than being
+// dropped from the list. Deleting calls the file store directly rather than
+// going through save()/action dispatch since attachments aren't part of the
+// /api/system action set.
 function TicketAttachments({
   attachments,
   onDeleted,
@@ -34,12 +41,17 @@ function TicketAttachments({
 }) {
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
   const pictures = attachments.filter((attachment) =>
-    String(attachment.contentType || "").startsWith("image/"),
+    isImageAttachment(attachment.contentType),
   );
   const videos = attachments.filter((attachment) =>
-    String(attachment.contentType || "").startsWith("video/"),
+    isVideoAttachment(attachment.contentType),
   );
-  if (!pictures.length && !videos.length) return null;
+  const documents = attachments.filter(
+    (attachment) =>
+      !isImageAttachment(attachment.contentType) &&
+      !isVideoAttachment(attachment.contentType),
+  );
+  if (!pictures.length && !videos.length && !documents.length) return null;
 
   const handleDelete = async (id: string | number) => {
     if (!window.confirm("Delete this file? This cannot be undone.")) return;
@@ -99,11 +111,31 @@ function TicketAttachments({
       </div>
     );
 
+  const documentGroup = documents.length > 0 && (
+    <div className="attachment-thumb-grid">
+      <small className="attachment-group-label">DOCUMENT</small>
+      {documents.map((attachment) => (
+        <figure key={attachment.id} className="attachment-thumb">
+          <DocumentTile attachment={attachment} />
+          <button
+            type="button"
+            className="secondary compact attachment-delete"
+            disabled={deletingId === attachment.id}
+            onClick={() => handleDelete(attachment.id)}
+          >
+            Delete
+          </button>
+        </figure>
+      ))}
+    </div>
+  );
+
   const content = (
     <>
-      {!compact && <strong>Pictures &amp; videos</strong>}
+      {!compact && <strong>Pictures, videos &amp; documents</strong>}
       {group(pictures, "PICTURE")}
       {group(videos, "VIDEO")}
+      {documentGroup}
     </>
   );
   return compact ? (
@@ -151,6 +183,15 @@ export function MaintenanceModule({
     ),
   ].sort((a, b) => b.localeCompare(a));
   const [meterMonth, setMeterMonth] = useState(meterMonths[0] || "all");
+  // The meter tab is split in two: an entry grid for the month being keyed in
+  // right now, and the full historical log. Staff key one hostel at a time,
+  // so the grid carries its own hostel selection and draft values.
+  const [meterView, setMeterView] = useState<"entry" | "history">("entry");
+  const [entryHostelId, setEntryHostelId] = useState("");
+  const [entryDate, setEntryDate] = useState(today);
+  const [entryQuery, setEntryQuery] = useState("");
+  const [entryHideDone, setEntryHideDone] = useState(false);
+  const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
   const monthLabel = (ym: string) =>
     ym === "all"
       ? "All months"
@@ -250,6 +291,138 @@ export function MaintenanceModule({
   const meterRooms = [
     ...new Map(data.bedSpaces.map((bed) => [bed.roomId, bed])).values(),
   ];
+
+  // ---- Month-entry grid -------------------------------------------------
+  const meterHostels = data.hostels.filter((hostel: Row) =>
+    meterRooms.some((room) => String(room.hostelId) === String(hostel.id)),
+  );
+  const activeEntryHostelId =
+    entryHostelId && meterHostels.some((h: Row) => String(h.id) === entryHostelId)
+      ? entryHostelId
+      : String(meterHostels[0]?.id || "");
+  const activeEntryHostel = meterHostels.find(
+    (h: Row) => String(h.id) === activeEntryHostelId,
+  );
+  const entryRooms = meterRooms
+    .filter((room) => String(room.hostelId) === activeEntryHostelId)
+    .sort((a, b) =>
+      `${a.unitCode}-${a.roomLabel}`.localeCompare(
+        `${b.unitCode}-${b.roomLabel}`,
+        undefined,
+        { numeric: true },
+      ),
+    );
+  // Readings for this hostel keyed by room, newest first — the grid reads the
+  // two most recent columns from here and the usage baseline from the newest.
+  const hostelReadings = data.meterReadings.filter(
+    (reading: Row) => String(reading.hostelId) === activeEntryHostelId,
+  );
+  const readingsByRoom = new Map<string, Row[]>();
+  for (const reading of hostelReadings) {
+    const key = String(reading.roomId);
+    const list = readingsByRoom.get(key);
+    if (list) list.push(reading);
+    else readingsByRoom.set(key, [reading]);
+  }
+  for (const list of readingsByRoom.values())
+    list.sort((a, b) =>
+      a.readingDate === b.readingDate
+        ? Number(b.id) - Number(a.id)
+        : String(b.readingDate).localeCompare(String(a.readingDate)),
+    );
+  // Column dates: the two most recent reading dates before the one being
+  // keyed in, exactly like the previous-two-months columns on the paper sheet.
+  const priorDates = [
+    ...new Set(
+      hostelReadings
+        .map((reading: Row) => String(reading.readingDate))
+        .filter((date: string) => date && date !== entryDate),
+    ),
+  ]
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, 2)
+    .reverse();
+  const entryRate = Number(activeEntryHostel?.electricityRate || 0);
+  const readingOn = (roomId: string | number, date: string) => {
+    const list = readingsByRoom.get(String(roomId)) || [];
+    return list.find((reading) => reading.readingDate === date);
+  };
+  // Baseline for usage is the newest reading strictly before the entry date,
+  // matching how the billing cycle pairs consecutive readings.
+  const baselineFor = (roomId: string | number) =>
+    (readingsByRoom.get(String(roomId)) || []).find(
+      (reading) => String(reading.readingDate) < entryDate,
+    );
+  const draftValueFor = (room: Row) => {
+    const key = String(room.roomId);
+    if (key in entryDraft) return entryDraft[key];
+    const saved = readingOn(room.roomId, entryDate);
+    return saved ? String(saved.readingValue) : "";
+  };
+  const entryRowsAll = entryRooms.map((room) => {
+    const value = draftValueFor(room);
+    const baseline = baselineFor(room.roomId);
+    const usage =
+      value === "" || !baseline
+        ? null
+        : Number(value) - Number(baseline.readingValue);
+    return {
+      room,
+      code: `${room.unitCode}-${room.roomLabel}`,
+      value,
+      baseline,
+      usage,
+      amount: usage && usage > 0 ? Math.ceil(usage * entryRate) : 0,
+      saved: Boolean(readingOn(room.roomId, entryDate)),
+    };
+  });
+  const entryRows = entryRowsAll.filter((row) => {
+    const search = entryQuery.trim().toLowerCase();
+    if (search && !row.code.toLowerCase().includes(search)) return false;
+    if (entryHideDone && row.value !== "") return false;
+    return true;
+  });
+  const entryFilled = entryRowsAll.filter((row) => row.value !== "").length;
+  const entryDirty = entryRowsAll.filter(
+    (row) =>
+      String(row.room.roomId) in entryDraft &&
+      entryDraft[String(row.room.roomId)] !== "",
+  );
+  const entryTotalAmount = entryRowsAll.reduce(
+    (sum, row) => sum + row.amount,
+    0,
+  );
+  const pendingCountFor = (hostelId: string | number) => {
+    const rooms = meterRooms.filter(
+      (room) => String(room.hostelId) === String(hostelId),
+    );
+    const done = new Set(
+      data.meterReadings
+        .filter(
+          (reading: Row) =>
+            String(reading.hostelId) === String(hostelId) &&
+            reading.readingDate === entryDate,
+        )
+        .map((reading: Row) => String(reading.roomId)),
+    );
+    return rooms.filter((room) => !done.has(String(room.roomId))).length;
+  };
+  const saveEntryGrid = async () => {
+    if (!entryDirty.length) return;
+    const ok = await save(
+      {
+        action: "meter-reading-batch",
+        readingDate: entryDate,
+        readingType: "monthly",
+        rows: entryDirty.map((row) => ({
+          roomId: row.room.roomId,
+          readingValue: row.value,
+        })),
+      },
+      `${entryDirty.length} meter reading${entryDirty.length === 1 ? "" : "s"} saved`,
+    );
+    if (ok) setEntryDraft({});
+  };
   const downloadMeterTemplate = () => {
     const csv = [
       "roomCode,readingDate,readingValue,readingType,notes",
@@ -521,18 +694,24 @@ export function MaintenanceModule({
           </section>
         </>
       )}
-      {tab === "meters" && (
+      {tab === "meters" && meterView === "entry" && (
         <section className="panel">
           <div className="section-heading">
             <div>
-              <small>MONTHLY / CHECK-IN / CHECK-OUT</small>
-              <h3>Electricity meter readings</h3>
+              <small>MONTHLY METER ENTRY</small>
+              <h3>Key in this month&apos;s readings</h3>
               <p>
-                Sharing-room calculations can use check-in, check-out or special
-                semester-break readings.
+                One row per room with the previous two readings alongside, so a
+                whole hostel can be keyed in and saved in one go.
               </p>
             </div>
             <div className="button-row">
+              <button
+                className="secondary compact"
+                onClick={() => setMeterView("history")}
+              >
+                Past records
+              </button>
               <button
                 className="secondary compact"
                 onClick={downloadMeterTemplate}
@@ -547,6 +726,192 @@ export function MaintenanceModule({
                   onChange={(event) => importMeterCsv(event.target.files?.[0])}
                 />
               </label>
+            </div>
+          </div>
+
+          <div className="workspace-tabs meter-hostel-tabs">
+            {meterHostels.map((hostel: Row) => {
+              const pending = pendingCountFor(hostel.id);
+              return (
+                <button
+                  key={hostel.id}
+                  type="button"
+                  className={
+                    String(hostel.id) === activeEntryHostelId ? "active" : ""
+                  }
+                  onClick={() => {
+                    setEntryHostelId(String(hostel.id));
+                    setEntryDraft({});
+                    setEntryQuery("");
+                  }}
+                >
+                  {hostel.name}
+                  <span className="tab-count">
+                    {pending ? `${pending} left` : "done"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="v2-toolbar meter-toolbar">
+            <label className="v2-search">
+              <SearchIcon />
+              <input
+                value={entryQuery}
+                onChange={(event) => setEntryQuery(event.target.value)}
+                placeholder="Jump to a room code"
+              />
+            </label>
+            <label className="inline-field">
+              Reading date
+              <input
+                type="date"
+                value={entryDate}
+                onChange={(event) => {
+                  setEntryDate(event.target.value);
+                  setEntryDraft({});
+                }}
+              />
+            </label>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={entryHideDone}
+                onChange={(event) => setEntryHideDone(event.target.checked)}
+              />
+              Only rooms still blank
+            </label>
+          </div>
+
+          {entryRooms.length ? (
+            <>
+              <div className="table-wrap meter-entry-wrap">
+                <table className="meter-entry-table">
+                  <thead>
+                    <tr>
+                      <th>Room code</th>
+                      {priorDates.map((date) => (
+                        <th key={date}>{dateLabel(date)}</th>
+                      ))}
+                      <th className="entry-col">{dateLabel(entryDate)}</th>
+                      <th>Usage</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entryRows.map((row) => (
+                      <tr
+                        key={row.room.roomId}
+                        className={row.saved ? "reading-saved" : ""}
+                      >
+                        <td>
+                          <code>{row.code}</code>
+                        </td>
+                        {priorDates.map((date) => {
+                          const previous = readingOn(row.room.roomId, date);
+                          return (
+                            <td key={date} className="reading-past">
+                              {previous ? previous.readingValue : "-"}
+                            </td>
+                          );
+                        })}
+                        <td className="entry-col">
+                          <input
+                            type="number"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={row.value}
+                            placeholder={
+                              row.baseline
+                                ? String(row.baseline.readingValue)
+                                : "0"
+                            }
+                            onChange={(event) =>
+                              setEntryDraft((draft) => ({
+                                ...draft,
+                                [String(row.room.roomId)]: event.target.value,
+                              }))
+                            }
+                          />
+                        </td>
+                        <td>
+                          {row.usage === null ? (
+                            <small>
+                              {row.baseline ? "-" : "No previous reading"}
+                            </small>
+                          ) : row.usage < 0 ? (
+                            <strong className="reading-warn">
+                              {row.usage.toFixed(2)} kWh
+                            </strong>
+                          ) : (
+                            `${row.usage.toFixed(2)} kWh`
+                          )}
+                        </td>
+                        <td>
+                          <strong>{row.amount ? money(row.amount, true) : "-"}</strong>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <footer className="meter-entry-footer">
+                <div>
+                  <strong>
+                    {entryFilled} of {entryRooms.length} rooms
+                  </strong>
+                  <small>
+                    {entryDirty.length
+                      ? `${entryDirty.length} unsaved · estimated ${money(entryTotalAmount, true)} for this hostel`
+                      : `Estimated ${money(entryTotalAmount, true)} for this hostel`}
+                  </small>
+                </div>
+                <div className="button-row">
+                  <button
+                    className="secondary compact"
+                    disabled={!entryDirty.length}
+                    onClick={() => setEntryDraft({})}
+                  >
+                    Discard changes
+                  </button>
+                  <button
+                    className="primary compact"
+                    disabled={busy || !entryDirty.length}
+                    onClick={saveEntryGrid}
+                  >
+                    Save {entryDirty.length || ""} reading
+                    {entryDirty.length === 1 ? "" : "s"}
+                  </button>
+                </div>
+              </footer>
+            </>
+          ) : (
+            <Empty
+              title="No rooms in this hostel"
+              text="Add units and rooms before recording meter readings."
+            />
+          )}
+        </section>
+      )}
+      {tab === "meters" && meterView === "history" && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <small>PAST RECORDS</small>
+              <h3>Meter reading history</h3>
+              <p>
+                Every reading ever recorded — monthly, check-in, check-out and
+                semester-break — with the usage and amount it billed out at.
+              </p>
+            </div>
+            <div className="button-row">
+              <button
+                className="secondary compact"
+                onClick={() => setMeterView("entry")}
+              >
+                Back to monthly entry
+              </button>
               <button
                 className="primary compact"
                 onClick={() => {
@@ -561,7 +926,7 @@ export function MaintenanceModule({
               </button>
             </div>
           </div>
-          <div className="v2-toolbar">
+          <div className="v2-toolbar meter-toolbar">
             <label className="v2-search">
               <SearchIcon />
               <input
@@ -1028,12 +1393,15 @@ export function MaintenanceModule({
                     </>
                   )}
                   <label className="wide">
-                    Update photo (optional)
+                    Attach file (optional)
                     <input
                       name="updateAttachment"
                       type="file"
-                      accept="image/*"
+                      accept={ATTACHMENT_ACCEPT}
                     />
+                    <small className="field-note">
+                      Photo, video, PDF, Word, Excel or CSV — up to 25 MB.
+                    </small>
                   </label>
                 </div>
                 <button className="primary" disabled={busy}>
@@ -1488,16 +1856,17 @@ export function MaintenanceModule({
               </select>
             </label>
             <label className="wide">
-              Picture / video
+              Picture / video / document
               <input
                 name="attachment"
                 type="file"
-                accept="image/*,video/*"
+                accept={ATTACHMENT_ACCEPT}
                 multiple
                 required={data.currentUser?.roleKey === "tenant"}
               />
               <small className="field-note">
-                Maximum 3 pictures and 1 video. Required for tenant submissions.
+                Maximum 3 pictures and 1 video, plus any number of PDF, Word,
+                Excel or CSV files. Required for tenant submissions.
               </small>
             </label>
             <div className="form-actions wide">

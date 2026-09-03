@@ -15,6 +15,8 @@ export type Data = {
   reservations: Row[];
   students: Row[];
   studentRateChanges: Row[];
+  depositAdjustments: Row[];
+  pastTenancies: Row[];
   salesPeople: string[];
   parkingLots: Row[];
   parkingRentals: Row[];
@@ -37,7 +39,12 @@ export type Data = {
   reminderTemplates: Row[];
   currentUser: Row;
   importProgress: { assignments: number; expected: number };
-  settings: { roomTransferFee: number };
+  settings: {
+    roomTransferFee: number;
+    autoBillingEnabled: boolean;
+    autoBillingCutoffDay: number;
+    autoBillingDueDays: number;
+  };
 };
 export type HostelTab = "availability" | "reservations" | "pricing" | "occupancy";
 
@@ -48,6 +55,154 @@ export const today = new Date().toISOString().slice(0, 10);
 export const DEPOSIT_MONTHS = 3;
 export const depositFor = (monthlyRental: number) =>
   Number(monthlyRental || 0) * DEPOSIT_MONTHS;
+
+// A rate change never rewrites the tenancy's own figures — it is an
+// effective-dated override the monthly billing run reads at invoice time,
+// which is what stops an already-issued invoice being rewritten
+// retroactively. Anything that shows "what this student pays now" therefore
+// has to apply the same rule, or the screen keeps showing the superseded
+// rent long after billing has moved on.
+//
+// The precedence deliberately mirrors the billing query exactly (latest
+// change on or before the date wins; a null figure on that change falls
+// through to the tenancy, NOT to an older change) so the number on screen is
+// always the number that will be billed.
+export function effectiveRateOn(
+  rateChanges: Row[],
+  assignmentId: string | number | null | undefined,
+  tenancy: { monthlyRental?: unknown; securityDeposit?: unknown },
+  onDate: string = today,
+) {
+  const applicable = assignmentId
+    ? rateChanges
+        .filter(
+          (change) =>
+            String(change.assignmentId) === String(assignmentId) &&
+            String(change.effectiveDate) <= onDate,
+        )
+        .sort((a, b) =>
+          String(b.effectiveDate).localeCompare(String(a.effectiveDate)),
+        )[0]
+    : undefined;
+  const base = {
+    monthlyRental:
+      tenancy.monthlyRental === null || tenancy.monthlyRental === undefined
+        ? null
+        : Number(tenancy.monthlyRental),
+    securityDeposit:
+      tenancy.securityDeposit === null || tenancy.securityDeposit === undefined
+        ? null
+        : Number(tenancy.securityDeposit),
+  };
+  if (!applicable)
+    return { ...base, source: "tenancy" as const, effectiveDate: null };
+  return {
+    monthlyRental:
+      applicable.monthlyRental === null || applicable.monthlyRental === undefined
+        ? base.monthlyRental
+        : Number(applicable.monthlyRental),
+    securityDeposit:
+      applicable.securityDeposit === null ||
+      applicable.securityDeposit === undefined
+        ? base.securityDeposit
+        : Number(applicable.securityDeposit),
+    source: "rate-change" as const,
+    effectiveDate: String(applicable.effectiveDate),
+  };
+}
+
+// Staff let rooms, not beds. A bed is an internal slot: 78% of rooms hold
+// exactly one, so asking which bed is a question with a single possible
+// answer, and for a sharing room it is the house that decides which space a
+// new tenant takes. Pickers therefore offer rooms and this resolves the bed
+// behind the scenes — the bed layer stays, because 90-odd rooms really do
+// house several people on separate beds and the electricity split divides a
+// room's usage between exactly those occupants.
+export type RoomOption = {
+  roomId: string | number;
+  roomCode: string;
+  unitCode: string;
+  hostelId: string | number;
+  hostelName: string;
+  roomType: string;
+  gender: string;
+  // The bed a new tenant would be given — always the lowest free one, so the
+  // choice is deterministic rather than whichever row the query happened to
+  // return first.
+  bed: Row;
+  freeCount: number;
+  totalCount: number;
+  rate: number | null;
+};
+
+export function roomOptionsFrom(
+  beds: Row[],
+  isSelectable: (bed: Row) => boolean,
+): RoomOption[] {
+  const byRoom = new Map<string, Row[]>();
+  for (const bed of beds) {
+    const key = String(bed.roomId);
+    const list = byRoom.get(key);
+    if (list) list.push(bed);
+    else byRoom.set(key, [bed]);
+  }
+  const options: RoomOption[] = [];
+  for (const roomBeds of byRoom.values()) {
+    const free = roomBeds
+      .filter(isSelectable)
+      .sort((a, b) =>
+        String(a.bedLabel || "").localeCompare(String(b.bedLabel || ""), undefined, {
+          numeric: true,
+        }),
+      );
+    if (!free.length) continue;
+    const bed = free[0];
+    const rate = bed.salesRate ?? bed.monthlyRental;
+    options.push({
+      roomId: bed.roomId,
+      roomCode: `${bed.unitCode}-${bed.roomLabel}`,
+      unitCode: bed.unitCode,
+      hostelId: bed.hostelId,
+      hostelName: bed.hostelName,
+      roomType: String(bed.configuredRoomType || bed.roomType || "single"),
+      gender: String(bed.gender || "unspecified"),
+      bed,
+      freeCount: free.length,
+      totalCount: roomBeds.length,
+      rate: rate === null || rate === undefined ? null : Number(rate),
+    });
+  }
+  return options.sort((a, b) =>
+    a.roomCode.localeCompare(b.roomCode, undefined, { numeric: true }),
+  );
+}
+
+// How a room reads in a dropdown. A single room says nothing extra; a shared
+// one has to say how much of it is still free, or staff cannot tell they are
+// putting someone into an occupied room.
+export const roomOptionLabel = (option: RoomOption) =>
+  option.totalCount > 1
+    ? `${option.roomCode} — ${option.freeCount} of ${option.totalCount} spaces free`
+    : option.roomCode;
+
+// The next change that has not taken effect yet, so staff can see what is
+// coming without digging through the history.
+export function nextScheduledRate(
+  rateChanges: Row[],
+  assignmentId: string | number | null | undefined,
+  afterDate: string = today,
+) {
+  if (!assignmentId) return undefined;
+  return rateChanges
+    .filter(
+      (change) =>
+        String(change.assignmentId) === String(assignmentId) &&
+        String(change.effectiveDate) > afterDate,
+    )
+    .sort((a, b) =>
+      String(a.effectiveDate).localeCompare(String(b.effectiveDate)),
+    )[0];
+}
 // The charge types editable through the reservation Payment step's
 // breakdown form — blankCharges (that form's initial state) is derived
 // from exactly this list, so anything added to chargeLabels below without
@@ -218,6 +373,104 @@ async function compressImageFile(file: File): Promise<File> {
     return file;
   }
 }
+// Every attachment field accepts the same set: photos and video, plus the
+// office formats staff actually hand over — PDF, Word, Excel, PowerPoint,
+// CSV and plain text. Listed as both MIME types and extensions because
+// Windows reports some Office files with an empty or generic type, which an
+// extension-less accept list would silently reject. Kept in one place so a
+// new format only has to be added once. (The Maintenance CSV importer sets
+// its own narrower accept — it parses the file rather than storing it.)
+export const ATTACHMENT_ACCEPT = [
+  "image/*",
+  "video/*",
+  "application/pdf",
+  ".pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".doc",
+  ".docx",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls",
+  ".xlsx",
+  ".xlsm",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".ppt",
+  ".pptx",
+  "text/csv",
+  ".csv",
+  "text/plain",
+  ".txt",
+].join(",");
+
+export const isImageAttachment = (type?: string | null) =>
+  String(type || "").startsWith("image/");
+export const isVideoAttachment = (type?: string | null) =>
+  String(type || "").startsWith("video/");
+
+// Short badge for a stored file. Reads the extension first because that is
+// what staff recognise, and falls back to the MIME type for files saved
+// without one.
+export function fileKindLabel(type?: string | null, name?: string | null) {
+  const extension = String(name || "")
+    .split(".")
+    .pop()
+    ?.toLowerCase();
+  const byExtension: Record<string, string> = {
+    pdf: "PDF",
+    doc: "WORD",
+    docx: "WORD",
+    xls: "EXCEL",
+    xlsx: "EXCEL",
+    xlsm: "EXCEL",
+    csv: "CSV",
+    ppt: "SLIDES",
+    pptx: "SLIDES",
+    txt: "TEXT",
+    zip: "ZIP",
+  };
+  if (extension && byExtension[extension]) return byExtension[extension];
+  const mime = String(type || "");
+  if (mime.includes("pdf")) return "PDF";
+  if (mime.includes("word")) return "WORD";
+  if (mime.includes("sheet") || mime.includes("excel")) return "EXCEL";
+  if (mime.includes("presentation") || mime.includes("powerpoint"))
+    return "SLIDES";
+  if (mime.startsWith("text/")) return "TEXT";
+  if (isImageAttachment(mime)) return "IMAGE";
+  if (isVideoAttachment(mime)) return "VIDEO";
+  return "FILE";
+}
+
+export const fileSizeLabel = (bytes?: number | string | null) => {
+  const size = Number(bytes || 0);
+  if (!size) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+// Non-media attachments can't be previewed inline, so they render as a
+// labelled tile that opens the file in a new tab instead.
+export function DocumentTile({ attachment }: { attachment: Row }) {
+  const size = fileSizeLabel(attachment.sizeBytes);
+  return (
+    <a
+      className="document-tile"
+      href={`/api/files?id=${attachment.id}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <span className="document-tile-kind">
+        {fileKindLabel(attachment.contentType, attachment.fileName)}
+      </span>
+      <span className="document-tile-name">{attachment.fileName}</span>
+      {size && <small>{size}</small>}
+    </a>
+  );
+}
+
 export const uploadAttachment = async (
   file: File,
   contextType: string,
@@ -855,9 +1108,11 @@ export function Metric({
 }
 
 export function Stat({ value, label }: { value: string | number; label: string }) {
+  // Money and other long values need a smaller size or they overflow the card.
+  const isLong = String(value).length >= 8;
   return (
     <article>
-      <strong>{value}</strong>
+      <strong className={isLong ? "is-long" : undefined}>{value}</strong>
       <span>{label}</span>
     </article>
   );

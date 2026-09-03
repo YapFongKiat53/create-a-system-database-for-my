@@ -1,0 +1,2 @@
+ALTER TABLE "maintenance_tickets" ADD COLUMN "billed_cycle_id" bigint;--> statement-breakpoint
+ALTER TABLE "maintenance_tickets" ADD CONSTRAINT "maintenance_tickets_billed_cycle_id_billing_cycles_id_fk" FOREIGN KEY ("billed_cycle_id") REFERENCES "public"."billing_cycles"("id") ON DELETE no action ON UPDATE no action;

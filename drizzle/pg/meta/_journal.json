@@ -120,6 +120,20 @@
       "when": 1787294912987,
       "tag": "0016_needy_tusk",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787709741146,
+      "tag": "0017_empty_kate_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787802563045,
+      "tag": "0018_oval_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

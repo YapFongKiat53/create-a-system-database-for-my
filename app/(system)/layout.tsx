@@ -7,84 +7,136 @@ import { usePathname, useRouter } from "next/navigation";
 import { SystemProvider, useSystem } from "../SystemContext";
 import type { Row } from "../modules/shared";
 
-const allNavigation: {
+import {
+  DashboardIcon,
+  RoomsIcon,
+  TenantsIcon,
+  BillingIcon,
+  MaintenanceIcon,
+  ParkingIcon,
+  PropertiesIcon,
+  ReportsIcon,
+  AnnouncementsIcon,
+  AccessIcon,
+  BrandIcon,
+  SignOutIcon,
+} from "./NavIcons";
+
+type NavItem = {
   href: string;
   label: string;
-  mark: string;
   note: string;
   permission: string;
-}[] = [
+  Icon: (props: { className?: string }) => React.ReactElement;
+};
+
+/**
+ * Grouped by the job being done rather than by database table, so the rail
+ * answers "where do I go to do X". Labels stay close to what the modules were
+ * called; only the grouping and the one-line hints are new.
+ *
+ * `permission` still drives visibility exactly as before — an empty string
+ * means every signed-in role sees it.
+ */
+const navGroups: { label: string | null; items: NavItem[] }[] = [
   {
-    href: "/dashboard",
-    label: "Dashboard",
-    mark: "D",
-    note: "Today at a glance",
-    permission: "",
+    label: null,
+    items: [
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        note: "Today at a glance",
+        permission: "",
+        Icon: DashboardIcon,
+      },
+    ],
   },
   {
-    href: "/hostels",
-    label: "Hostel Information",
-    mark: "H",
-    note: "Sales & rooms",
-    permission: "hostels",
+    label: "LETTING",
+    items: [
+      {
+        href: "/hostels",
+        label: "Rooms & reservations",
+        note: "Availability, rates, bookings",
+        permission: "hostels",
+        Icon: RoomsIcon,
+      },
+      {
+        href: "/students",
+        label: "Tenants",
+        note: "Contracts, room changes, move-out",
+        permission: "students",
+        Icon: TenantsIcon,
+      },
+    ],
   },
   {
-    href: "/units",
-    label: "Unit Information",
-    mark: "U",
-    note: "Owners & assets",
-    permission: "units-general",
+    label: "MONEY",
+    items: [
+      {
+        href: "/finance",
+        label: "Billing",
+        note: "Invoices, payments, deposits",
+        permission: "finance",
+        Icon: BillingIcon,
+      },
+    ],
   },
   {
-    href: "/students",
-    label: "Student Information",
-    mark: "S",
-    note: "Tenancy lifecycle",
-    permission: "students",
+    label: "OPERATIONS",
+    items: [
+      {
+        href: "/maintenance",
+        label: "Maintenance",
+        note: "Tickets and meter readings",
+        permission: "maintenance",
+        Icon: MaintenanceIcon,
+      },
+      {
+        href: "/parking",
+        label: "Parking",
+        note: "Lots and vehicle records",
+        permission: "parking",
+        Icon: ParkingIcon,
+      },
+    ],
   },
   {
-    href: "/parking",
-    label: "Parking",
-    mark: "P",
-    note: "Lots & rentals",
-    permission: "parking",
-  },
-  {
-    href: "/maintenance",
-    label: "Maintenance",
-    mark: "M",
-    note: "Tickets & meters",
-    permission: "maintenance",
-  },
-  {
-    href: "/finance",
-    label: "Finance",
-    mark: "F",
-    note: "Billing & receipts",
-    permission: "finance",
-  },
-  {
-    href: "/announcements",
-    label: "Announcements",
-    mark: "A",
-    note: "Resident notices",
-    permission: "announcements",
-  },
-  {
-    href: "/reports",
-    label: "Reports",
-    mark: "R",
-    note: "Operational review",
-    permission: "reports",
-  },
-  {
-    href: "/users",
-    label: "User Management",
-    mark: "UM",
-    note: "Roles & access",
-    permission: "users",
+    label: "ADMIN",
+    items: [
+      {
+        href: "/units",
+        label: "Properties & units",
+        note: "Owners, agreements, assets",
+        permission: "units-general",
+        Icon: PropertiesIcon,
+      },
+      {
+        href: "/reports",
+        label: "Reports",
+        note: "Registers and monthly figures",
+        permission: "reports",
+        Icon: ReportsIcon,
+      },
+      {
+        href: "/announcements",
+        label: "Announcements",
+        note: "Notices to residents",
+        permission: "announcements",
+        Icon: AnnouncementsIcon,
+      },
+      {
+        href: "/users",
+        label: "People & access",
+        note: "Roles and permissions",
+        permission: "users",
+        Icon: AccessIcon,
+      },
+    ],
   },
 ];
+
+const allNavigation: NavItem[] = navGroups.flatMap((group) => group.items);
 
 function Chrome({ children }: { children: ReactNode }) {
   const { data, error, notice, load } = useSystem();
@@ -126,36 +178,42 @@ function Chrome({ children }: { children: ReactNode }) {
       <div className="sidebar-trigger" aria-hidden="true" />
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">HO</span>
+          <span className="brand-mark">
+            <BrandIcon />
+          </span>
           <div>
             <strong>Hostel Operations</strong>
-            <small>Internal management system</small>
+            <small>Management console</small>
           </div>
         </div>
-        <p className="nav-label">MODULES</p>
-        <nav>
-          {navigation.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={pathname === item.href ? "active" : ""}
-            >
-              <span className="nav-mark">{item.mark}</span>
-              <span className="nav-copy">
-                <b>{item.label}</b>
-                <small>{item.note}</small>
-              </span>
-            </Link>
-          ))}
+        <nav className="nav-groups">
+          {navGroups.map((group, index) => {
+            const items = group.items.filter((item) =>
+              navigation.some((allowed) => allowed.href === item.href),
+            );
+            if (items.length === 0) return null;
+            return (
+              <div className="nav-group" key={group.label ?? `g${index}`}>
+                {group.label && <p className="nav-label">{group.label}</p>}
+                {items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={pathname === item.href ? "active" : ""}
+                  >
+                    <span className="nav-icon">
+                      <item.Icon />
+                    </span>
+                    <span className="nav-copy">
+                      <b>{item.label}</b>
+                      <small>{item.note}</small>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            );
+          })}
         </nav>
-        <div className="phase-card">
-          <small>SYSTEM SCOPE</small>
-          <strong>9 connected modules</strong>
-          <div>
-            <i style={{ width: "82%" }} />
-          </div>
-          <p>Room assignment stays manual; billing uses operational records.</p>
-        </div>
         <div className="sidebar-foot">
           <span>
             {String(data?.currentUser?.displayName || "IR")
@@ -166,28 +224,28 @@ function Chrome({ children }: { children: ReactNode }) {
             <strong>{data?.currentUser?.displayName || "Irena"}</strong>
             <small>{data?.currentUser?.roleName || "Administrator"}</small>
           </div>
+          <button
+            className="sidebar-signout"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={async () => {
+              await fetch("/api/auth", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "logout" }),
+              });
+              window.location.replace("/login");
+            }}
+          >
+            <SignOutIcon />
+          </button>
         </div>
-        <button
-          className="sidebar-signout"
-          onClick={async () => {
-            await fetch("/api/auth", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ action: "logout" }),
-            });
-            window.location.replace("/login");
-          }}
-        >
-          Sign out
-        </button>
       </aside>
       <main>
         <header className="topbar">
           <div>
-            <p className="eyebrow">
-              OPERATIONS / {(current?.label || "").toUpperCase()}
-            </p>
             <h1>{current?.label}</h1>
+            <p className="topbar-note">{current?.note}</p>
           </div>
         </header>
         {error && (

@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import {
+  ATTACHMENT_ACCEPT,
   Empty,
   Modal,
   SearchIcon,
@@ -64,6 +65,14 @@ const CHARGE_TYPE_META: Record<
     color: "#991b1b",
     background: "#fee2e2",
     icon: "⏰",
+  },
+  // The gap between the deposit held and the deposit now required — never a
+  // second full deposit, only the difference either way.
+  "deposit-adjustment": {
+    label: "Deposit change",
+    color: "#8f6a2c",
+    background: "#f4ecdc",
+    icon: "🔐",
   },
   "first-month-rental": {
     label: "First month rental",
@@ -238,6 +247,31 @@ export function FinanceModule({
         String(a.paymentUpdatedAt || ""),
       ),
     );
+  // Deposits do not stop moving once the student is in. A rate change or a
+  // room change books the difference, which the next invoice collects (or
+  // credits back) — so the money actually held is the move-in deposits plus
+  // the net of those adjustments, and the ledger has to show both or it
+  // understates what the house is holding.
+  const depositMovements = data.depositAdjustments || [];
+  const movementState = (row: Row) =>
+    !row.billedCycleId
+      ? "scheduled"
+      : row.invoiceStatus === "paid"
+        ? "settled"
+        : "billed";
+  const depositsCollectedAtMoveIn = data.reservations.reduce(
+    (sum, reservation) => sum + depositPaidOf(reservation),
+    0,
+  );
+  // Only a settled movement has actually changed the cash held; one that is
+  // merely billed is still a receivable.
+  const depositMovementSettled = depositMovements
+    .filter((row) => movementState(row) === "settled")
+    .reduce((sum: number, row: Row) => sum + Number(row.amount || 0), 0);
+  const depositMovementPending = depositMovements
+    .filter((row) => movementState(row) !== "settled")
+    .reduce((sum: number, row: Row) => sum + Number(row.amount || 0), 0);
+
   const pendingReservationReviews = reservationDeposits.filter(
     isReservationPendingReview,
   );
@@ -337,12 +371,20 @@ export function FinanceModule({
           </p>
         </div>
         {data.currentUser?.roleKey !== "tenant" && (
-          <button
-            className="v2-btn-primary"
-            onClick={() => setModal("cycle")}
-          >
-            + Prepare billing month
-          </button>
+          <div className="button-row">
+            <button
+              className="secondary compact"
+              onClick={() => setModal("auto-billing")}
+            >
+              Automatic billing
+            </button>
+            <button
+              className="v2-btn-primary"
+              onClick={() => setModal("cycle")}
+            >
+              + Prepare billing month
+            </button>
+          </div>
         )}
       </section>
       <section className="module-metrics">
@@ -699,11 +741,11 @@ export function FinanceModule({
       <section className="panel">
         <div className="section-heading">
           <div>
-            <small>SALES DEPOSITS</small>
-            <h3>Reservation deposits received</h3>
+            <small>REFUNDABLE MONEY HELD</small>
+            <h3>Deposits</h3>
             <p>
-              Payments collected during Sales reservations, before the
-              student has a monthly invoice.
+              Deposits taken at move-in, plus every change since. Only money
+              the house will hand back appears here.
             </p>
           </div>
           {pendingReservationReviews.length > 0 && (
@@ -712,6 +754,56 @@ export function FinanceModule({
             </span>
           )}
         </div>
+
+        <div className="deposit-ledger">
+          <div>
+            <small>COLLECTED AT MOVE-IN</small>
+            <b>{money(depositsCollectedAtMoveIn, true)}</b>
+            <span>{reservationDeposits.length} reservations</span>
+          </div>
+          <div>
+            <small>CHANGES SETTLED SINCE</small>
+            <b className={depositMovementSettled < 0 ? "figure-out" : ""}>
+              {depositMovementSettled >= 0 ? "+" : "−"}
+              {money(Math.abs(depositMovementSettled), true)}
+            </b>
+            <span>
+              {
+                depositMovements.filter(
+                  (row) => movementState(row) === "settled",
+                ).length
+              }{" "}
+              paid changes
+            </span>
+          </div>
+          <div>
+            <small>TOTAL HELD</small>
+            <b className="figure-in">
+              {money(
+                depositsCollectedAtMoveIn + depositMovementSettled,
+                true,
+              )}
+            </b>
+            <span>Refundable to students</span>
+          </div>
+          <div>
+            <small>CHANGES NOT YET SETTLED</small>
+            <b className={depositMovementPending ? "figure-out" : ""}>
+              {depositMovementPending >= 0 ? "+" : "−"}
+              {money(Math.abs(depositMovementPending), true)}
+            </b>
+            <span>
+              {
+                depositMovements.filter(
+                  (row) => movementState(row) !== "settled",
+                ).length
+              }{" "}
+              awaiting payment
+            </span>
+          </div>
+        </div>
+
+        <h4 className="deposit-section-label">Collected at move-in</h4>
         <div className="table-wrap">
           <table>
             <thead>
@@ -829,6 +921,89 @@ export function FinanceModule({
                 <tr>
                   <td colSpan={8}>
                     <em>No reservation deposits recorded yet.</em>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <h4 className="deposit-section-label">Changes during tenancy</h4>
+        <p className="deposit-section-note">
+          When rent changes or a student moves room, only the difference
+          between the deposit held and the new figure is billed — never a
+          second full deposit. It is collected (or credited back) on the next
+          monthly invoice.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Hostel / room</th>
+                <th>Deposit</th>
+                <th>Difference</th>
+                <th>Reason</th>
+                <th>Effective</th>
+                <th>Invoice</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {depositMovements.map((row) => {
+                const state = movementState(row);
+                const up = Number(row.amount) > 0;
+                return (
+                  <tr key={row.id}>
+                    <td>
+                      <strong>{row.studentName || "Unknown"}</strong>
+                      <small>{titleCase(row.source || "")}</small>
+                    </td>
+                    <td>
+                      {row.hostelName || "-"}
+                      <small>{row.roomCode || "Room not set"}</small>
+                    </td>
+                    <td>
+                      {money(row.previousAmount, true)} →{" "}
+                      <strong>{money(row.newAmount, true)}</strong>
+                    </td>
+                    <td>
+                      <strong className={up ? "figure-out" : "figure-in"}>
+                        {up ? "+" : "−"}
+                        {money(Math.abs(Number(row.amount)), true)}
+                      </strong>
+                      <small>{up ? "top-up owed" : "refund due"}</small>
+                    </td>
+                    <td>{row.reason || "-"}</td>
+                    <td>{dateLabel(row.effectiveDate)}</td>
+                    <td>
+                      {row.invoiceNo ? (
+                        <code>{row.invoiceNo}</code>
+                      ) : (
+                        <span className="muted">Next invoice</span>
+                      )}
+                    </td>
+                    <td>
+                      <StatusPill
+                        status={
+                          state === "settled"
+                            ? "paid"
+                            : state === "billed"
+                              ? "partial"
+                              : "unpaid"
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+              {!depositMovements.length && (
+                <tr>
+                  <td colSpan={8}>
+                    <em>
+                      No deposit changes yet — every tenancy still holds the
+                      deposit taken at move-in.
+                    </em>
                   </td>
                 </tr>
               )}
@@ -1150,6 +1325,79 @@ export function FinanceModule({
           </section>
         </>
       )}
+      {modal === "auto-billing" && (
+        <Modal
+          title="Automatic monthly billing"
+          kicker="SCHEDULED RUN"
+          description="Rent and electricity are charged every month whether or not anyone opens Finance."
+          onClose={() => setModal("")}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const values = formValues(e) as Record<string, string>;
+              for (const [settingKey, settingValue] of [
+                ["auto-billing-enabled", values.enabled === "on" ? "on" : "off"],
+                ["auto-billing-cutoff-day", String(values.cutoffDay || 24)],
+                ["auto-billing-due-days", String(values.dueDays || 14)],
+              ])
+                await save(
+                  { action: "system-setting-update", settingKey, settingValue },
+                  "Automatic billing updated",
+                );
+              setModal("");
+            }}
+          >
+            <label className="wide">
+              Run automatically
+              <select
+                name="enabled"
+                defaultValue={data.settings.autoBillingEnabled ? "on" : "off"}
+              >
+                <option value="off">Off — prepare each month by hand</option>
+                <option value="on">On — build each month automatically</option>
+              </select>
+            </label>
+            <label>
+              Cut-off day of month
+              <input
+                name="cutoffDay"
+                type="number"
+                min="1"
+                max="28"
+                defaultValue={data.settings.autoBillingCutoffDay}
+              />
+              <small className="field-note">
+                The month&apos;s bills are built on this day. Capped at 28 so
+                every month has one.
+              </small>
+            </label>
+            <label>
+              Payment due, days after cut-off
+              <input
+                name="dueDays"
+                type="number"
+                min="0"
+                max="60"
+                defaultValue={data.settings.autoBillingDueDays}
+              />
+            </label>
+            <p className="wide field-note">
+              Each bill is the tenant&apos;s rent plus their share of the
+              room&apos;s electricity, with parking, maintenance and any deposit
+              difference added when they apply. A room with no new meter reading
+              is billed rent only — its usage is picked up in full on the next
+              reading, never estimated and never charged twice.
+            </p>
+            <div className="form-actions wide">
+              <button className="primary" disabled={busy}>
+                Save
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {modal === "cycle" && (
         <Modal
           title="Prepare billing month"
@@ -1467,7 +1715,7 @@ export function FinanceModule({
                   <input
                     name="proof"
                     type="file"
-                    accept="image/*,.pdf"
+                    accept={ATTACHMENT_ACCEPT}
                     required
                   />
                 </label>

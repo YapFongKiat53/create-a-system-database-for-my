@@ -124,10 +124,21 @@ export async function GET(request:Request) {
       headers:authHeaders(key),
     });
     if (!object.ok) return new Response("Stored file not found", { status:404 });
+    // Only images, video and PDF can actually be shown in a browser tab.
+    // Serving a spreadsheet or Word file as "inline" leaves the tab either
+    // blank or full of binary noise, so those download under their real name
+    // instead.
+    const previewable =
+      row.contentType.startsWith("image/") ||
+      row.contentType.startsWith("video/") ||
+      row.contentType.startsWith("audio/") ||
+      row.contentType === "application/pdf" ||
+      row.contentType === "text/plain";
+    const disposition = previewable ? "inline" : "attachment";
     return new Response(object.body, {
       headers:{
         "content-type":row.contentType,
-        "content-disposition":`inline; filename="${row.fileName.replace(/"/g, "")}"`,
+        "content-disposition":`${disposition}; filename="${row.fileName.replace(/"/g, "")}"`,
         "cache-control":"private, max-age=300",
       },
     });
