@@ -22,6 +22,7 @@ import {
   uploadAttachment,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import { BASE_PATH } from "../basePath";
 
 // Pictures and videos render inline (no click-through needed) and split
 // into their own sections since they're viewed differently. Anything else —
@@ -57,7 +58,7 @@ function TicketAttachments({
     if (!window.confirm("Delete this file? This cannot be undone.")) return;
     setDeletingId(id);
     try {
-      const response = await fetch(`/api/files?id=${id}`, {
+      const response = await fetch(`${BASE_PATH}/api/files?id=${id}`, {
         method: "DELETE",
       });
       const result = (await response.json().catch(() => ({}))) as {
@@ -81,18 +82,18 @@ function TicketAttachments({
           <figure key={attachment.id} className="attachment-thumb">
             {attachment.contentType?.startsWith("video/") ? (
               <video
-                src={`/api/files?id=${attachment.id}`}
+                src={`${BASE_PATH}/api/files?id=${attachment.id}`}
                 controls
                 preload="metadata"
               />
             ) : (
               <a
-                href={`/api/files?id=${attachment.id}`}
+                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                 target="_blank"
                 rel="noreferrer"
               >
                 <img
-                  src={`/api/files?id=${attachment.id}`}
+                  src={`${BASE_PATH}/api/files?id=${attachment.id}`}
                   alt={attachment.fileName}
                   loading="lazy"
                 />

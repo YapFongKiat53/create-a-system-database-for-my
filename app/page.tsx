@@ -1,22 +1,23 @@
 "use client";
 
 import { useEffect } from "react";
+import { BASE_PATH } from "./basePath";
 
 export default function Home() {
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth", { cache: "no-store" })
+    fetch(`${BASE_PATH}/api/auth`, { cache: "no-store" })
       .then((response) => response.json() as Promise<{
         user?: { roleKey: string } | null;
       }>)
       .then((result) => {
         if (cancelled) return;
-        if (!result.user) window.location.replace("/login");
+        if (!result.user) window.location.replace(`${BASE_PATH}/login`);
         else if (result.user.roleKey === "tenant")
-          window.location.replace("/student");
-        else window.location.replace("/dashboard");
+          window.location.replace(`${BASE_PATH}/student`);
+        else window.location.replace(`${BASE_PATH}/dashboard`);
       })
-      .catch(() => !cancelled && window.location.replace("/login"));
+      .catch(() => !cancelled && window.location.replace(`${BASE_PATH}/login`));
     return () => {
       cancelled = true;
     };

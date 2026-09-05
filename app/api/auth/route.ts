@@ -10,10 +10,11 @@ import {
   verifyPassword,
 } from "../../../db/auth";
 import { appRoles, appUsers } from "../../../db/schema";
+import { BASE_PATH } from "../../basePath";
 
 /** Where a role lands after signing in. */
 function landingFor(roleKey: string) {
-  return roleKey === "tenant" ? "/student" : "/";
+  return `${BASE_PATH}${roleKey === "tenant" ? "/student" : "/"}`;
 }
 
 export async function GET(request: Request) {

@@ -2692,26 +2692,39 @@ export async function GET(request: Request) {
     }
     return Response.json(responseData);
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to load hostel records",
-      },
-      { status: 500 },
-    );
+    const diagnostic =
+      error instanceof Error
+        ? {
+            message: error.message,
+            name: error.name,
+            code: (error as { code?: string }).code,
+            errno: (error as { errno?: string | number }).errno,
+            cause:
+              error.cause instanceof Error
+                ? error.cause.message
+                : error.cause,
+          }
+        : { message: "Unable to load hostel records" };
+    return Response.json({ error: diagnostic }, { status: 500 });
   }
 }
 
 // Rent falls due every month whether or not anyone remembers to press a
-// button, so the billing month builds itself. There is no scheduler process
-// here, so this runs off ordinary traffic: the first request on or after the
-// cut-off day creates that month's cycle. It is safe to call on every request
-// because billing_cycles.period_label is unique — a second attempt at the same
-// month hits the conflict clause and changes nothing — and because
-// generateBillingCycle already skips any student who has an invoice in the
-// cycle, so an interrupted run simply completes on the next request.
+// button, so the billing month reserves itself. There is no scheduler
+// process here, so this runs off ordinary traffic: the first request on or
+// after the cut-off day creates that month's (empty) draft cycle. It is safe
+// to call on every request because billing_cycles.period_label is unique —
+// a second attempt at the same month hits the conflict clause and changes
+// nothing.
+//
+// This deliberately stops at reserving the period — it does NOT call
+// generateBillingCycle to actually charge anyone. An earlier version did,
+// and because it rides on ordinary page traffic rather than a real cron, the
+// day it was switched on it silently back-billed every active tenant for
+// whatever period the cut-off math decided was overdue (this project's own
+// history has that incident on record). A member of staff now has to open
+// Finance, preview the cycle this created, and press "Generate invoices"
+// themselves before a single ringgit is charged to anyone.
 let lastAutoBillingCheck = "";
 // Turning the schedule on has to take effect now, not tomorrow — the day
 // guard is cleared whenever the settings change.
@@ -2753,12 +2766,12 @@ async function runScheduledBilling(db: ReturnType<typeof getDb>) {
     const cutoff = new Date(Date.UTC(periodYear, periodMonth, cutoffDay));
     const due = new Date(cutoff);
     due.setUTCDate(due.getUTCDate() + dueDays);
-    await generateBillingCycle(db, {
+    // Only the empty container — see the comment above this function for why
+    // this does not go on to bill anyone.
+    await ensureBillingCycle(db, {
       periodLabel,
       cutoffDate: iso(cutoff),
       dueDate: iso(due),
-      invoiceFrequency: "monthly",
-      actorName: "Automatic billing",
     });
   } catch (error) {
     // Never let the scheduled run break the page it rode in on. The next
@@ -2768,45 +2781,73 @@ async function runScheduledBilling(db: ReturnType<typeof getDb>) {
   }
 }
 
-// Builds a billing month and its invoices. Extracted so the scheduled run and
-// the manual "Prepare billing month" button share one implementation — two
-// copies of this arithmetic would drift, and the money it produces is the
-// point of the whole system.
-async function generateBillingCycle(
+// Reserves a billing month without charging anyone. Idempotent — calling it
+// again for the same period_label only refreshes the cut-off/due dates, so
+// it is safe for both the scheduler and a staff member to call more than
+// once for the same month.
+async function ensureBillingCycle(
   db: ReturnType<typeof getDb>,
-  input: {
-    periodLabel: string;
-    cutoffDate: string;
-    dueDate: string;
-    invoiceFrequency?: string;
-    actorName: string;
-  },
+  input: { periodLabel: string; cutoffDate: string; dueDate: string },
 ) {
-  {
-    {
-      const cycle = (
-        await db.execute<{ id: number }>(sql`
-          INSERT INTO billing_cycles (period_label, cutoff_date, due_date, status)
-          VALUES (${input.periodLabel}, ${input.cutoffDate}, ${input.dueDate}, 'draft')
-          ON CONFLICT(period_label) DO UPDATE SET cutoff_date=excluded.cutoff_date, due_date=excluded.due_date
-          RETURNING id
-        `)
-      )[0];
-      if (!cycle) throw new Error("Unable to create billing cycle");
-      const cycleId = Number(cycle.id);
-      const cutoffDate = input.cutoffDate;
-      const dueDate = input.dueDate;
-      const invoiceFrequency = input.invoiceFrequency || "on-request";
+  const cycle = (
+    await db.execute<{ id: number }>(sql`
+      INSERT INTO billing_cycles (period_label, cutoff_date, due_date, status)
+      VALUES (${input.periodLabel}, ${input.cutoffDate}, ${input.dueDate}, 'draft')
+      ON CONFLICT(period_label) DO UPDATE SET cutoff_date=excluded.cutoff_date, due_date=excluded.due_date
+      RETURNING id
+    `)
+  )[0];
+  if (!cycle) throw new Error("Unable to create billing cycle");
+  return Number(cycle.id);
+}
+
+type PendingInvoice = {
+  invoiceNo: string;
+  studentId: number;
+  studentName: string;
+  roomCode: string;
+  assignmentId: number;
+  total: number;
+  items: [string, string, number, number, number][];
+  depositCarried: number;
+};
+
+// Works out what everyone currently owes for a cycle, without writing
+// anything. generateBillingCycle() and previewBillingCycle() both call this
+// and share every line of the money math between them — the whole point of
+// a preview is that it can't drift from what actually gets billed.
+async function computeCycleInvoices(
+  db: ReturnType<typeof getDb>,
+  cycleId: number,
+  input: { periodLabel: string; cutoffDate: string; invoiceFrequency?: string },
+): Promise<{
+  invoicesToInsert: PendingInvoice[];
+  maintenanceTicketsByStudent: Map<number, number[]>;
+  depositIdsByAssignment: Map<number, number[]>;
+}> {
+  const empty = {
+    invoicesToInsert: [] as PendingInvoice[],
+    maintenanceTicketsByStudent: new Map<number, number[]>(),
+    depositIdsByAssignment: new Map<number, number[]>(),
+  };
+  const cutoffDate = input.cutoffDate;
+  const invoiceFrequency = input.invoiceFrequency || "on-request";
 
       const active = await db.execute<{
         assignment_id: number;
         student_id: number;
+        student_name: string;
+        room_code: string;
         monthly_rental: number | null;
         room_id: number;
         electricity_rate: number;
+        check_in_date: string | null;
       }>(sql`
-        SELECT a.id assignment_id, a.student_id, a.monthly_rental, r.id room_id, h.electricity_rate
+        SELECT a.id assignment_id, a.student_id, s.full_name student_name,
+               u.unit_code || '-' || r.room_label room_code,
+               a.monthly_rental, r.id room_id, h.electricity_rate, a.check_in_date
         FROM accommodation_assignments a
+        JOIN student_profiles s ON s.id=a.student_id
         JOIN bed_spaces b ON a.bed_space_id=b.id
         JOIN hostel_rooms r ON b.room_id=r.id
         JOIN hostel_units u ON r.unit_id=u.id
@@ -3095,7 +3136,39 @@ async function generateBillingCycle(
             const electricityRate = Number(assignment.electricity_rate || 0);
 
             const rateChange = rateChangeByAssignment.get(assignmentId);
-            const rent = Number(rateChange ?? assignment.monthly_rental ?? 0);
+            const fullRent = Number(rateChange ?? assignment.monthly_rental ?? 0);
+
+            // A tenant who moved in during the very month this cycle bills
+            // already paid a full month's rent at move-in (the one-time
+            // "first month advance rental" line on their move-in invoice —
+            // see syncMoveInInvoice). Charging the normal full rent again
+            // here would double-bill that month. Rather than skip the
+            // assignment outright (which would also swallow any electricity,
+            // parking or maintenance charge it legitimately owes), only the
+            // rent portion is adjusted:
+            //   check-in day 1-15  -> the move-in charge already covers this
+            //                         month in full; nothing more here.
+            //   check-in day 16-28 -> half a month, for the back half they
+            //                         actually lived here.
+            //   check-in day 29-31 -> too little of the month left to bill;
+            //                         nothing here, and next month's cycle
+            //                         charges a normal full month as their
+            //                         effective first month.
+            // A tenant who moved in any earlier month is unaffected — this
+            // only fires the one time a fresh move-in's month lines up with
+            // the cycle being generated.
+            const checkInDate = assignment.check_in_date;
+            const movedInThisPeriod =
+              checkInDate !== null &&
+              checkInDate.slice(0, 7) === input.periodLabel;
+            const rent = !movedInThisPeriod
+              ? fullRent
+              : (() => {
+                  const day = Number(checkInDate.slice(8, 10));
+                  if (day <= 15) return 0;
+                  if (day <= 28) return fullRent / 2;
+                  return 0;
+                })();
 
             const electricity = electricityShareFromCache(
               assignmentId,
@@ -3172,6 +3245,8 @@ async function generateBillingCycle(
             return {
               invoiceNo: `INV-${cycleId}-${studentId}`,
               studentId,
+              studentName: assignment.student_name,
+              roomCode: assignment.room_code,
               assignmentId,
               total,
               items,
@@ -3183,7 +3258,36 @@ async function generateBillingCycle(
             // invoices and gives Finance 139 rows to chase for nothing — the
             // tenancy needs a rent set, which is a data problem, not a bill.
             .filter((invoice) => invoice.items.length > 0);
+        return { invoicesToInsert, maintenanceTicketsByStudent, depositIdsByAssignment };
+      }
+      return empty;
+    }
+    return empty;
+  }
 
+// Builds a billing month and its invoices. Extracted so the scheduled run
+// (via ensureBillingCycle only — see runScheduledBilling) and the manual
+// "Prepare billing month" -> preview -> "Generate invoices" flow share one
+// implementation for the actual money math: two copies of this arithmetic
+// would drift, and the money it produces is the point of the whole system.
+async function generateBillingCycle(
+  db: ReturnType<typeof getDb>,
+  input: {
+    periodLabel: string;
+    cutoffDate: string;
+    dueDate: string;
+    invoiceFrequency?: string;
+    actorName: string;
+  },
+) {
+  const cycleId = await ensureBillingCycle(db, input);
+  const cutoffDate = input.cutoffDate;
+  const dueDate = input.dueDate;
+  const invoiceFrequency = input.invoiceFrequency || "on-request";
+  const { invoicesToInsert, maintenanceTicketsByStudent, depositIdsByAssignment } =
+    await computeCycleInvoices(db, cycleId, input);
+
+  if (invoicesToInsert.length) {
           for (const batch of chunks(invoicesToInsert, 200)) {
             const invoiceValueRows = batch.map(
               (invoice) =>
@@ -3280,12 +3384,51 @@ async function generateBillingCycle(
               });
             }
           }
-        }
-      }
-      return cycleId;
-    }
   }
+  return cycleId;
 }
+
+// The read-only twin of generateBillingCycle(): reserves the period (so two
+// staff previewing at once land on the same draft cycle instead of each
+// minting their own) and runs the identical computation, but stops short of
+// ever touching billing_invoices/billing_items. Recomputed fresh every time
+// rather than cached, so a payment or rate change recorded between preview
+// and the actual "Generate invoices" click is never missed.
+async function previewBillingCycle(
+  db: ReturnType<typeof getDb>,
+  input: {
+    periodLabel: string;
+    cutoffDate: string;
+    dueDate: string;
+    invoiceFrequency?: string;
+  },
+) {
+  const cycleId = await ensureBillingCycle(db, input);
+  const { invoicesToInsert } = await computeCycleInvoices(db, cycleId, input);
+  return {
+    cycleId,
+    periodLabel: input.periodLabel,
+    cutoffDate: input.cutoffDate,
+    dueDate: input.dueDate,
+    rows: invoicesToInsert.map((row) => ({
+      studentId: row.studentId,
+      studentName: row.studentName,
+      roomCode: row.roomCode,
+      invoiceNo: row.invoiceNo,
+      total: row.total,
+      items: row.items.map(([itemType, description, quantity, rate, amount]) => ({
+        itemType,
+        description,
+        quantity,
+        rate,
+        amount,
+      })),
+    })),
+    invoiceCount: invoicesToInsert.length,
+    totalBilled: invoicesToInsert.reduce((sum, row) => sum + row.total, 0),
+  };
+}
+
 
 export async function POST(request: Request) {
   try {
@@ -3294,6 +3437,7 @@ export async function POST(request: Request) {
     const action = asText(body.action);
     let createdId: number | undefined;
     let linkedPaymentId: number | undefined;
+    let billingPreview: Awaited<ReturnType<typeof previewBillingCycle>> | undefined;
     if (!administrationSeeded) {
       await seedAdministration(db);
       administrationSeeded = true;
@@ -5200,6 +5344,22 @@ export async function POST(request: Request) {
           submittedBy: currentUser.displayName,
         })
         .where(eq(meterReadings.id, asNumber(body.readingId)));
+    } else if (action === "billing-cycle-preview") {
+      // Read-only preview of what "billing-cycle" below would actually
+      // charge, computed by the exact same function so it cannot drift from
+      // what a real run produces. The only write is reserving the period in
+      // billing_cycles (see ensureBillingCycle) — no invoice or item is
+      // created, and nothing here is visible to a tenant.
+      if (!asText(body.periodLabel) || !body.cutoffDate || !body.dueDate)
+        throw new Error(
+          "Billing month, cut-off date and due date are required",
+        );
+      billingPreview = await previewBillingCycle(db, {
+        periodLabel: asText(body.periodLabel),
+        cutoffDate: asText(body.cutoffDate),
+        dueDate: asText(body.dueDate),
+        invoiceFrequency: asText(body.invoiceFrequency, "on-request"),
+      });
     } else if (action === "billing-cycle") {
       if (!asText(body.periodLabel) || !body.cutoffDate || !body.dueDate)
         throw new Error(
@@ -5551,7 +5711,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unsupported action" }, { status: 400 });
     }
     return Response.json(
-      { ok: true, id: createdId, linkedPaymentId },
+      { ok: true, id: createdId, linkedPaymentId, preview: billingPreview },
       { status: 201 },
     );
   } catch (error) {

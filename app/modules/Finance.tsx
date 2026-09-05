@@ -18,6 +18,7 @@ import {
   uploadAttachment,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import { BASE_PATH } from "../basePath";
 
 const PAGE_SIZE = 30;
 
@@ -163,6 +164,39 @@ export function FinanceModule({
 }) {
   const [modal, setModal] = useState("");
   const latest = data.billingCycles[0];
+  const latestCycleInvoiceCount = latest
+    ? data.invoices.filter((invoice: Row) => invoice.cycleId === latest.id)
+        .length
+    : 0;
+  // Nothing is charged until this is set AND staff explicitly presses
+  // "Generate invoices" below — see the "cycle" modal.
+  const [cyclePreview, setCyclePreview] = useState<{
+    cycleId: number;
+    periodLabel: string;
+    cutoffDate: string;
+    dueDate: string;
+    invoiceCount: number;
+    totalBilled: number;
+    rows: {
+      studentId: number;
+      studentName: string;
+      roomCode: string;
+      invoiceNo: string;
+      total: number;
+      items: {
+        itemType: string;
+        description: string;
+        quantity: number;
+        rate: number;
+        amount: number;
+      }[];
+    }[];
+  } | null>(null);
+  const [cycleInputs, setCycleInputs] = useState<Record<
+    string,
+    string
+  > | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [financeTab, setFinanceTab] = useState<
     "invoices" | "deposits" | "adjustments" | "maintenance" | "parking"
   >("invoices");
@@ -467,9 +501,42 @@ export function FinanceModule({
             <p>
               Cut-off {dateLabel(latest.cutoffDate)} · Due{" "}
               {dateLabel(latest.dueDate)} · {titleCase(latest.status)}
+              {latest.status === "draft" &&
+                latestCycleInvoiceCount === 0 &&
+                " · Reserved, not yet generated"}
             </p>
           </div>
           {latest.status === "draft" &&
+            latestCycleInvoiceCount === 0 &&
+            data.currentUser?.roleKey !== "tenant" && (
+              <button
+                className="primary"
+                disabled={previewBusy}
+                onClick={async () => {
+                  const values = {
+                    periodLabel: latest.periodLabel,
+                    cutoffDate: latest.cutoffDate,
+                    dueDate: latest.dueDate,
+                    invoiceFrequency: "monthly",
+                  };
+                  setPreviewBusy(true);
+                  const result = await save(
+                    { action: "billing-cycle-preview", ...values },
+                    "Preview ready",
+                  );
+                  setPreviewBusy(false);
+                  if (result?.preview) {
+                    setCycleInputs(values);
+                    setCyclePreview(result.preview);
+                    setModal("cycle");
+                  }
+                }}
+              >
+                {previewBusy ? "Calculating…" : "Preview & generate"}
+              </button>
+            )}
+          {latest.status === "draft" &&
+            latestCycleInvoiceCount > 0 &&
             data.currentUser?.roleKey !== "tenant" && (
               <button
                 className="primary"
@@ -871,7 +938,7 @@ export function FinanceModule({
                             <a
                               key={attachment.id}
                               className="secondary compact"
-                              href={`/api/files?id=${attachment.id}`}
+                              href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                               target="_blank"
                               rel="noreferrer"
                             >
@@ -1400,48 +1467,146 @@ export function FinanceModule({
       )}
       {modal === "cycle" && (
         <Modal
-          title="Prepare billing month"
+          wide={Boolean(cyclePreview)}
+          title={
+            cyclePreview ? `Preview — ${cyclePreview.periodLabel}` : "Prepare billing month"
+          }
           kicker="CUT-OFF CONTROL"
-          description="The 24th is the normal cut-off. Review draft calculations before posting."
-          onClose={() => setModal("")}
+          description={
+            cyclePreview
+              ? "Nothing has been charged yet. Check the figures below, then generate — or go back and adjust the dates."
+              : "The 24th is the normal cut-off. The next step shows exactly what this would bill before anything is created."
+          }
+          onClose={() => {
+            setModal("");
+            setCyclePreview(null);
+            setCycleInputs(null);
+          }}
         >
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await save(
-                { action: "billing-cycle", ...formValues(e) },
-                "Draft billing cycle prepared",
-              );
-              if (ok) setModal("");
-            }}
-          >
-            <label>
-              Billing month
-              <input name="periodLabel" type="month" required />
-            </label>
-            <label>
-              Cut-off date
-              <input name="cutoffDate" type="date" required />
-            </label>
-            <label>
-              Payment due date
-              <input name="dueDate" type="date" required />
-            </label>
-            <label>
-              Invoice frequency
-              <select name="invoiceFrequency">
-                <option value="on-request">Invoice on request</option>
-                <option value="monthly">Generate invoice monthly</option>
-                <option value="one-time">One-time invoice</option>
-              </select>
-            </label>
-            <div className="form-actions wide">
-              <button className="primary" disabled={busy}>
-                Generate draft bills
-              </button>
+          {!cyclePreview ? (
+            <form
+              className="form-grid"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const values = formValues(e) as Record<string, string>;
+                setPreviewBusy(true);
+                const result = await save(
+                  { action: "billing-cycle-preview", ...values },
+                  "Preview ready",
+                );
+                setPreviewBusy(false);
+                if (result?.preview) {
+                  setCycleInputs(values);
+                  setCyclePreview(result.preview);
+                }
+              }}
+            >
+              <label>
+                Billing month
+                <input name="periodLabel" type="month" required />
+              </label>
+              <label>
+                Cut-off date
+                <input name="cutoffDate" type="date" required />
+              </label>
+              <label>
+                Payment due date
+                <input name="dueDate" type="date" required />
+              </label>
+              <label>
+                Invoice frequency
+                <select name="invoiceFrequency">
+                  <option value="on-request">Invoice on request</option>
+                  <option value="monthly">Generate invoice monthly</option>
+                  <option value="one-time">One-time invoice</option>
+                </select>
+              </label>
+              <div className="form-actions wide">
+                <button className="primary" disabled={busy || previewBusy}>
+                  {previewBusy ? "Calculating…" : "Preview this month"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="billing-preview">
+              <section className="module-metrics">
+                <Stat value={cyclePreview.invoiceCount} label="Would bill" />
+                <Stat
+                  value={money(cyclePreview.totalBilled, true)}
+                  label="Would total"
+                />
+                <Stat
+                  value={`${dateLabel(cyclePreview.cutoffDate)} → ${dateLabel(cyclePreview.dueDate)}`}
+                  label="Cut-off / due"
+                />
+              </section>
+              {cyclePreview.rows.length === 0 ? (
+                <p className="empty-copy">
+                  Nobody would be billed for this month — either everyone
+                  already has an invoice in it, or no active tenant has rent
+                  set.
+                </p>
+              ) : (
+                <div className="table-wrap billing-preview-table">
+                  <table className="finance-invoices">
+                    <thead>
+                      <tr>
+                        <th>Tenant</th>
+                        <th>Room</th>
+                        <th>Breakdown</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cyclePreview.rows.map((row) => (
+                        <tr key={row.studentId}>
+                          <td>{row.studentName}</td>
+                          <td>{row.roomCode}</td>
+                          <td>
+                            {row.items
+                              .map(
+                                (item) =>
+                                  `${chargeTypeMeta(item.itemType).label}: ${money(item.amount, true)}`,
+                              )
+                              .join(" · ")}
+                          </td>
+                          <td>{money(row.total, true)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="form-actions wide">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setCyclePreview(null)}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || cyclePreview.rows.length === 0}
+                  onClick={async () => {
+                    const ok = await save(
+                      { action: "billing-cycle", ...cycleInputs },
+                      "Invoices generated",
+                    );
+                    if (ok) {
+                      setModal("");
+                      setCyclePreview(null);
+                      setCycleInputs(null);
+                    }
+                  }}
+                >
+                  Generate invoices
+                </button>
+              </div>
             </div>
-          </form>
+          )}
         </Modal>
       )}
       {modal.startsWith("invoice:") &&
@@ -1608,7 +1773,7 @@ export function FinanceModule({
                           <span key={attachment.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
                             <a
                               className="secondary compact"
-                              href={`/api/files?id=${attachment.id}`}
+                              href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                               target="_blank"
                               rel="noreferrer"
                             >
@@ -1756,7 +1921,7 @@ export function FinanceModule({
                 {slips.map((attachment) => (
                   <a
                     key={attachment.id}
-                    href={`/api/files?id=${attachment.id}`}
+                    href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                     target="_blank"
                     rel="noreferrer"
                   >

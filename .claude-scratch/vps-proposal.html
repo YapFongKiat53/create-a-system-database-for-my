@@ -1,0 +1,407 @@
+<title>Off cPanel, Onto a VPS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap');
+
+  :root {
+    --bg: #eef1ef;
+    --surface: #ffffff;
+    --surface-2: #e5e9e6;
+    --ink: #161b1a;
+    --ink-soft: #4c5652;
+    --ink-faint: #7c8985;
+    --line: #d3d9d5;
+    --accent: #24634f;
+    --accent-ink: #133f32;
+    --accent-soft: #dceae3;
+    --good: #2c7a4b;
+    --good-soft: #e1f1e5;
+    --warn: #a8631c;
+    --warn-soft: #f6e9d6;
+    --bad: #a8352e;
+    --bad-soft: #f7e2df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121613;
+      --surface: #191f1c;
+      --surface-2: #212824;
+      --ink: #eaeeec;
+      --ink-soft: #b0bab5;
+      --ink-faint: #7c8985;
+      --line: #2b332e;
+      --accent: #5cbe97;
+      --accent-ink: #d3f0e2;
+      --accent-soft: #1c322a;
+      --good: #6bc78d;
+      --good-soft: #17301f;
+      --warn: #e0a154;
+      --warn-soft: #392a15;
+      --bad: #e2827a;
+      --bad-soft: #3a1d1a;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #121613;
+    --surface: #191f1c;
+    --surface-2: #212824;
+    --ink: #eaeeec;
+    --ink-soft: #b0bab5;
+    --ink-faint: #7c8985;
+    --line: #2b332e;
+    --accent: #5cbe97;
+    --accent-ink: #d3f0e2;
+    --accent-soft: #1c322a;
+    --good: #6bc78d;
+    --good-soft: #17301f;
+    --warn: #e0a154;
+    --warn-soft: #392a15;
+    --bad: #e2827a;
+    --bad-soft: #3a1d1a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Noto Serif SC", serif;
+    line-height: 1.65;
+    font-size: 17px;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 1.5px;
+    background: var(--accent);
+    display: inline-block;
+  }
+
+  h1 {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-weight: 700;
+    font-size: clamp(32px, 5vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  .dek {
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 40px;
+  }
+
+  h2 {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-weight: 600;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+
+  .section {
+    margin-top: 64px;
+  }
+  .section-note {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 14px;
+    color: var(--ink-faint);
+    margin: 0 0 26px;
+  }
+
+  p { max-width: 66ch; margin: 0 0 16px; }
+  p:last-child { margin-bottom: 0; }
+
+  .context-box {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 26px;
+  }
+  .context-box p { max-width: none; color: var(--ink-soft); font-size: 16px; }
+  .context-box code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.88em;
+    background: var(--surface-2);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+
+  /* ---- Spec fit table ---- */
+  .specsheet {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .spec-head {
+    display: grid;
+    grid-template-columns: 1.1fr 1.4fr 1.6fr 1fr;
+    gap: 16px;
+    padding: 14px 22px;
+    background: var(--surface-2);
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-faint);
+  }
+  .spec-row {
+    display: grid;
+    grid-template-columns: 1.1fr 1.4fr 1.6fr 1fr;
+    gap: 16px;
+    padding: 18px 22px;
+    border-top: 1px solid var(--line);
+    align-items: center;
+  }
+  .spec-name {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .spec-value {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 14.5px;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .spec-need {
+    font-size: 14px;
+    color: var(--ink-soft);
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+  }
+  .fit {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 100px;
+    justify-self: start;
+    white-space: nowrap;
+  }
+  .fit-good { background: var(--good-soft); color: var(--good); }
+  .fit-watch { background: var(--warn-soft); color: var(--warn); }
+
+  @media (max-width: 640px) {
+    .spec-head { display: none; }
+    .spec-row {
+      grid-template-columns: 1fr;
+      gap: 6px;
+      padding: 16px 20px;
+    }
+    .spec-value::before { content: "规格： "; color: var(--ink-faint); font-family: "IBM Plex Sans", sans-serif; }
+    .spec-need::before { content: "这个系统需要： "; color: var(--ink-faint); }
+  }
+
+  /* ---- Two-column comparison ---- */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 700px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare-col {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px 24px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .compare-col h3 {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .compare-price {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+    display: block;
+    font-weight: 400;
+  }
+  .plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .plist li {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 14.5px;
+    line-height: 1.5;
+    padding-left: 22px;
+    position: relative;
+    color: var(--ink-soft);
+  }
+  .plist.good li::before { content: "+"; position:absolute; left:2px; top:0; color: var(--good); font-weight:700; font-family: "IBM Plex Mono", monospace;}
+  .plist.bad li::before { content: "–"; position:absolute; left:2px; top:0; color: var(--bad); font-weight:700; font-family: "IBM Plex Mono", monospace;}
+  .plabel {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .plabel.good { color: var(--good); }
+  .plabel.bad { color: var(--bad); }
+
+  /* ---- Recommendation ---- */
+  .verdict {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 28px 30px;
+  }
+  .verdict .plabel { color: var(--accent-ink); font-size: 12px; margin-bottom: 10px; display:block; }
+  .verdict p { color: var(--ink); max-width: none; }
+  .verdict p:first-of-type { font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif; font-weight: 600; font-size: 18px; color: var(--accent-ink); line-height:1.45; }
+
+  .caveat {
+    font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+    font-size: 13.5px;
+    color: var(--ink-faint);
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+  }
+
+  .footline {
+    margin-top: 72px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+</style>
+
+<div class="page">
+  <div class="eyebrow">Hostel Operations · 基础设施提案</div>
+  <h1>脱离 cPanel，改用 VPS</h1>
+  <p class="dek">评估「Linux KVM VPS – Basic」方案是否撑得起这个系统，并比较自己操作跟请人代管这两条路的取舍。</p>
+
+  <div class="section">
+    <div class="context-box">
+      <p>这次会走到考虑 VPS，是因为现有 cPanel 共享主机连续出现两个只有主机端能修的限制：Setup Node.js App 的反向代理只认根目录 <code>/</code>，其他路径全部 500；接着确认对外连到 Supabase 资料库的连线被防火墙挡下（<code>ETIMEDOUT</code>）。这两个都要等主机客服处理，VPS 能让这类设定完全掌握在自己手上。</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Basic 方案，够撑起这个系统吗？</h2>
+    <p class="section-note">对照 Linux KVM VPS – Basic 的实际规格，跟这个系统真正会用到的资源。</p>
+    <div class="specsheet">
+      <div class="spec-head">
+        <div>项目</div><div>Basic 规格</div><div>这个系统的需求</div><div>结论</div>
+      </div>
+      <div class="spec-row">
+        <div class="spec-name">RAM</div>
+        <div class="spec-value">1 GB</div>
+        <div class="spec-need">一个 Node.js process + Nginx；没有本地资料库（资料库在 Supabase）</div>
+        <div class="fit fit-watch">够用但吃紧</div>
+      </div>
+      <div class="spec-row">
+        <div class="spec-name">vCPU</div>
+        <div class="spec-value">1 核心（+1 免费）</div>
+        <div class="spec-need">大部分时间在等 Supabase 回应，不吃 CPU 运算</div>
+        <div class="fit fit-good">合适</div>
+      </div>
+      <div class="spec-row">
+        <div class="spec-name">硬碟</div>
+        <div class="spec-value">40 GB NVMe SSD</div>
+        <div class="spec-need">App + node_modules 大约数百 MB，无本地档案储存</div>
+        <div class="fit fit-good">绰绰有余</div>
+      </div>
+      <div class="spec-row">
+        <div class="spec-name">流量</div>
+        <div class="spec-value">2 TB／月，100 Mbps</div>
+        <div class="spec-need">内部员工与住宿生使用，同时在线人数少</div>
+        <div class="fit fit-good">绰绰有余</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>自己操作，还是请人代管？</h2>
+    <p class="section-note">两条路都能让系统跑在 VPS 上，差别在于谁去顾服务器本身。</p>
+    <div class="compare">
+      <div class="compare-col">
+        <h3>自己操作<span class="compare-price">只付 VPS 本身：RM28.90 起／月</span></h3>
+        <div>
+          <span class="plabel good">优点</span>
+          <ul class="plist good">
+            <li>不用等第三方回覆——就像这次处理 cPanel 一样，我可以直接带你一步步设定</li>
+            <li>没有额外管理费</li>
+            <li>服务器设定完全自己掌握，不会再被某个黑盒子（像 CloudLinux Selector）卡住</li>
+          </ul>
+        </div>
+        <div>
+          <span class="plabel bad">缺点</span>
+          <ul class="plist bad">
+            <li>系统更新、防火墙、SSL 证书续期都要自己顾（或靠我提醒、带着做）</li>
+            <li>半夜当机没人盯着，要等你自己发现</li>
+            <li>要透过终端机下指令，比 cPanel 图形介面多一点学习曲线</li>
+          </ul>
+        </div>
+      </div>
+      <div class="compare-col">
+        <h3>请人代管<span class="compare-price">VPS 费用之外，另计管理费</span></h3>
+        <div>
+          <span class="plabel good">优点</span>
+          <ul class="plist good">
+            <li>有专人顾资安更新、监控、备份，出状况会主动处理</li>
+            <li>不需要自己碰指令行，用沟通的方式说需求就好</li>
+          </ul>
+        </div>
+        <div>
+          <span class="plabel bad">缺点</span>
+          <ul class="plist bad">
+            <li>每月多一笔费用——业界行情大致是 VPS 本身费用的 2～4 倍，实际报价需另外问这家主机商是否有 Managed 升级，或另找人</li>
+            <li>又多一层「要等对方回覆」——这正是这次卡在 cPanel 的原因，换到 VPS 若还是靠别人处理，同样的等待可能重演</li>
+            <li>资料库密码、住宿生资料要交给第三方，需要额外评估信任</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>建议</h2>
+    <div class="verdict">
+      <span class="plabel">我的看法</span>
+      <p>Basic 方案本身没问题，自己操作也是更适合你的路。</p>
+      <p>这次处理 cPanel 的过程你都愿意一步步照着截图操作、跟着终端机指令走——VPS 需要的操作模式跟这次几乎一样，差别只是这次的设定是「一次做对」，而不是被一个不透明的托管黑盒子卡住。省下来的管理费，也抵得过多学几个 Linux 指令的时间。</p>
+      <div class="caveat">代管路线并非不可行，只是这次遇到的根本问题（等第三方处理才能修）在代管模式下不会消失，反而是多一层。若未来系统规模变大、需要更认真的资安责任分担，再重新评估代管也不迟。</div>
+    </div>
+  </div>
+
+  <div class="footline">HOSTELPRO · 基础设施提案 · 2026年9月</div>
+</div>

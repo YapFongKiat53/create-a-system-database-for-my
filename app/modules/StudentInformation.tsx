@@ -26,6 +26,7 @@ import {
   today,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import { BASE_PATH } from "../basePath";
 
 type DirectoryTab = "all" | "active" | "moved-out" | "agency";
 type CompletionFilter = "all" | "complete" | "incomplete";
@@ -905,7 +906,7 @@ function StudentBilling({
                               {slips.length ? (
                                 <a
                                   className="secondary compact"
-                                  href={`/api/files?id=${slips[0].id}`}
+                                  href={`${BASE_PATH}/api/files?id=${slips[0].id}`}
                                   target="_blank"
                                   rel="noreferrer"
                                 >

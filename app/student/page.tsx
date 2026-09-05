@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BASE_PATH } from "../basePath";
 
 type Me = {
   displayName: string;
@@ -15,30 +16,30 @@ export default function StudentPortalPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth", { cache: "no-store" })
+    fetch(`${BASE_PATH}/api/auth`, { cache: "no-store" })
       .then((response) => response.json() as Promise<{ user?: Me | null }>)
       .then((result) => {
         if (cancelled) return;
         if (!result.user) {
-          window.location.replace("/login");
+          window.location.replace(`${BASE_PATH}/login`);
           return;
         }
         setMe(result.user);
         setLoading(false);
       })
-      .catch(() => !cancelled && window.location.replace("/login"));
+      .catch(() => !cancelled && window.location.replace(`${BASE_PATH}/login`));
     return () => {
       cancelled = true;
     };
   }, []);
 
   const signOut = async () => {
-    await fetch("/api/auth", {
+    await fetch(`${BASE_PATH}/api/auth`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "logout" }),
     });
-    window.location.replace("/login");
+    window.location.replace(`${BASE_PATH}/login`);
   };
 
   if (loading)

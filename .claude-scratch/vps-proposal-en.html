@@ -1,0 +1,299 @@
+<title>VPS Migration Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap');
+
+  :root {
+    --bg: #eef1ef;
+    --surface: #ffffff;
+    --surface-2: #e5e9e6;
+    --ink: #161b1a;
+    --ink-soft: #4c5652;
+    --ink-faint: #7c8985;
+    --line: #d3d9d5;
+    --accent: #24634f;
+    --accent-ink: #133f32;
+    --accent-soft: #dceae3;
+    --good: #2c7a4b;
+    --good-soft: #e1f1e5;
+    --warn: #a8631c;
+    --warn-soft: #f6e9d6;
+    --bad: #a8352e;
+    --bad-soft: #f7e2df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121613; --surface: #191f1c; --surface-2: #212824;
+      --ink: #eaeeec; --ink-soft: #b0bab5; --ink-faint: #7c8985;
+      --line: #2b332e; --accent: #5cbe97; --accent-ink: #d3f0e2; --accent-soft: #1c322a;
+      --good: #6bc78d; --good-soft: #17301f; --warn: #e0a154; --warn-soft: #392a15;
+      --bad: #e2827a; --bad-soft: #3a1d1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121613; --surface: #191f1c; --surface-2: #212824;
+    --ink: #eaeeec; --ink-soft: #b0bab5; --ink-faint: #7c8985;
+    --line: #2b332e; --accent: #5cbe97; --accent-ink: #d3f0e2; --accent-soft: #1c322a;
+    --good: #6bc78d; --good-soft: #17301f; --warn: #e0a154; --warn-soft: #392a15;
+    --bad: #e2827a; --bad-soft: #3a1d1a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    line-height: 1.65;
+    font-size: 17px;
+  }
+
+  .page { max-width: 900px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); display: flex; align-items: center; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 1.5px; background: var(--accent); display: inline-block; }
+
+  h1 {
+    font-family: "IBM Plex Sans", sans-serif; font-weight: 700;
+    font-size: clamp(32px, 5vw, 46px); line-height: 1.08; letter-spacing: -0.015em;
+    margin: 0 0 16px; text-wrap: balance; color: var(--ink);
+  }
+
+  .dek { font-size: 18px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 22px; }
+
+  .meta-row {
+    display: flex; gap: 28px; flex-wrap: wrap;
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-faint);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    padding: 14px 0; margin-bottom: 44px;
+  }
+  .meta-row span b { color: var(--ink-soft); font-weight: 600; }
+
+  h2 {
+    font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: 24px;
+    letter-spacing: -0.01em; color: var(--ink); margin: 0 0 6px; text-wrap: balance;
+  }
+  .section { margin-top: 60px; }
+  .section-note { font-family: "IBM Plex Sans", sans-serif; font-size: 14px; color: var(--ink-faint); margin: 0 0 24px; }
+
+  p { max-width: 70ch; margin: 0 0 16px; }
+  p:last-child { margin-bottom: 0; }
+
+  .summary-box {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 24px 28px;
+  }
+  .summary-box .plabel { color: var(--accent-ink); display:block; margin-bottom: 10px; }
+  .summary-box p { color: var(--ink); max-width: none; }
+
+  .context-box {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px;
+  }
+  .context-box ul { margin: 8px 0 0; padding-left: 20px; }
+  .context-box li { margin-bottom: 8px; color: var(--ink-soft); }
+  .context-box p { color: var(--ink-soft); max-width: none; }
+  .context-box code {
+    font-family: "IBM Plex Mono", monospace; font-size: 0.88em;
+    background: var(--surface-2); padding: 0.1em 0.4em; border-radius: 4px; color: var(--ink);
+  }
+
+  /* ---- Real tables ---- */
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    overflow: hidden; font-family: "IBM Plex Sans", sans-serif; font-size: 14.5px;
+  }
+  caption {
+    caption-side: top; text-align: left; font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  thead th {
+    background: var(--surface-2); text-align: left; font-weight: 600; font-size: 12.5px;
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-faint);
+    padding: 13px 18px; border-bottom: 1px solid var(--line);
+  }
+  tbody td, tbody th {
+    padding: 15px 18px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink-soft);
+  }
+  tbody th { font-weight: 600; color: var(--ink); text-align: left; white-space: nowrap; }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 40%, transparent); }
+  td.mono, th.mono { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+  .pill {
+    display: inline-block; font-family: "IBM Plex Sans", sans-serif; font-size: 12px; font-weight: 600;
+    padding: 4px 11px; border-radius: 100px; white-space: nowrap;
+  }
+  .pill-good { background: var(--good-soft); color: var(--good); }
+  .pill-watch { background: var(--warn-soft); color: var(--warn); }
+
+  .table-wrap { overflow-x: auto; }
+
+  /* self-managed column highlighted as the recommended one */
+  .col-highlight { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+  thead th.col-highlight { background: var(--accent-soft); color: var(--accent-ink); }
+
+  .check { color: var(--good); font-weight: 700; }
+  .cross { color: var(--bad); font-weight: 700; }
+
+  .verdict {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px;
+    padding: 28px 30px; margin-top: 28px;
+  }
+  .verdict .plabel { color: var(--accent-ink); font-size: 12px; margin-bottom: 10px; display:block; }
+  .verdict p { color: var(--ink); max-width: none; }
+  .verdict p.lead {
+    font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: 18px;
+    color: var(--accent-ink); line-height:1.45;
+  }
+  .caveat {
+    font-family: "IBM Plex Sans", sans-serif; font-size: 13.5px; color: var(--ink-faint);
+    margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line);
+  }
+
+  .plabel {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 600;
+  }
+
+  .footline {
+    margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-faint);
+  }
+
+  @media print {
+    body { background: #fff; }
+    .page { max-width: none; padding: 0 8px; }
+  }
+</style>
+
+<div class="page">
+  <div class="eyebrow">Hostel Operations · Infrastructure</div>
+  <h1>VPS Migration Proposal</h1>
+  <p class="dek">Assessing a move from shared cPanel hosting to a self-managed VPS, and comparing self-managed versus fully-managed operation.</p>
+  <div class="meta-row">
+    <span><b>Subject system:</b> Hostel Operations (student/tenancy management)</span>
+    <span><b>Candidate plan:</b> Linux KVM VPS – Basic, RM28.90/mo</span>
+    <span><b>Date:</b> September 2026</span>
+  </div>
+
+  <div class="section">
+    <h2>Executive Summary</h2>
+    <div class="summary-box">
+      <span class="plabel">Recommendation</span>
+      <p>Migrate the Hostel Operations application to a self-managed Linux KVM VPS (Basic tier). The current shared cPanel host has two infrastructure-level faults that only the hosting provider can fix — a reverse-proxy misconfiguration and an outbound firewall blocking database connectivity — and both have required open-ended waits on provider support. A VPS removes that dependency entirely, at a lower ongoing cost than a managed alternative.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Background</h2>
+    <div class="context-box">
+      <p>Two faults were identified on the current shared hosting account while deploying this system, both outside of what the cPanel control panel can configure:</p>
+      <ul>
+        <li>The Node.js reverse proxy only forwards requests for the exact root path (<code>/</code>); every other route — API endpoints, static assets, all application pages — returns a generic server error.</li>
+        <li>After that was partially addressed, outbound connections from the server to the application's external PostgreSQL database (hosted on Supabase) were found to be silently blocked at the network level (<code>ETIMEDOUT</code>), rather than reaching the database at all.</li>
+      </ul>
+      <p>Both faults required escalation to the hosting provider's support team, with no fix guaranteed and no fixed timeline.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Is the Basic Tier Sufficient?</h2>
+    <p class="section-note">Plan specifications weighed against what this application actually requires to run.</p>
+    <div class="table-wrap">
+      <table>
+        <caption>Linux KVM VPS – Basic, RM28.90/month</caption>
+        <thead>
+          <tr><th>Resource</th><th>Plan Spec</th><th>Application Requirement</th><th>Assessment</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>RAM</th>
+            <td class="mono">1 GB</td>
+            <td>Single Node.js process + Nginx; no local database — data is hosted externally on Supabase</td>
+            <td><span class="pill pill-watch">Sufficient, limited headroom</span></td>
+          </tr>
+          <tr>
+            <th>vCPU</th>
+            <td class="mono">1 core (+1 promotional)</td>
+            <td>Workload is I/O-bound — mostly waiting on database responses, not compute-intensive</td>
+            <td><span class="pill pill-good">Sufficient</span></td>
+          </tr>
+          <tr>
+            <th>Storage</th>
+            <td class="mono">40 GB NVMe SSD</td>
+            <td>Application and dependencies total a few hundred MB; no local file storage in use</td>
+            <td><span class="pill pill-good">Ample headroom</span></td>
+          </tr>
+          <tr>
+            <th>Bandwidth</th>
+            <td class="mono">2 TB/mo, 100 Mbps shared</td>
+            <td>Internal staff and resident usage only; low concurrent traffic</td>
+            <td><span class="pill pill-good">Ample headroom</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Deployment Model Comparison</h2>
+    <p class="section-note">Either model runs the application on the same VPS hardware — the difference is who is responsible for the server itself.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Criteria</th><th class="col-highlight">Self-Managed</th><th>Fully-Managed Service</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Monthly cost</th>
+            <td class="col-highlight mono">RM28.90 (VPS only)</td>
+            <td class="mono">VPS cost + management fee — typically 2–4× the base VPS cost industry-wide; requires a quote from this provider or a third-party administrator</td>
+          </tr>
+          <tr>
+            <th>Response time on faults</th>
+            <td class="col-highlight"><span class="check">✓</span> Immediate — no third party to wait on</td>
+            <td>Bound by the provider's support SLA</td>
+          </tr>
+          <tr>
+            <th>Security patching &amp; updates</th>
+            <td class="col-highlight">Owner's responsibility (with guided support)</td>
+            <td><span class="check">✓</span> Handled by the managing party</td>
+          </tr>
+          <tr>
+            <th>Configuration control</th>
+            <td class="col-highlight"><span class="check">✓</span> Full, direct control</td>
+            <td>Requests routed through the managing party</td>
+          </tr>
+          <tr>
+            <th>Data access exposure</th>
+            <td class="col-highlight"><span class="check">✓</span> Database credentials stay in-house</td>
+            <td>Shared with a third-party administrator</td>
+          </tr>
+          <tr>
+            <th>Technical requirement</th>
+            <td class="col-highlight">Command-line operations, guided step-by-step</td>
+            <td><span class="check">✓</span> None — handled via support requests</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Recommendation</h2>
+    <div class="verdict">
+      <span class="plabel">Assessment</span>
+      <p class="lead">Proceed with the self-managed Linux KVM VPS – Basic plan.</p>
+      <p>The Basic tier's specifications comfortably cover this application's needs, with RAM as the only figure worth monitoring as usage grows. Self-management directly eliminates the root cause of the current outage — dependency on a third party's support queue to fix infrastructure faults — while costing less than a managed alternative.</p>
+      <div class="caveat">A managed service remains a reasonable option if the system's scale or data-security requirements grow to the point where dedicated, contracted security ownership becomes necessary. That is not the case at the system's current scale.</div>
+    </div>
+  </div>
+
+  <div class="footline">HOSTELPRO · VPS Migration Proposal · September 2026</div>
+</div>

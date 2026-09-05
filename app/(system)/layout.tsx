@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { SystemProvider, useSystem } from "../SystemContext";
 import type { Row } from "../modules/shared";
+import { BASE_PATH } from "../basePath";
 
 import {
   DashboardIcon,
@@ -229,12 +230,12 @@ function Chrome({ children }: { children: ReactNode }) {
             title="Sign out"
             aria-label="Sign out"
             onClick={async () => {
-              await fetch("/api/auth", {
+              await fetch(`${BASE_PATH}/api/auth`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({ action: "logout" }),
               });
-              window.location.replace("/login");
+              window.location.replace(`${BASE_PATH}/login`);
             }}
           >
             <SignOutIcon />
@@ -281,18 +282,18 @@ export default function SystemLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth", { cache: "no-store" })
+    fetch(`${BASE_PATH}/api/auth`, { cache: "no-store" })
       .then((response) => response.json() as Promise<{
         user?: { roleKey: string } | null;
       }>)
       .then((result) => {
         if (cancelled) return;
-        if (!result.user) window.location.replace("/login");
+        if (!result.user) window.location.replace(`${BASE_PATH}/login`);
         else if (result.user.roleKey === "tenant")
-          window.location.replace("/student");
+          window.location.replace(`${BASE_PATH}/student`);
         else setAllowed(true);
       })
-      .catch(() => !cancelled && window.location.replace("/login"));
+      .catch(() => !cancelled && window.location.replace(`${BASE_PATH}/login`));
     return () => {
       cancelled = true;
     };

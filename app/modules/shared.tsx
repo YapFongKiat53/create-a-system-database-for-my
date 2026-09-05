@@ -3,6 +3,7 @@
 
 import { useId, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { BASE_PATH } from "../basePath";
 
 export type Row = Record<string, any>;
 export type Data = {
@@ -458,7 +459,7 @@ export function DocumentTile({ attachment }: { attachment: Row }) {
   return (
     <a
       className="document-tile"
-      href={`/api/files?id=${attachment.id}`}
+      href={`${BASE_PATH}/api/files?id=${attachment.id}`}
       target="_blank"
       rel="noreferrer"
     >
@@ -485,7 +486,7 @@ export const uploadAttachment = async (
   form.set("recordId", String(recordId));
   form.set("uploadedBy", uploadedBy);
   if (fileName) form.set("fileName", fileName);
-  const response = await fetch("/api/files", { method: "POST", body: form });
+  const response = await fetch(`${BASE_PATH}/api/files`, { method: "POST", body: form });
   const result = (await response.json()) as { error?: string; id?: number };
   if (!response.ok) throw new Error(result.error || "Unable to upload file");
   return result;
@@ -504,13 +505,13 @@ export const linkAttachment = async (
   form.set("contextType", contextType);
   form.set("recordId", String(recordId));
   form.set("uploadedBy", uploadedBy);
-  const response = await fetch("/api/files", { method: "POST", body: form });
+  const response = await fetch(`${BASE_PATH}/api/files`, { method: "POST", body: form });
   const result = (await response.json()) as { error?: string; id?: number };
   if (!response.ok) throw new Error(result.error || "Unable to link file");
   return result;
 };
 export const renameAttachment = async (attachmentId: number, fileName: string) => {
-  const response = await fetch(`/api/files?id=${attachmentId}`, {
+  const response = await fetch(`${BASE_PATH}/api/files?id=${attachmentId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ fileName }),

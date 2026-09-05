@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { BASE_PATH } from "../basePath";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -12,7 +13,7 @@ export default function LoginPage() {
   // Already signed in? Go straight to the right side of the system.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth", { cache: "no-store" })
+    fetch(`${BASE_PATH}/api/auth`, { cache: "no-store" })
       .then((response) => response.json() as Promise<{
         user?: unknown;
         landing?: string;
@@ -34,7 +35,7 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/auth", {
+      const response = await fetch(`${BASE_PATH}/api/auth`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "login", email, password }),
@@ -44,7 +45,7 @@ export default function LoginPage() {
         landing?: string;
       };
       if (!response.ok) throw new Error(result.error || "Unable to sign in");
-      window.location.replace(result.landing || "/");
+      window.location.replace(result.landing || `${BASE_PATH}/`);
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Unable to sign in",

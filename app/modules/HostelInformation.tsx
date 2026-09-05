@@ -35,6 +35,7 @@ import {
   uploadAttachment,
 } from "./shared";
 import type { Data, HostelTab, Row } from "./shared";
+import { BASE_PATH } from "../basePath";
 import React from "react";
 
 // Access card price differs by hostel; the card admin/handling fee is flat.
@@ -3269,7 +3270,7 @@ function ReservationManageDetails({
                     .map((attachment: Row) => (
                       <span key={attachment.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <a
-                          href={`/api/files?id=${attachment.id}`}
+                          href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                           target="_blank"
                           rel="noreferrer"
                           style={{ fontSize: '12px', color: '#008861', fontWeight: 600, whiteSpace: 'nowrap' }}

@@ -18,6 +18,7 @@ import {
   uploadAttachment,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import { BASE_PATH } from "../basePath";
 
 // Hostels that organise units into lettered/numbered blocks (e.g. Damai's
 // D1/D2/D3, Nadayu's NB/NC/NE). Hostels not listed here have no block
@@ -1609,7 +1610,7 @@ function RoomOverviewPanel({
           <div className="room-photo-cover">
             {roomPhotos[0] ? (
               <img
-                src={`/api/files?id=${roomPhotos[0].id}`}
+                src={`${BASE_PATH}/api/files?id=${roomPhotos[0].id}`}
                 alt={`${roomCode} cover`}
               />
             ) : (
@@ -1882,12 +1883,12 @@ function RoomOverviewPanel({
                 {roomPhotos.slice(0, 6).map((attachment) => (
                   <a
                     key={attachment.id}
-                    href={`/api/files?id=${attachment.id}`}
+                    href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                     target="_blank"
                     rel="noreferrer"
                   >
                     <img
-                      src={`/api/files?id=${attachment.id}`}
+                      src={`${BASE_PATH}/api/files?id=${attachment.id}`}
                       alt={attachment.fileName || "Room photo"}
                     />
                   </a>
@@ -2260,7 +2261,7 @@ function OwnerAgreement({
             {attachments.map((attachment) => (
               <a
                 key={attachment.id}
-                href={`/api/files?id=${attachment.id}`}
+                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
                 target="_blank"
                 rel="noreferrer"
               >

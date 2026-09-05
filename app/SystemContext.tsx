@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { Data } from "./modules/shared";
+import { BASE_PATH } from "./basePath";
 
 type SaveResult = { ok: boolean; id?: number } | null;
 
@@ -47,8 +48,8 @@ export function SystemProvider({ children }: { children: ReactNode }) {
     setError("");
     try {
       const url = modules?.length
-        ? `/api/system?modules=${modules.join(",")}`
-        : "/api/system";
+        ? `${BASE_PATH}/api/system?modules=${modules.join(",")}`
+        : `${BASE_PATH}/api/system`;
       const response = await fetch(url, { cache: "no-store" });
       const result = (await response.json()) as {
         error?: string;
@@ -77,7 +78,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/system", {
+      const response = await fetch(`${BASE_PATH}/api/system`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -87,6 +88,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
         ok?: boolean;
         id?: number;
         linkedPaymentId?: number;
+        preview?: unknown;
       };
       if (!response.ok)
         throw new Error(result.error || "Unable to save record");
@@ -95,7 +97,12 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       await load(scopedModulesForAction(action) ?? undefined);
       setNotice(success);
       window.setTimeout(() => setNotice(""), 3000);
-      return result as { ok: boolean; id?: number; linkedPaymentId?: number };
+      return result as {
+        ok: boolean;
+        id?: number;
+        linkedPaymentId?: number;
+        preview?: unknown;
+      };
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Unable to save record",
