@@ -2197,7 +2197,7 @@ export function HostelModule({
           <div className="charge-grid">
             {RESERVATION_BREAKDOWN_CHARGE_TYPES.map((key) => (
               <label key={key}>
-                {chargeLabels[key]}
+                <span>{chargeLabels[key]}</span>
                 <input
                   type="number"
                   min="0"
@@ -3099,6 +3099,15 @@ function ReservationManageDetails({
     .filter((charge: Row) => selectedChargeIds.includes(charge.id))
     .reduce((sum: number, charge: Row) => sum + Number(charge.amount || 0), 0);
   const creditBalance = Math.max(totalPaid - totalPayable, 0);
+  // Charges are only ever marked fully paid or fully unpaid — a payment
+  // that covers just part of a large item (typically the deposit) has
+  // nowhere to record that partial coverage. This surfaces the gap between
+  // what's actually on file (totalPaid) and what's itemized against a
+  // specific charge, so it's visible instead of silently unaccounted for.
+  const itemizedPaid = (r.charges || [])
+    .filter((charge: Row) => Boolean(charge.paidAt))
+    .reduce((sum: number, charge: Row) => sum + Number(charge.amount || 0), 0);
+  const unallocatedPaid = Math.max(totalPaid - itemizedPaid, 0);
   const preferredUnitCode = r.preferredUnitId
     ? data.units.find((unit: Row) => unit.id === r.preferredUnitId)?.unitCode
     : null;
@@ -3424,21 +3433,22 @@ function ReservationManageDetails({
             style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
           >
             {(r.charges || []).length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
                   Charges covered by this payment
                 </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '8px', backgroundColor: '#fff' }}>
+                <div className="reservation-charge-checklist">
                   {(r.charges || []).map((charge: Row) => {
                     const isPaid = Boolean(charge.paidAt);
+                    const isSelected = selectedChargeIds.includes(charge.id);
                     return (
                       <label
                         key={charge.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', opacity: isPaid ? 0.6 : 1 }}
+                        className={`reservation-charge-row${isPaid ? " is-paid" : isSelected ? " is-selected" : ""}`}
                       >
                         <input
                           type="checkbox"
-                          checked={isPaid || selectedChargeIds.includes(charge.id)}
+                          checked={isPaid || isSelected}
                           disabled={isPaid || busy}
                           onChange={(event) => {
                             const checked = event.currentTarget.checked;
@@ -3449,37 +3459,44 @@ function ReservationManageDetails({
                             );
                           }}
                         />
-                        <span style={{ flex: 1 }}>
+                        <span className="reservation-charge-label">
                           {chargeLabels[charge.chargeType] || charge.chargeType}
                           {charge.notes && (
-                            <em
-                              style={{
-                                color: '#92400e',
-                                fontStyle: 'normal',
-                                fontSize: '10px',
-                                fontWeight: 700,
-                                marginLeft: '6px',
-                                textTransform: 'uppercase',
-                              }}
-                            >
-                              {charge.notes}
-                            </em>
+                            <em className="reservation-charge-note">{charge.notes}</em>
                           )}
                         </span>
-                        <strong>{money(charge.amount)}</strong>
-                        {isPaid && (
-                          <span style={{ color: '#166534', fontWeight: 700, fontSize: '11px' }}>
-                            ✓ Paid
+                        <span className="reservation-charge-amount-col">
+                          <span className="reservation-charge-amount">{money(charge.amount)}</span>
+                          <span
+                            className={`reservation-charge-status${isPaid ? " is-paid" : isSelected ? " is-selected" : ""}`}
+                          >
+                            {isPaid ? "Paid" : isSelected ? "Selected" : "Unpaid"}
                           </span>
-                        )}
+                        </span>
                       </label>
                     );
                   })}
                 </div>
                 {selectedChargesTotal > 0 && (
-                  <span style={{ fontSize: '11px', color: '#6b7280' }}>
-                    Amount for this payment: <strong>{money(selectedChargesTotal)}</strong>
-                  </span>
+                  <div className="reservation-charge-selected-total">
+                    <span>Amount for this payment</span>
+                    <strong>{money(selectedChargesTotal)}</strong>
+                  </div>
+                )}
+                {unallocatedPaid > 0 && (
+                  <div className="reservation-reconcile-note">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 9v4M12 16.5h.01" />
+                      <path d="M10.29 3.86 1.82 18a1.5 1.5 0 0 0 1.3 2.25h17.76a1.5 1.5 0 0 0 1.3-2.25L13.71 3.86a1.5 1.5 0 0 0-2.42 0Z" />
+                    </svg>
+                    <span>
+                      <strong>{money(unallocatedPaid)}</strong> of the money on file for this
+                      reservation isn't itemized against any charge above — likely a payment
+                      that only partly covers a larger item (usually the deposit). Charges here
+                      can only be marked fully paid, so this amount needs checking against the
+                      actual payment record before it can be assigned.
+                    </span>
+                  </div>
                 )}
               </div>
             ) : (
@@ -3498,7 +3515,9 @@ function ReservationManageDetails({
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Payment slip</span>
+              <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
+                Payment slip <span className="reservation-field-required">(required)</span>
+              </span>
               <input
                 name="paymentProof"
                 type="file"

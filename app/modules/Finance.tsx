@@ -1623,94 +1623,83 @@ export function FinanceModule({
               onClose={() => setModal("")}
             >
               <div className="invoice-sheet">
-                <div>
+                <div className="invoice-items">
                   {invoice.items.map((x: Row) => {
                     const meta = chargeTypeMeta(x.itemType);
                     return (
-                      <p key={x.id}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div key={x.id} className="invoice-item-row">
+                        <div className="invoice-item-main">
                           <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '2px 8px',
-                              borderRadius: '999px',
-                              background: meta.background,
-                              color: meta.color,
-                              fontSize: '10px',
-                              fontWeight: 700,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.02em',
-                              whiteSpace: 'nowrap',
-                            }}
+                            className="invoice-item-badge"
+                            style={{ background: meta.background, color: meta.color }}
                           >
                             {meta.icon} {meta.label}
                           </span>
-                          {x.description}
-                        </span>
-                        <b>{money(x.amount, true)}</b>
-                        {data.currentUser?.roleKey !== "tenant" && (
-                          <button
-                            className="secondary compact"
-                            onClick={() => setModal(`edit-item:${x.id}`)}
-                          >
-                            Edit
-                          </button>
-                        )}
-                        {data.currentUser?.roleKey !== "tenant" &&
-                          (x.verifiedAt ? (
-                            <span className="secondary compact" style={{ pointerEvents: "none" }}>
-                              ✓ Verified
-                            </span>
-                          ) : (
+                          <span className="invoice-item-desc">{x.description}</span>
+                        </div>
+                        <div className="invoice-item-actions">
+                          <strong className="invoice-item-amount">
+                            {money(x.amount, true)}
+                          </strong>
+                          {data.currentUser?.roleKey !== "tenant" && (
                             <button
                               className="secondary compact"
-                              disabled={busy}
-                              onClick={() =>
-                                save(
-                                  { action: "billing-item-verify", itemId: x.id },
-                                  "Billing item verified",
-                                )
-                              }
+                              onClick={() => setModal(`edit-item:${x.id}`)}
                             >
-                              Verify
+                              Edit
                             </button>
-                          ))}
-                      </p>
+                          )}
+                          {data.currentUser?.roleKey !== "tenant" &&
+                            (x.verifiedAt ? (
+                              <span className="invoice-item-verified">✓ Verified</span>
+                            ) : (
+                              <button
+                                className="secondary compact"
+                                disabled={busy}
+                                onClick={() =>
+                                  save(
+                                    { action: "billing-item-verify", itemId: x.id },
+                                    "Billing item verified",
+                                  )
+                                }
+                              >
+                                Verify
+                              </button>
+                            ))}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-                <footer>
-                  <span>Total</span>
-                  <strong>{money(invoice.totalAmount, true)}</strong>
-                </footer>
-                <footer>
-                  <span>Paid</span>
-                  <strong>{money(invoice.amountPaid, true)}</strong>
-                </footer>
-                {invoice.amountPaid > invoice.totalAmount ? (
-                  <footer style={{ color: "#166534" }}>
-                    <span>Overpaid (credit)</span>
-                    <strong>
-                      {money(invoice.amountPaid - invoice.totalAmount, true)}
-                    </strong>
-                  </footer>
-                ) : (
-                  <footer
-                    style={{
-                      color:
-                        invoice.totalAmount > invoice.amountPaid
-                          ? "#991b1b"
-                          : undefined,
-                    }}
-                  >
-                    <span>Outstanding</span>
-                    <strong>
-                      {money(invoice.totalAmount - invoice.amountPaid, true)}
-                    </strong>
-                  </footer>
-                )}
+                <div className="invoice-totals">
+                  <div>
+                    <span>Total</span>
+                    <strong>{money(invoice.totalAmount, true)}</strong>
+                  </div>
+                  <div>
+                    <span>Paid</span>
+                    <strong className="paid">{money(invoice.amountPaid, true)}</strong>
+                  </div>
+                  {invoice.amountPaid > invoice.totalAmount ? (
+                    <div>
+                      <span>Overpaid (credit)</span>
+                      <strong className="paid">
+                        {money(invoice.amountPaid - invoice.totalAmount, true)}
+                      </strong>
+                    </div>
+                  ) : (
+                    <div>
+                      <span>Outstanding</span>
+                      <strong
+                        className={
+                          invoice.totalAmount > invoice.amountPaid ? "outstanding" : "settled"
+                        }
+                      >
+                        {money(invoice.totalAmount - invoice.amountPaid, true)}
+                      </strong>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="button-row">
                 <button className="secondary" onClick={() => window.print()}>
@@ -1731,7 +1720,7 @@ export function FinanceModule({
                       Edit invoice
                     </button>
                     <button
-                      className="secondary"
+                      className="danger"
                       disabled={busy}
                       onClick={async () => {
                         const confirmed = confirm(
@@ -1758,62 +1747,70 @@ export function FinanceModule({
                 <div className="payment-review">
                   <h4>Payment submissions</h4>
                   {invoice.payments.map((p: Row) => (
-                    <div key={p.id}>
-                      <span>
-                        {money(p.verifiedAmount ?? p.amount, true)} ·{" "}
-                        {p.remark || "No remark"} · {titleCase(p.status)}
-                      </span>
-                      {data.attachments
-                        .filter(
-                          (attachment) =>
-                            attachment.contextType === "payment-proof" &&
-                            attachment.recordId === p.id,
-                        )
-                        .map((attachment) => (
-                          <span key={attachment.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                            <a
-                              className="secondary compact"
-                              href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {attachment.fileName || "View payment slip"}
-                            </a>
-                            <button
-                              type="button"
-                              className="secondary compact"
-                              disabled={busy}
-                              onClick={async () => {
-                                const newName = prompt(
-                                  "Rename this payment slip:",
-                                  attachment.fileName,
-                                );
-                                if (newName && newName.trim()) {
-                                  await renameAttachment(attachment.id, newName.trim());
-                                  await load();
-                                }
-                              }}
-                            >
-                              Rename
-                            </button>
-                          </span>
-                        ))}
-                      {p.status !== "verified" && (
-                        <button
-                          className="secondary compact"
-                          onClick={() => setModal(`verify:${p.id}`)}
+                    <div key={p.id} className="payment-review-item">
+                      <div className="payment-review-item-main">
+                        <strong>{money(p.verifiedAmount ?? p.amount, true)}</strong>
+                        <span className="payment-review-item-covers">
+                          {p.remark || "No remark"}
+                        </span>
+                        <span
+                          className={`payment-review-item-status${p.status === "verified" ? " is-verified" : ""}`}
                         >
-                          Verify & issue receipt
-                        </button>
-                      )}
-                      {p.status === "verified" && (
-                        <button
-                          className="secondary compact"
-                          onClick={() => window.print()}
-                        >
-                          Receipt {p.receiptNo}
-                        </button>
-                      )}
+                          {titleCase(p.status)}
+                        </span>
+                      </div>
+                      <div className="payment-review-item-actions">
+                        {data.attachments
+                          .filter(
+                            (attachment) =>
+                              attachment.contextType === "payment-proof" &&
+                              attachment.recordId === p.id,
+                          )
+                          .map((attachment) => (
+                            <span key={attachment.id} className="payment-review-item-slip">
+                              <a
+                                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {attachment.fileName || "View payment slip"}
+                              </a>
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                disabled={busy}
+                                onClick={async () => {
+                                  const newName = prompt(
+                                    "Rename this payment slip:",
+                                    attachment.fileName,
+                                  );
+                                  if (newName && newName.trim()) {
+                                    await renameAttachment(attachment.id, newName.trim());
+                                    await load();
+                                  }
+                                }}
+                              >
+                                Rename
+                              </button>
+                            </span>
+                          ))}
+                        {p.status !== "verified" && (
+                          <button
+                            className="secondary compact"
+                            onClick={() => setModal(`verify:${p.id}`)}
+                          >
+                            Verify & issue receipt
+                          </button>
+                        )}
+                        {p.status === "verified" && (
+                          <button
+                            className="secondary compact"
+                            onClick={() => window.print()}
+                          >
+                            Receipt {p.receiptNo}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
