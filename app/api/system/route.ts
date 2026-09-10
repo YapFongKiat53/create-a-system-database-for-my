@@ -12,6 +12,19 @@ import {
 } from "drizzle-orm";
 import { getDb, type PgTx } from "../../../db";
 import {
+  billingPreflight,
+  checkMeterJump,
+  checkOverpayment,
+  checkRentOutlier,
+  confirmationNote,
+  DEFAULT_GUARDS,
+  GUARD_SETTING_KEYS,
+  loadMoneyGuards,
+  parseMoney,
+  parseOptionalMoney,
+  SuspiciousAmountError,
+} from "./money";
+import {
   getSessionUser,
   hashPassword,
   permissionsForRole,
@@ -2621,6 +2634,29 @@ export async function GET(request: Request) {
           settingRows.find((row) => row.settingKey === "auto-billing-due-day")
             ?.settingValue ?? 5,
         ),
+        // Where a figure stops looking like a normal month and starts looking
+        // like a slipped digit. Adjustable, because the right line depends on
+        // the estate — see app/api/system/money.ts.
+        moneyGuardMeterJumpKwh: Number(
+          settingRows.find(
+            (row) => row.settingKey === GUARD_SETTING_KEYS.meterJumpKwh,
+          )?.settingValue ?? DEFAULT_GUARDS.meterJumpKwh,
+        ),
+        moneyGuardOverpayRm: Number(
+          settingRows.find(
+            (row) => row.settingKey === GUARD_SETTING_KEYS.overpayRm,
+          )?.settingValue ?? DEFAULT_GUARDS.overpayRm,
+        ),
+        moneyGuardOverpayPct: Number(
+          settingRows.find(
+            (row) => row.settingKey === GUARD_SETTING_KEYS.overpayPct,
+          )?.settingValue ?? DEFAULT_GUARDS.overpayPct,
+        ),
+        moneyGuardRentMax: Number(
+          settingRows.find(
+            (row) => row.settingKey === GUARD_SETTING_KEYS.rentMax,
+          )?.settingValue ?? DEFAULT_GUARDS.rentMax,
+        ),
       },
       tickets: ticketRows,
       ticketMessages: messageRows,
@@ -3731,7 +3767,19 @@ async function previewBillingCycle(
     cycleId,
     input,
   );
+  // Money that will never be charged because nobody set it up — a rent left
+  // unset, a room with no meter baseline, an agreement that expired. Reported
+  // alongside the preview, never blocking: "preview then generate" is already
+  // the gate, and a second one would only stop normal work. A failure here
+  // must not take the preview down with it.
+  const preflight = await billingPreflight(db, {
+    cutoffDate: input.cutoffDate,
+  }).catch((failure) => {
+    console.error("Billing preflight failed", failure);
+    return { issues: [], checkedAt: new Date().toISOString() };
+  });
   return {
+    preflight,
     cycleId,
     periodLabel: input.periodLabel,
     cutoffDate: input.cutoffDate,
@@ -4938,9 +4986,9 @@ export async function POST(request: Request) {
       if (!newBed) throw new Error("Selected room not found");
       if (newBed.status !== "vacant")
         throw new Error("Selected room is no longer vacant");
-      const monthlyRental = asNumber(body.monthlyRental, 0);
-      const securityDeposit = asNumber(body.securityDeposit, 0);
-      const accessCardDeposit = asNumber(body.accessCardDeposit, 0);
+      const monthlyRental = parseMoney(body.monthlyRental, "Monthly rent");
+      const securityDeposit = parseMoney(body.securityDeposit, "Security deposit");
+      const accessCardDeposit = parseMoney(body.accessCardDeposit, "Access card deposit");
       const roomTransferFee = asNumber(body.roomTransferFee, 0);
       const now = nowIso();
       // What the student has already settled per room-tied charge, so the
@@ -5153,13 +5201,41 @@ export async function POST(request: Request) {
       // previous reading — i.e. for the last occupant's usage, before they
       // ever arrived. A check-in that skipped it was the one way to create
       // that charge silently.
-      const openingMeter = asNullableNumber(body.checkInMeter);
+      const openingMeter = parseOptionalMoney(
+        body.checkInMeter,
+        "Opening meter reading",
+      );
       if (openingMeter === null)
         throw new Error(
           "An opening meter reading is required — it is the baseline utility billing charges from",
         );
-      if (openingMeter < 0)
-        throw new Error("The opening meter reading cannot be negative");
+      // The opening reading becomes a meter_readings row like any other, so a
+      // slipped digit here inflates the room's usage exactly the same way —
+      // and this is the path that produced 16-3-A's 2,637 → 25,023 jump.
+      if (!boolValue(body.confirmSuspicious)) {
+        const priorReading = (
+          await db.execute<{ reading_value: number; room_code: string }>(sql`
+            SELECT m.reading_value,
+                   u.unit_code || '-' || r.room_label AS room_code
+            FROM meter_readings m
+            JOIN hostel_rooms r ON r.id = m.room_id
+            JOIN hostel_units u ON u.id = r.unit_id
+            JOIN bed_spaces b ON b.room_id = r.id
+            WHERE b.id = ${assignment.bedSpaceId}
+            ORDER BY m.reading_date DESC, m.id DESC LIMIT 1
+          `)
+        )[0];
+        if (priorReading)
+          checkMeterJump(
+            openingMeter - Number(priorReading.reading_value),
+            await loadMoneyGuards(db),
+            {
+              roomCode: String(priorReading.room_code),
+              previous: Number(priorReading.reading_value),
+              current: openingMeter,
+            },
+          );
+      }
       const arrivedOn = asText(
         body.checkInDate,
         new Date().toISOString().slice(0, 10),
@@ -5321,7 +5397,14 @@ export async function POST(request: Request) {
         throw new Error("Assignment and effective date are required");
       const assignmentId = asNumber(body.assignmentId);
       const effectiveDate = asText(body.effectiveDate);
-      const newDeposit = asNullableNumber(body.securityDeposit);
+      const newDeposit = parseOptionalMoney(body.securityDeposit, "Security deposit");
+      const newRental = parseOptionalMoney(body.monthlyRental, "Monthly rent");
+      // Changing a rent changes what this tenant is charged every month from
+      // now on, so a slipped digit here is not a one-off error.
+      if (newRental !== null && !boolValue(body.confirmSuspicious))
+        checkRentOutlier(newRental, await loadMoneyGuards(db), {
+          label: "this tenancy",
+        });
       // What is on record as held right now — the newest change taking effect
       // on or before this one, falling back to the tenancy. Only the gap
       // between that and the new figure is ever owed; the money already held
@@ -5334,7 +5417,7 @@ export async function POST(request: Request) {
       await db.insert(studentRateChanges).values({
         assignmentId,
         effectiveDate,
-        monthlyRental: asNullableNumber(body.monthlyRental),
+        monthlyRental: newRental,
         securityDeposit: newDeposit,
         reason: asText(body.reason),
       });
@@ -5490,8 +5573,8 @@ export async function POST(request: Request) {
         unitNumber,
         carPlateNumber: asText(body.carPlateNumber),
         carModel: asText(body.carModel),
-        monthlyRental: asNumber(body.monthlyRental),
-        depositAmount: asNumber(body.depositAmount),
+        monthlyRental: parseMoney(body.monthlyRental, "Parking monthly rent"),
+        depositAmount: parseMoney(body.depositAmount, "Parking deposit"),
         startDate: asText(body.startDate),
         endDate: asNullableText(body.endDate),
         paidUntil: asNullableText(body.paidUntil),
@@ -5528,8 +5611,8 @@ export async function POST(request: Request) {
           unitNumber: asText(body.unitNumber),
           carPlateNumber: asText(body.carPlateNumber),
           carModel: asText(body.carModel),
-          monthlyRental: asNumber(body.monthlyRental),
-          depositAmount: asNumber(body.depositAmount),
+          monthlyRental: parseMoney(body.monthlyRental, "Parking monthly rent"),
+          depositAmount: parseMoney(body.depositAmount, "Parking deposit"),
           startDate: asText(body.startDate) || existing.startDate,
           endDate: asNullableText(body.endDate),
           paidUntil: asNullableText(body.paidUntil),
@@ -5775,12 +5858,13 @@ export async function POST(request: Request) {
         .delete(ticketCategories)
         .where(eq(ticketCategories.id, asNumber(body.categoryId)));
     } else if (action === "general-cost") {
-      if (
-        !body.costDate ||
-        !asText(body.description) ||
-        asNumber(body.amount) < 0
-      )
+      if (!body.costDate || !asText(body.description))
         throw new Error("Date, description and amount are required");
+      const costAmount = parseMoney(body.amount, "Amount");
+      const costStudentCharge = parseOptionalMoney(
+        body.studentCharge,
+        "Student charge",
+      );
       const inserted = await db
         .insert(generalCosts)
         .values({
@@ -5791,8 +5875,8 @@ export async function POST(request: Request) {
           costType: asText(body.costType, "maintenance"),
           description: asText(body.description),
           responsibility: asText(body.responsibility, "management"),
-          amount: asNumber(body.amount),
-          studentCharge: asNumber(body.studentCharge),
+          amount: costAmount,
+          studentCharge: costStudentCharge ?? 0,
           notes: asText(body.notes),
           createdBy: currentUser.displayName,
         })
@@ -5814,18 +5898,58 @@ export async function POST(request: Request) {
         .update(hostelRooms)
         .set({ meterSerial: asText(body.meterSerial) })
         .where(eq(hostelRooms.id, roomId));
+      const readingValue = parseMoney(body.readingValue, "Reading value");
+      const replacedFinal = parseOptionalMoney(
+        body.replacedMeterFinal,
+        "Old meter final reading",
+      );
+      // A mis-keyed extra digit on a reading turns into a four-figure
+      // electricity bill that goes straight out to a student.
+      const priorRow = (
+        await db.execute<{ reading_value: number; room_code: string }>(sql`
+          SELECT m.reading_value,
+                 (SELECT u.unit_code || '-' || r.room_label
+                    FROM hostel_rooms r JOIN hostel_units u ON u.id = r.unit_id
+                   WHERE r.id = ${roomId}) AS room_code
+          FROM meter_readings m
+          WHERE m.room_id = ${roomId} AND m.reading_date <= ${asText(body.readingDate)}
+          ORDER BY m.reading_date DESC, m.id DESC LIMIT 1
+        `)
+      )[0];
+      let readingNotes = asText(body.notes);
+      if (priorRow) {
+        const previous = Number(priorRow.reading_value);
+        const usage =
+          replacedFinal !== null
+            ? Math.max(0, replacedFinal - previous) + Math.max(0, readingValue)
+            : readingValue - previous;
+        if (usage > 0) {
+          const guards = await loadMoneyGuards(db);
+          if (!boolValue(body.confirmSuspicious))
+            checkMeterJump(usage, guards, {
+              roomCode: String(priorRow.room_code || "This room"),
+              previous,
+              current: readingValue,
+            });
+          else if (usage > guards.meterJumpKwh)
+            readingNotes = `${readingNotes ? `${readingNotes} ` : ""}${confirmationNote(
+              currentUser.displayName,
+              `${usage.toLocaleString()} kWh this round is correct`,
+            )}`.trim();
+        }
+      }
       await db.insert(meterReadings).values({
         bedSpaceId: canonicalBed.id,
         roomId,
         readingDate: asText(body.readingDate),
-        readingValue: asNumber(body.readingValue),
+        readingValue,
         readingType: asText(body.readingType, "monthly"),
         // Only carried when the form's "meter was replaced" switch is on —
         // see the column's comment in db/schema.ts for what it does to the
         // month's usage.
-        replacedMeterFinal: asNullableNumber(body.replacedMeterFinal),
+        replacedMeterFinal: replacedFinal,
         submittedBy: asText(body.submittedBy, "Maintenance Team"),
-        notes: asText(body.notes),
+        notes: readingNotes,
       });
     } else if (action === "meter-reading-batch") {
       // The month-entry grid posts one row per room in a single save. Re-saving
@@ -5843,11 +5967,45 @@ export async function POST(request: Request) {
         const roomId = asNumber(row.roomId);
         if (!roomId || row.readingValue === "" || row.readingValue == null)
           return [];
-        return [{ roomId, readingValue: asNumber(row.readingValue) }];
+        return [
+          { roomId, readingValue: parseMoney(row.readingValue, "Reading value") },
+        ];
       });
       if (!clean.length) throw new Error("Enter at least one meter reading");
 
       const roomIds = [...new Set(clean.map((row) => row.roomId))];
+      // The month-entry grid is how readings are normally keyed in, so this is
+      // where a slipped digit actually arrives — the single-entry form is the
+      // exception, not the rule. Checked against the same threshold, and named
+      // by room so the person can see which line to look at.
+      if (!boolValue(body.confirmSuspicious)) {
+        const priorRows = await db.execute<{
+          room_id: number;
+          reading_value: number;
+          room_code: string;
+        }>(sql`
+          SELECT DISTINCT ON (m.room_id) m.room_id, m.reading_value,
+                 u.unit_code || '-' || r.room_label AS room_code
+          FROM meter_readings m
+          JOIN hostel_rooms r ON r.id = m.room_id
+          JOIN hostel_units u ON u.id = r.unit_id
+          WHERE m.room_id IN ${roomIds} AND m.reading_date < ${readingDate}
+          ORDER BY m.room_id, m.reading_date DESC, m.id DESC
+        `);
+        const priorByRoom = new Map(
+          priorRows.map((row) => [Number(row.room_id), row]),
+        );
+        const guards = await loadMoneyGuards(db);
+        for (const row of clean) {
+          const prior = priorByRoom.get(row.roomId);
+          if (!prior) continue;
+          checkMeterJump(row.readingValue - Number(prior.reading_value), guards, {
+            roomCode: String(prior.room_code),
+            previous: Number(prior.reading_value),
+            current: row.readingValue,
+          });
+        }
+      }
       // One bed per room carries the reading, matching the single-entry action.
       const bedRows = await db.execute<{ room_id: number; bed_id: number }>(sql`
         SELECT room_id, MIN(id) AS bed_id FROM bed_spaces
@@ -5959,7 +6117,9 @@ export async function POST(request: Request) {
             roomId: match.roomId,
             bedSpaceId: match.bedId,
             readingDate: asText(row.readingDate),
-            readingValue: asNumber(row.readingValue),
+            // A CSV pasted from a spreadsheet is the one place a thousands
+            // separator genuinely turns up in a reading.
+            readingValue: parseMoney(row.readingValue, `Reading for ${code}`),
             readingType: asText(row.readingType, "monthly"),
             submittedBy: currentUser.displayName,
             notes: asText(row.notes),
@@ -5981,7 +6141,7 @@ export async function POST(request: Request) {
         .update(meterReadings)
         .set({
           readingDate: asText(body.readingDate),
-          readingValue: asNumber(body.readingValue),
+          readingValue: parseMoney(body.readingValue, "Reading value"),
           readingType: asText(body.readingType, "monthly"),
           // Cleared when the "meter was replaced" switch is turned back off,
           // so an edit can undo a replacement recorded by mistake.
@@ -6025,15 +6185,44 @@ export async function POST(request: Request) {
         .set({ status: "posted", postedAt: nowIso() })
         .where(eq(billingCycles.id, asNumber(body.cycleId)));
     } else if (action === "billing-payment") {
-      if (!body.invoiceId || !body.amount)
-        throw new Error("Invoice and payment amount are required");
+      if (!body.invoiceId) throw new Error("Invoice is required");
+      const invoiceId = asNumber(body.invoiceId);
+      const amount = parseMoney(body.amount, "Payment amount");
+      if (amount <= 0) throw new Error("Payment amount must be more than 0.");
+      const target = (
+        await db.execute<{
+          invoice_no: string;
+          total_amount: number;
+          amount_paid: number;
+        }>(sql`
+          SELECT invoice_no, total_amount, amount_paid
+          FROM billing_invoices WHERE id = ${invoiceId}
+        `)
+      )[0];
+      if (!target) throw new Error("Invoice not found");
+      // An extra zero on a receipt marks the invoice paid and leaves the
+      // difference belonging to nobody. Paying several months at once is
+      // legitimate, so this asks rather than refuses.
+      const outstanding =
+        Number(target.total_amount || 0) - Number(target.amount_paid || 0);
+      let remark = asText(body.remark);
+      if (!boolValue(body.confirmSuspicious))
+        checkOverpayment(amount, await loadMoneyGuards(db), {
+          outstanding,
+          invoiceNo: String(target.invoice_no),
+        });
+      else if (amount > outstanding)
+        remark = `${remark ? `${remark} ` : ""}${confirmationNote(
+          currentUser.displayName,
+          `RM ${amount.toLocaleString()} exceeds the RM ${outstanding.toLocaleString()} outstanding`,
+        )}`.trim();
       const inserted = await db
         .insert(billingPaymentRecords)
         .values({
-          invoiceId: asNumber(body.invoiceId),
-          amount: asNumber(body.amount),
+          invoiceId,
+          amount,
           reference: "",
-          remark: asText(body.remark),
+          remark,
           status: "pending-verification",
         })
         .returning({ id: billingPaymentRecords.id });
@@ -6054,7 +6243,9 @@ export async function POST(request: Request) {
           status: "verified",
           verifiedAt: nowIso(),
           verifiedBy: currentUser.displayName,
-          verifiedAmount: asNumber(body.verifiedAmount, payment.amount),
+          verifiedAmount:
+            parseOptionalMoney(body.verifiedAmount, "Verified amount") ??
+            payment.amount,
           actualReference: asText(body.actualReference),
           receiptNo: `RCT-${payment.invoiceId}-${paymentId}`,
         })
@@ -6171,6 +6362,48 @@ export async function POST(request: Request) {
     } else if (action === "billing-invoice-delete") {
       const invoiceId = asNumber(body.invoiceId);
       if (!invoiceId) throw new Error("Invoice is required");
+      // This deletes the invoice's payment records along with it. Without
+      // these two guards, money already received disappears from the database
+      // with no trace, and nobody finds out until a bank reconciliation comes
+      // up short with nothing left to trace it back to.
+      const guard = (
+        await db.execute<{
+          invoice_no: string;
+          period_label: string;
+          cycle_status: string;
+          payment_count: number;
+          payment_total: number;
+        }>(sql`
+          SELECT i.invoice_no, c.period_label, c.status AS cycle_status,
+                 COALESCE(p.n, 0) AS payment_count,
+                 COALESCE(p.total, 0) AS payment_total
+          FROM billing_invoices i
+          -- LEFT, because a move-in invoice (INV-MI-*) belongs to no cycle at
+          -- all: it is raised when a booking converts, not by a monthly run.
+          -- An inner join would drop those seven rows and report the invoice
+          -- as missing — while four of them have money against them.
+          LEFT JOIN billing_cycles c ON c.id = i.cycle_id
+          LEFT JOIN (
+            SELECT invoice_id, count(*) AS n, SUM(amount) AS total
+            FROM billing_payment_records GROUP BY invoice_id
+          ) p ON p.invoice_id = i.id
+          WHERE i.id = ${invoiceId}
+        `)
+      )[0];
+      if (!guard) throw new Error("Invoice not found");
+      if (Number(guard.payment_count) > 0)
+        throw new Error(
+          `${guard.invoice_no} has ${guard.payment_count} payment${Number(guard.payment_count) === 1 ? "" : "s"} ` +
+            `against it totalling RM ${Number(guard.payment_total).toLocaleString()}. Deleting the invoice ` +
+            `would delete that money with it — settle or move those payments first.`,
+        );
+      // A move-in invoice has no cycle, so there is nothing to be posted —
+      // the payment check above is the only guard that applies to it.
+      if (guard.cycle_status && guard.cycle_status !== "draft")
+        throw new Error(
+          `${guard.period_label} has already been ${guard.cycle_status === "verified" ? "verified" : "posted"} — ` +
+            `its invoices can no longer be deleted.`,
+        );
       const itemIds = (
         await db
           .select({ id: billingItems.id })
@@ -6363,9 +6596,20 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to save record";
-    return Response.json({ error: message }, { status: 400 });
+    // A figure that is merely suspicious is refused differently from one that
+    // is wrong: the client shows a confirmation the staff member can tick to
+    // send the identical request back with confirmSuspicious set.
+    return Response.json(
+      error instanceof SuspiciousAmountError
+        ? { error: message, suspicious: true }
+        : { error: message },
+      { status: 400 },
+    );
   }
 }
+
+
+
 
 
 

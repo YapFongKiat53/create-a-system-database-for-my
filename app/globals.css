@@ -151,7 +151,7 @@
   .app-shell {
     min-height: calc(100vh / var(--ui-zoom));
     display: grid;
-    /* 左侧固定为 280px 给侧边栏，右侧 1fr 给主内容 */
+    /* 280px of fixed rail for the sidebar, the rest for the module */
     grid-template-columns: 280px 1fr; 
   }
   
@@ -233,13 +233,13 @@
   
   .brand strong {
     color: var(--ink);
-    font-size: 18px; /* 品牌名字体放大 */
+    font-size: 18px; /* larger than the rail's other text — it is the wordmark */
   }
   
   .brand small,
   .sidebar-foot small {
     color: var(--nav-fg-muted);
-    font-size: 12px; /* 品牌副标题体放大 */
+    font-size: 12px; /* sits under the wordmark, so it reads as a subtitle not a nav item */
   }
   
   .nav-group .nav-label {
@@ -433,7 +433,7 @@
   
   .sidebar-foot strong {
     color: var(--ink);
-    font-size: 14px; /* 用户名放大 */
+    font-size: 14px; /* the signed-in name, so it outranks the role beside it */
   }
   
   .sidebar-signout {
@@ -490,7 +490,7 @@
        3. TOPBAR & MAIN CONTENT (FIXED GRID POSITION)
        ========================================= */
   main {
-    grid-column: 2; /* 确保主内容放在网格的第二列，不会被侧边栏盖住 */
+    grid-column: 2; /* pinned to the second column so the sidebar never overlaps it */
     min-width: 0;
   }
   
@@ -1043,7 +1043,7 @@
     background: var(--info-wash);
   }
   
-  /* Unit 层级 */
+  /* Unit level */
   .mpt-row.unit-row {
     background: #fafafa;
     padding-left: 64px;
@@ -1117,7 +1117,7 @@
     cursor: pointer;
   }
   
-  /* Room 层级 */
+  /* Room level */
   .mpt-row.room-row {
     background: var(--surface);
     padding-left: 96px;
@@ -1135,7 +1135,7 @@
     padding: var(--sp-5) 0;
   }
   
-  /* 单元格样式 */
+  /* Cells */
   .mpt-cell {
     font-size: 14px;
     color: var(--info-text);
@@ -1217,7 +1217,7 @@
     font-size: 12px;
   }
   
-  /* MPT 状态徽章 */
+  /* MPT status badges */
   .status-badge {
     display: inline-flex;
     align-items: center;
@@ -1391,7 +1391,7 @@
     color: var(--bad-text);
   }
 
-  /* 租客信息 */
+  /* Tenant details */
   .occupant-cell {
     display: flex;
     align-items: center;
@@ -1414,7 +1414,7 @@
     color: var(--info-text);
   }
   
-  /* MPT 操作列 */
+  /* MPT actions column */
   .action-cell {
     display: flex;
     justify-content: flex-start;
@@ -2384,9 +2384,12 @@
   .report-grid>.report-card,
   .dash-stats>.dash-stat {
     display: flex;
-    /* Basis sized so five stats still sit on one row inside a workspace
-       panel (Tenants gained an "Awaiting check-in" figure). */
-    flex: 1 1 170px;
+    /* Basis sized so the stats sit on one row rather than leaving the last
+       one stretched across a row of its own. 170px was just wide enough to
+       wrap the fourth tile at a 781px content width — which is what Finance
+       and Maintenance both render at. flex-grow still fills the row, so on a
+       wide screen this changes nothing; it only moves the wrap point. */
+    flex: 1 1 150px;
     min-width: 0;
     flex-direction: column;
     justify-content: center;
@@ -3172,9 +3175,17 @@
     padding: var(--sp-3);
     border-bottom: 1px solid var(--line);
     background: var(--paper);
+    /* A row of tabs that outgrows its panel has to scroll inside itself.
+       Reports now has ten, which pushed the whole page sideways instead —
+       the tabs stayed put and everything else moved. */
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
-  
+
   .workspace-tabs button {
+    /* Tabs shrink before they wrap by default; keeping them at their natural
+       width is what makes the row scroll rather than squash the labels. */
+    flex: none;
     min-height: 38px;
     padding: 0 var(--sp-4);
     border: 1px solid transparent;
@@ -10375,4 +10386,136 @@
 .ticket-status-tabs .tab-count.done {
   color: var(--ok-text);
   background: var(--ok-fill);
+}
+
+/* =========================================
+   MONEY GATE (billing preview + forms)
+   Two different refusals need to look different: a
+   figure that cannot be read is an error, a figure
+   that merely looks wrong is a decision. And money
+   that will never be charged at all is neither — it
+   is a checklist to work through before invoices
+   exist, which is why it sits above the preview.
+   ========================================= */
+.billing-preflight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: 16px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info-text, var(--brand));
+  border-radius: var(--r-md);
+  background: var(--paper);
+}
+
+.billing-preflight > strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.billing-preflight > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.preflight-issues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.preflight-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.preflight-issue b {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+/* The count is the point of the row, so it reads as a figure rather than as
+   another word in the sentence. */
+.preflight-issue b em {
+  padding: 1px var(--sp-2);
+  border-radius: 999px;
+  background: var(--warn-fill);
+  color: var(--warn-text);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.preflight-issue small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.preflight-issue p {
+  margin: 3px 0 0;
+  max-height: 54px;
+  overflow-y: auto;
+  color: var(--ink-soft, var(--ink));
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* Deliberately not styled as an error: the figure may well be right, and the
+   staff member is being asked to decide, not apologise. */
+.suspicious-confirm {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: 4px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--warn-line, #fde68a);
+  border-radius: var(--r-md);
+  background: var(--warn-wash);
+  cursor: pointer;
+}
+
+.suspicious-confirm input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--warn-text);
+  cursor: pointer;
+}
+
+.suspicious-confirm span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.suspicious-confirm b {
+  color: var(--warn-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.suspicious-confirm small {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.55;
+  text-transform: none;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }

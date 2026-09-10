@@ -11,6 +11,9 @@ type SystemContextValue = {
   data: Data | null;
   busy: boolean;
   error: string;
+  /** Non-empty when the last save was refused only because a figure looked
+      wrong — the form offers a confirmation rather than a dead end. */
+  suspicious: string;
   notice: string;
   load: (modules?: string[]) => Promise<void>;
   save: (payload: Record<string, unknown>, success?: string) => Promise<SaveResult>;
@@ -42,6 +45,9 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<Data | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Set when the last save was refused only because a figure looked wrong.
+  // The form reads it to offer "I have checked this, it is correct".
+  const [suspicious, setSuspicious] = useState("");
   const [notice, setNotice] = useState("");
 
   const load = async (modules?: string[]) => {
@@ -85,13 +91,19 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       });
       const result = (await response.json()) as {
         error?: string;
+        suspicious?: boolean;
         ok?: boolean;
         id?: number;
         linkedPaymentId?: number;
         preview?: unknown;
       };
-      if (!response.ok)
+      if (!response.ok) {
+        // A figure that is only suspicious, not invalid, is offered back to
+        // the form so it can show a confirmation instead of a dead end.
+        setSuspicious(result.suspicious ? result.error || "" : "");
         throw new Error(result.error || "Unable to save record");
+      }
+      setSuspicious("");
       const action =
         typeof payload.action === "string" ? payload.action : "";
       await load(scopedModulesForAction(action) ?? undefined);
@@ -114,7 +126,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SystemContext.Provider value={{ data, busy, error, notice, load, save }}>
+    <SystemContext.Provider value={{ data, busy, error, suspicious, notice, load, save }}>
       {children}
     </SystemContext.Provider>
   );

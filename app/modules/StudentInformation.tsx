@@ -1391,10 +1391,13 @@ export function StudentsModule({
   data,
   save,
   busy,
+  suspicious,
 }: {
   data: Data;
   save: any;
   busy: boolean;
+  /** Set when the last save was refused only because a figure looked wrong. */
+  suspicious: string;
 }) {
   const [selectedHostelKey, setSelectedHostelKey] = useState<string | null>(
     "all",
@@ -2331,7 +2334,7 @@ export function StudentsModule({
                       </button>
                     </div>
                   ) : (
-                    // 新增：如果还没有 assignmentId，则显示分配房间的按钮
+                    // No tenancy yet, so offer to place the student instead
                     <button
                       type="button"
                       className="primary compact"
@@ -2478,7 +2481,7 @@ export function StudentsModule({
                   </>
                 ) : (
                   <>
-                    {/* 更新提示文案 */}
+                    {/* Says what to do next, not just that nothing is here */}
                     <p className="empty-copy">
                       No active room assignment. Click &ldquo;Assign a room&rdquo; above to place this student in a vacant bed space.
                     </p>
@@ -2924,6 +2927,7 @@ export function StudentsModule({
 
       {checkInTarget && (
         <CheckInModal
+          suspicious={suspicious}
           tenancy={checkInTarget}
           data={data}
           save={save}

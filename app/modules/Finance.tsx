@@ -9,6 +9,7 @@ import {
   SearchIcon,
   Stat,
   StatusPill,
+  SuspiciousConfirm,
   dateLabel,
   formValues,
   money,
@@ -156,11 +157,14 @@ export function FinanceModule({
   save,
   busy,
   load,
+  suspicious,
 }: {
   data: Data;
   save: any;
   busy: boolean;
   load: (modules?: string[]) => Promise<void>;
+  /** Set when the last save was refused only because a figure looked wrong. */
+  suspicious: string;
 }) {
   const [modal, setModal] = useState("");
   const latest = data.billingCycles[0];
@@ -182,6 +186,19 @@ export function FinanceModule({
     // read since the last cycle. The list is capped server-side, so the
     // count is what to trust for "how many".
     unreadMeterRoomCount: number;
+    // Money that will never be charged because nobody set it up: a rent left
+    // unset, a room with no meter baseline, an expired agreement. Reported
+    // before the invoices are created, while it can still be fixed.
+    preflight?: {
+      checkedAt: string;
+      issues: {
+        key: string;
+        title: string;
+        detail: string;
+        count: number;
+        rows: { label: string; note: string }[];
+      }[];
+    };
     // Of those, the ones with no reading at all — they need two rounds
     // before they can ever charge, so they are the urgent half.
     neverReadRoomCount: number;
@@ -206,6 +223,8 @@ export function FinanceModule({
     string
   > | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // Ticked by the staff member after the server refused an over-payment.
+  const [confirmOverpay, setConfirmOverpay] = useState(false);
   // The house rule, in one place: a month is cut off on the same day of that
   // month, and its rent falls due on a fixed day of the NEXT month. Typing
   // all three dates by hand is how cycle 2026-10 ended up cut off on
@@ -1441,6 +1460,10 @@ export function FinanceModule({
                 ["auto-billing-enabled", values.enabled === "on" ? "on" : "off"],
                 ["auto-billing-cutoff-day", String(values.cutoffDay || 24)],
                 ["auto-billing-due-day", String(values.dueDay || 5)],
+                ["money-guard-meter-jump-kwh", String(values.meterJumpKwh || 500)],
+                ["money-guard-overpay-rm", String(values.overpayRm || 100)],
+                ["money-guard-overpay-pct", String(values.overpayPct || 20)],
+                ["money-guard-rent-max", String(values.rentMax || 5000)],
               ])
                 await save(
                   { action: "system-setting-update", settingKey, settingValue },
@@ -1488,6 +1511,70 @@ export function FinanceModule({
                 reminder under Announcements.
               </small>
             </label>
+
+            {/* The point at which a figure stops looking like a normal month
+                and starts looking like a slipped digit. Kept adjustable
+                because the right line depends on the estate, not on us: too
+                tight and staff learn to tick past the warning without
+                reading it, too loose and it never fires. */}
+            <p className="wide settings-note">
+              The four below are <strong>amount checks</strong>. Anything past
+              them is refused until somebody ticks &ldquo;I have checked
+              this&rdquo;.
+            </p>
+            <label>
+              Meter reading — monthly usage ceiling (kWh)
+              <input
+                name="meterJumpKwh"
+                type="number"
+                min="1"
+                defaultValue={data.settings.moneyGuardMeterJumpKwh}
+              />
+              <small className="field-note">
+                A room here averages about 89 kWh a month. One extra digit on
+                a reading lands far above this.
+              </small>
+            </label>
+            <label>
+              Over-payment allowed (RM)
+              <input
+                name="overpayRm"
+                type="number"
+                min="1"
+                defaultValue={data.settings.moneyGuardOverpayRm}
+              />
+              <small className="field-note">
+                Only refused once a receipt exceeds the outstanding balance by
+                more than this, so small roundings do not nag.
+              </small>
+            </label>
+            <label>
+              Over-payment allowed (%)
+              <input
+                name="overpayPct"
+                type="number"
+                min="1"
+                defaultValue={data.settings.moneyGuardOverpayPct}
+              />
+              <small className="field-note">
+                For small invoices, judged by proportion instead. A receipt
+                passes only when it is under both limits.
+              </small>
+            </label>
+            <label>
+              Monthly rent ceiling (RM)
+              <input
+                name="rentMax"
+                type="number"
+                min="1"
+                defaultValue={data.settings.moneyGuardRentMax}
+              />
+              <small className="field-note">
+                Whole-unit contracts genuinely run above this — tick to
+                confirm when one does.
+              </small>
+            </label>
+
             <p className="wide field-note">
               Each bill is the tenant&apos;s rent plus their share of the
               room&apos;s electricity, with parking, maintenance and any deposit
@@ -1624,6 +1711,42 @@ export function FinanceModule({
                   label="Cut-off / due"
                 />
               </section>
+              {/* Not "this figure is wrong" but "this money is not going to
+                  be charged at all" — a tenancy with no rent, a room that has
+                  never been metered, an agreement that ran out. Shown before
+                  the invoices exist, because afterwards it is a correction
+                  rather than a fix. */}
+              {cyclePreview.preflight &&
+                cyclePreview.preflight.issues.length > 0 && (
+                  <div className="billing-preflight">
+                    <strong>
+                      Before you generate — {cyclePreview.preflight.issues.length}{" "}
+                      thing{cyclePreview.preflight.issues.length === 1 ? "" : "s"} to look at
+                    </strong>
+                    <span>
+                      None of these stop the run, but each one is money this
+                      cycle will not charge. There is still time to fix them.
+                    </span>
+                    <div className="preflight-issues">
+                      {cyclePreview.preflight.issues.map((issue) => (
+                        <div key={issue.key} className="preflight-issue">
+                          <b>
+                            {issue.title}
+                            <em>{issue.count}</em>
+                          </b>
+                          <small>{issue.detail}</small>
+                          <p>
+                            {issue.rows
+                              .map((row) => `${row.label} (${row.note})`)
+                              .join(" · ")}
+                            {issue.count > issue.rows.length &&
+                              ` … and ${issue.count - issue.rows.length} more`}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               {/* Electricity is only charged for movement between two
                   readings, so a room nobody read this period bills rent
                   only. That used to happen silently — this is the last
@@ -1986,6 +2109,7 @@ export function FinanceModule({
                       action: "billing-payment",
                       invoiceId: invoice.id,
                       ...formValues(e),
+                      confirmSuspicious: confirmOverpay,
                     },
                     "Payment submitted for verification",
                   );
@@ -2029,6 +2153,11 @@ export function FinanceModule({
                     required
                   />
                 </label>
+                <SuspiciousConfirm
+                  message={suspicious}
+                  checked={confirmOverpay}
+                  onChange={setConfirmOverpay}
+                />
                 <div className="form-actions wide">
                   <button className="primary" disabled={busy}>
                     Submit proof

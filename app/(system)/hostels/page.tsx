@@ -6,7 +6,7 @@ import { HostelModule } from "../../modules/HostelInformation";
 import type { HostelTab } from "../../modules/shared";
 
 export default function HostelsPage() {
-  const { data, save, busy, load } = useSystem();
+  const { data, save, busy, load, suspicious } = useSystem();
   const [tab, setTab] = useState<HostelTab>("reservations");
   if (!data) return null;
   return (
@@ -17,6 +17,7 @@ export default function HostelsPage() {
       tab={tab}
       setTab={setTab}
       load={load}
+      suspicious={suspicious}
     />
   );
 }

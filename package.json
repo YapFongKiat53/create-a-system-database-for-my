@@ -12,8 +12,10 @@
     "test": "vinext build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "build:cpanel": "next build && cp -r .next/static .next/standalone/.next/static && ([ -d public ] && cp -r public .next/standalone/public || true)",
-    "start:cpanel": "node .next/standalone/server.js"
+    "build:standalone": "next build && cp -r .next/static .next/standalone/.next/static && ([ -d public ] && cp -r public .next/standalone/public || true)",
+    "start:standalone": "node .next/standalone/server.js",
+    "build:cpanel": "npm run build:standalone",
+    "start:cpanel": "npm run start:standalone"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

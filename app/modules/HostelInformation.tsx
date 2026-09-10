@@ -131,10 +131,13 @@ export function HostelModule({
   tab,
   setTab,
   load,
+  suspicious,
 }: {
   data: Data;
   save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
   busy: boolean;
+  /** Set when the last save was refused only because a figure looked wrong. */
+  suspicious: string;
   tab: HostelTab;
   setTab: (tab: HostelTab) => void;
   load: (modules?: string[]) => Promise<void>;
@@ -2373,6 +2376,7 @@ export function HostelModule({
       )}
       {checkInTenancy && (
         <CheckInModal
+          suspicious={suspicious}
           tenancy={checkInTenancy}
           data={data}
           save={save}

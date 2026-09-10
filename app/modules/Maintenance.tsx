@@ -12,6 +12,7 @@ import {
   SearchSelect,
   Stat,
   StatusPill,
+  SuspiciousConfirm,
   blockOf,
   dateLabel,
   formValues,
@@ -152,11 +153,14 @@ export function MaintenanceModule({
   save,
   busy,
   load,
+  suspicious,
 }: {
   data: Data;
   save: any;
   busy: boolean;
   load: (modules?: string[]) => Promise<void>;
+  /** Set when the last save was refused only because a figure looked wrong. */
+  suspicious: string;
 }) {
   const [tab, setTab] = useState("tickets");
   const [modal, setModal] = useState("");
@@ -188,6 +192,8 @@ export function MaintenanceModule({
   // zero, so that month spans two of them and the form has to collect the
   // outgoing meter's final reading as well as the new one's.
   const [meterReplaced, setMeterReplaced] = useState(false);
+  // Ticked after the server refused a reading for being far above normal.
+  const [confirmMeterJump, setConfirmMeterJump] = useState(false);
   const [oldMeterFinal, setOldMeterFinal] = useState("");
   const [newMeterValue, setNewMeterValue] = useState("");
   const [meterRoomType, setMeterRoomType] = useState("");
@@ -2299,12 +2305,14 @@ export function MaintenanceModule({
                     : "meter-reading",
                   readingId: editingMeter?.id,
                   ...formValues(e),
+                  confirmSuspicious: confirmMeterJump,
                 },
                 editingMeter ? "Meter reading updated" : "Meter reading added",
               );
               if (ok) {
                 setModal("");
                 setEditingMeter(null);
+                setConfirmMeterJump(false);
               }
             }}
           >
@@ -2526,6 +2534,11 @@ export function MaintenanceModule({
               Notes
               <input name="notes" defaultValue={editingMeter?.notes || ""} />
             </label>
+            <SuspiciousConfirm
+              message={suspicious}
+              checked={confirmMeterJump}
+              onChange={setConfirmMeterJump}
+            />
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>
                 {editingMeter ? "Update reading" : "Save reading"}

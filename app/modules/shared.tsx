@@ -47,6 +47,12 @@ export type Data = {
     // Day of the *following* month that rent falls due, not an offset from
     // the cut-off — see runScheduledBilling.
     autoBillingDueDay: number;
+    // Where a figure stops looking like a normal month and starts looking
+    // like a slipped digit — see app/api/system/money.ts.
+    moneyGuardMeterJumpKwh: number;
+    moneyGuardOverpayRm: number;
+    moneyGuardOverpayPct: number;
+    moneyGuardRentMax: number;
   };
 };
 export type HostelTab = "availability" | "reservations" | "pricing" | "occupancy";
@@ -561,6 +567,37 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
+/**
+ * Shown inside a form when the last save was refused only because a figure
+ * looked wrong. A blocked figure with no way past it is worse than no check
+ * at all — some months really do use 1,200 kWh — so this turns the refusal
+ * into a decision the staff member makes on the record.
+ */
+export function SuspiciousConfirm({
+  message,
+  checked,
+  onChange,
+}: {
+  message: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  if (!message) return null;
+  return (
+    <label className="wide suspicious-confirm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        <b>I have checked this — the figure is correct</b>
+        <small>{message}</small>
+      </span>
+    </label>
+  );
+}
+
 export function Modal({
   title,
   kicker,
@@ -876,15 +913,19 @@ export function CheckInModal({
   data,
   save,
   busy,
+  suspicious = "",
   onClose,
 }: {
   tenancy: Row;
   data: Data;
   save: any;
   busy: boolean;
+  /** Set when the opening reading was refused for being far above normal. */
+  suspicious?: string;
   onClose: () => void;
 }) {
   const [meterValue, setMeterValue] = useState("");
+  const [confirmMeter, setConfirmMeter] = useState(false);
   // The room's last recorded reading. Shown so staff have something to check
   // the number they just read off the meter against — and so a typo that
   // would hand the new tenant the previous occupant's usage is visible
@@ -916,6 +957,7 @@ export function CheckInModal({
               action: "assignment-check-in",
               assignmentId: tenancy.assignmentId,
               ...formValues(event),
+              confirmSuspicious: confirmMeter,
             },
             "Student checked in",
           );
@@ -962,6 +1004,11 @@ export function CheckInModal({
             </small>
           )}
         </label>
+        <SuspiciousConfirm
+          message={suspicious}
+          checked={confirmMeter}
+          onChange={setConfirmMeter}
+        />
         <label className="wide">
           Arrival notes
           <input

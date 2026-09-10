@@ -4,7 +4,12 @@ import { useSystem } from "../../SystemContext";
 import { StudentsModule } from "../../modules/StudentInformation";
 
 export default function StudentsPage() {
-  const { data, save, busy } = useSystem();
+  const { data, save, busy, suspicious } = useSystem();
   if (!data) return null;
-  return <StudentsModule data={data} save={save} busy={busy} />;
+  return <StudentsModule
+      data={data}
+      save={save}
+      busy={busy}
+      suspicious={suspicious}
+    />;
 }
