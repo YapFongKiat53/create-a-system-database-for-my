@@ -43,6 +43,13 @@ session, a static chunk served 200 at 28 KB.
 
 ## Steps
 
+> **`render.yaml` only applies to a service created as a Blueprint.** A
+> service created through New → Web Service ignores the file entirely and
+> falls back to Render's own defaults, which for this repo means
+> `npm run build` — and that is `vinext build`, the Cloudflare Workers build,
+> not the Node one. If the service already exists, use "Fixing an existing
+> service" at the bottom instead of these steps.
+
 **1. Push the branch.** `render.yaml` has to be in the repo Render reads.
 
 **2. Render → New → Blueprint**, pick the repo. Render reads `render.yaml`
@@ -94,12 +101,13 @@ three applied-but-uncommitted migrations (0019, 0020, 0021) were run with
 one-off scripts against `DATABASE_URL`, and that stays the process. Never
 point a migration at production without a backup first.
 
-**2. Two lockfiles are committed.** `package-lock.json` (current) and
-`pnpm-lock.yaml` (7 weeks old). Both pin `next@16.2.6` so they do not
-conflict today, but a stale second lockfile is a trap — if anything ever
-installs from the pnpm one, the deployed dependency tree is not the tested
-one. `render.yaml` says `npm ci` explicitly so Render cannot pick the wrong
-one; deleting the unused lockfile would remove the hazard properly.
+**2. There is now exactly one lockfile, and it has to stay that way.**
+`pnpm-lock.yaml` was removed because it broke the first deploy: Render sees a
+pnpm lockfile and switches the whole build to pnpm, and that lockfile was
+seven weeks stale — missing `postgres` and seven other dependencies — so
+`pnpm install --frozen-lockfile` refused to run, `node_modules` was never
+installed, and the build died on `vinext: not found`. Adding a second
+lockfile back would reproduce this exactly.
 
 **3. Database connections are worth watching.** `getDb()` opens a fresh pool
 of up to 20 per call and **nothing in the codebase ever closes one** — there
@@ -123,3 +131,23 @@ It exists only because cPanel serves the app under `/system` without
 stripping the prefix. On Render the app is at the domain root; setting it
 would break every asset and API path. It is deliberately absent from
 `render.yaml`.
+
+
+---
+
+## Fixing an existing service that was created by hand
+
+A service created through New → Web Service never reads `render.yaml`. Either
+delete it and recreate it as a Blueprint, or set the two commands yourself in
+**Settings → Build & Deploy**:
+
+| Setting | Value |
+|---|---|
+| Build Command | `npm ci && npm run build:standalone` |
+| Start Command | `npm run start:standalone` |
+
+Leave the environment variables alone — they are already set on the service.
+
+Setting them by hand works, but it does mean `render.yaml` is then only
+documentation: the dashboard is what actually runs. Recreating as a Blueprint
+keeps one source of truth.
