@@ -197,13 +197,10 @@ export function MaintenanceModule({
   const [oldMeterFinal, setOldMeterFinal] = useState("");
   const [newMeterValue, setNewMeterValue] = useState("");
   const [meterRoomType, setMeterRoomType] = useState("");
-  const meterMonths = [
-    ...new Set(
-      data.meterReadings
-        .map((reading) => String(reading.readingDate || "").slice(0, 7))
-        .filter(Boolean),
-    ),
-  ].sort((a, b) => b.localeCompare(a));
+  // Straight from the server: data.meterReadings only carries the newest few
+  // readings per room, so deriving the list from it would quietly drop every
+  // older month from the picker.
+  const meterMonths = data.meterMonths ?? [];
   const [meterMonth, setMeterMonth] = useState(meterMonths[0] || "all");
   // The meter tab is split in two: an entry grid for the month being keyed in
   // right now, and the full historical log. Staff key one hostel at a time,
@@ -809,7 +806,12 @@ export function MaintenanceModule({
             <div className="button-row">
               <button
                 className="secondary compact"
-                onClick={() => setMeterView("history")}
+                onClick={() => {
+                  setMeterView("history");
+                  // The full load only carries the newest few readings per
+                  // room; this is the screen that wants the rest of them.
+                  void load(["meter-history"]);
+                }}
               >
                 Past records
               </button>

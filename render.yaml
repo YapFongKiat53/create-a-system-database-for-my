@@ -34,6 +34,13 @@ services:
       # change the runtime under the app without anyone deciding to.
       - key: NODE_VERSION
         value: "22.13.0"
+      # Next's standalone server binds to `process.env.HOSTNAME || "0.0.0.0"`
+      # (.next/standalone/server.js). Render sets HOSTNAME to the container's
+      # own name, so without this the server listens on that one interface,
+      # Render's proxy cannot reach it, and every request is a 502 even though
+      # the logs say the service is live.
+      - key: HOSTNAME
+        value: "0.0.0.0"
       # sync: false means "prompt me for this in the dashboard, never store
       # it in the repo". All three are secrets.
       - key: DATABASE_URL

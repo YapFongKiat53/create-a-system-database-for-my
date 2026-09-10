@@ -34,6 +34,17 @@ function scopedModulesForAction(action: string): string[] | null {
   if (/^announcement/.test(action)) return ["announcements"];
   if (/^(role-|user-|reminder-)/.test(action)) return ["users"];
   if (/^(school-|course-)/.test(action)) return ["schools-courses"];
+  // A meter reading changes readings and nothing else. Falling through to
+  // the full reload meant keying in a month's readings pulled the entire
+  // dataset down once per room.
+  if (/^meter-reading/.test(action)) return ["meter-readings"];
+  // Student, unit and reservation actions deliberately still reload in full.
+  // The "tenants" scope returns students, invoices and reservations but not
+  // studentRateChanges or depositAdjustments, and "rooms" returns bed spaces
+  // and hostels but not units, owners or services — while a rate change, a
+  // room change and a move-out all write to exactly those. Scoping them
+  // without widening the server scopes first would leave the screen showing
+  // the figure that was just replaced. See loadScopedModules().
   return null;
 }
 

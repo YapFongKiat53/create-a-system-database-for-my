@@ -430,6 +430,82 @@ function deriveHostels(
   });
 }
 
+// How many readings per room the ordinary screens are given. Two is what the
+// arithmetic needs (usage is the movement between a pair); the third is so a
+// correction to the newest one still leaves a pair behind it.
+const METER_READINGS_PER_ROOM = 3;
+
+/**
+ * Meter readings for every room, newest first, capped per room.
+ *
+ * `limit` of null means the lot — used by ?modules=meter-history, which is
+ * what the past-records table and the Reports registers request when they are
+ * actually opened. Everything else gets the capped set: at 9,000 rows the
+ * unabridged table was 77% of the full payload, re-sent on every save, and it
+ * only ever grows.
+ */
+function selectMeterReadings(
+  db: ReturnType<typeof getDb>,
+  limit: number | null,
+) {
+  return db.execute<{
+    id: number;
+    bedSpaceId: number;
+    roomCode: string;
+    roomId: number;
+    roomLabel: string;
+    meterSerial: string;
+    unitCode: string;
+    hostelId: number;
+    hostelName: string;
+    electricityRate: number;
+    readingDate: string;
+    readingValue: number;
+    readingType: string;
+    replacedMeterFinal: number | null;
+    submittedBy: string;
+    notes: string;
+    createdAt: string;
+  }>(sql`
+    SELECT id, "bedSpaceId", "roomCode", "roomId", "roomLabel", "meterSerial",
+           "unitCode", "hostelId", "hostelName", "electricityRate",
+           "readingDate", "readingValue", "readingType", "replacedMeterFinal",
+           "submittedBy", notes, "createdAt"
+    FROM (
+      SELECT m.id,
+             m.bed_space_id       AS "bedSpaceId",
+             u.unit_code || '-' || r.room_label AS "roomCode",
+             r.id                 AS "roomId",
+             r.room_label         AS "roomLabel",
+             r.meter_serial       AS "meterSerial",
+             u.unit_code          AS "unitCode",
+             h.id                 AS "hostelId",
+             h.name               AS "hostelName",
+             h.electricity_rate   AS "electricityRate",
+             m.reading_date       AS "readingDate",
+             m.reading_value      AS "readingValue",
+             m.reading_type       AS "readingType",
+             m.replaced_meter_final AS "replacedMeterFinal",
+             m.submitted_by       AS "submittedBy",
+             m.notes,
+             m.created_at         AS "createdAt",
+             ROW_NUMBER() OVER (
+               PARTITION BY r.id ORDER BY m.reading_date DESC, m.id DESC
+             ) AS rn
+      FROM meter_readings m
+      JOIN bed_spaces b ON b.id = m.bed_space_id
+      JOIN hostel_rooms r ON r.id = b.room_id
+      JOIN hostel_units u ON u.id = r.unit_id
+      JOIN hostel_properties h ON h.id = u.hostel_id
+    ) ranked
+    ${limit === null ? sql`` : sql`WHERE rn <= ${limit}`}
+    ORDER BY "readingDate" DESC, id DESC
+  `);
+}
+
+const selectRecentMeterReadings = (db: ReturnType<typeof getDb>) =>
+  selectMeterReadings(db, METER_READINGS_PER_ROOM);
+
 function selectStudents(db: ReturnType<typeof getDb>) {
   return db
     .select({
@@ -591,6 +667,14 @@ const SCOPED_MODULE_KEYS = [
   "attachments",
   "rooms",
   "tenants",
+  // Every reading ever taken, which the full load deliberately does not
+  // carry. Requested by the screens that read history rather than the
+  // latest pair: Maintenance's past records, and the Reports registers.
+  "meter-history",
+  // The readings the full load does carry — the newest few per room. This
+  // is what a save from the meter screens refreshes, instead of pulling the
+  // whole ~11,900-row payload back down.
+  "meter-readings",
 ] as const;
 type ScopedModuleKey = (typeof SCOPED_MODULE_KEYS)[number];
 
@@ -920,6 +1004,21 @@ async function loadScopedModules(
           .select()
           .from(storedAttachments)
           .orderBy(desc(storedAttachments.id));
+      })(),
+    );
+  }
+
+  // Both write to the same key; which one a screen asks for decides whether
+  // it gets the whole history or just the newest few per room. The client
+  // merges the reply into what it already holds, so a screen that needs
+  // history asks once on open and keeps it until the next full load.
+  if (scopes.has("meter-history") || scopes.has("meter-readings")) {
+    tasks.push(
+      (async () => {
+        result.meterReadings = await selectMeterReadings(
+          db,
+          scopes.has("meter-history") ? null : METER_READINGS_PER_ROOM,
+        );
       })(),
     );
   }
@@ -2059,6 +2158,7 @@ export async function GET(request: Request) {
       ticketRows,
       messageRows,
       readingRows,
+      meterMonthRows,
       cycleRows,
       invoiceRows,
       invoiceItemRows,
@@ -2366,35 +2466,23 @@ export async function GET(request: Request) {
         .leftJoin(hostelRooms, eq(maintenanceTickets.roomId, hostelRooms.id))
         .orderBy(desc(maintenanceTickets.id)),
       db.select().from(ticketMessages).orderBy(asc(ticketMessages.createdAt)),
-      db
-        .select({
-          id: meterReadings.id,
-          bedSpaceId: meterReadings.bedSpaceId,
-          roomCode: sql<string>`${hostelUnits.unitCode} || '-' || ${hostelRooms.roomLabel}`,
-          roomId: hostelRooms.id,
-          roomLabel: hostelRooms.roomLabel,
-          meterSerial: hostelRooms.meterSerial,
-          unitCode: hostelUnits.unitCode,
-          hostelId: hostelProperties.id,
-          hostelName: hostelProperties.name,
-          electricityRate: hostelProperties.electricityRate,
-          readingDate: meterReadings.readingDate,
-          readingValue: meterReadings.readingValue,
-          readingType: meterReadings.readingType,
-          replacedMeterFinal: meterReadings.replacedMeterFinal,
-          submittedBy: meterReadings.submittedBy,
-          notes: meterReadings.notes,
-          createdAt: meterReadings.createdAt,
-        })
-        .from(meterReadings)
-        .innerJoin(bedSpaces, eq(meterReadings.bedSpaceId, bedSpaces.id))
-        .innerJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
-        .innerJoin(hostelUnits, eq(hostelRooms.unitId, hostelUnits.id))
-        .innerJoin(
-          hostelProperties,
-          eq(hostelUnits.hostelId, hostelProperties.id),
-        )
-        .orderBy(desc(meterReadings.readingDate)),
+      // Only the newest few per room, not every reading ever taken. Nothing on
+      // an ordinary screen looks further back than the previous reading — the
+      // billing split, the entry grid and the check-in baseline all compare
+      // the latest pair — but this table is the one that grows without limit:
+      // a normal meter round adds ~500 rows a month, and at 9,000 rows it was
+      // already 77% of everything the full load shipped. The two screens that
+      // genuinely read history (Maintenance's past records, the Reports
+      // registers) ask for it with ?modules=meter-history.
+      selectRecentMeterReadings(db),
+      // The months the dropdown offers. Cheap on its own, and it means
+      // trimming the readings above does not silently shorten that list.
+      db.execute<{ month: string }>(sql`
+        SELECT DISTINCT to_char(reading_date::date, 'YYYY-MM') AS month
+        FROM meter_readings
+        WHERE reading_date IS NOT NULL AND reading_date <> ''
+        ORDER BY month DESC
+      `),
       db.select().from(billingCycles).orderBy(desc(billingCycles.id)),
       selectInvoices(db),
       db.select().from(billingItems),
@@ -2661,6 +2749,7 @@ export async function GET(request: Request) {
       tickets: ticketRows,
       ticketMessages: messageRows,
       meterReadings: readingRows,
+      meterMonths: meterMonthRows.map((row) => String(row.month)),
       billingCycles: cycleRows,
       invoices: invoiceRows.map((invoice) => ({
         ...invoice,
@@ -6607,6 +6696,7 @@ export async function POST(request: Request) {
     );
   }
 }
+
 
 
 

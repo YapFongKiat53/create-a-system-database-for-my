@@ -27,6 +27,10 @@ export type Data = {
   tickets: Row[];
   ticketMessages: Row[];
   meterReadings: Row[];
+  // The months a reading exists for. Sent whole even though meterReadings is
+  // trimmed to the newest few per room, so the month picker still offers
+  // every month rather than only the ones the trimmed set happens to cover.
+  meterMonths: string[];
   billingCycles: Row[];
   invoices: Row[];
   announcements: Row[];

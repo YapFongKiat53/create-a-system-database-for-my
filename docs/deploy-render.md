@@ -66,6 +66,12 @@ means "ask, never store in the repo"):
 
 **4. Apply.** First build takes a few minutes (`npm ci` plus `next build`).
 
+`render.yaml` also sets `HOSTNAME=0.0.0.0`. That one is not optional: Next's
+standalone server binds to `process.env.HOSTNAME || "0.0.0.0"`, and Render
+sets `HOSTNAME` to the container's own name. Left alone, the server listens
+on that single interface, Render's proxy cannot reach it, and every request
+returns 502 while the logs cheerfully report the service is live.
+
 **5. Check it came up.** Open `https://<your-service>.onrender.com/login`.
 You should get the sign-in page. Then sign in and load Finance — that is the
 heaviest page (~30 queries in one request) and the best single smoke test.
@@ -146,7 +152,14 @@ delete it and recreate it as a Blueprint, or set the two commands yourself in
 | Build Command | `npm ci && npm run build:standalone` |
 | Start Command | `npm run start:standalone` |
 
-Leave the environment variables alone — they are already set on the service.
+Then add one environment variable, which a hand-made service will not have:
+
+| Key | Value |
+|---|---|
+| `HOSTNAME` | `0.0.0.0` |
+
+Without it every request is a 502 — see step 4 above for why. The three
+secrets are already on the service and need no change.
 
 Setting them by hand works, but it does mean `render.yaml` is then only
 documentation: the dashboard is what actually runs. Recreating as a Blueprint

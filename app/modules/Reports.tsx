@@ -12,7 +12,13 @@ import {
 import type { Data, Row } from "./shared";
 import { wholeUnitElectricity } from "./wholeUnitElectricity";
 
-export function ReportsModule({ data }: { data: Data }) {
+export function ReportsModule({
+  data,
+  load,
+}: {
+  data: Data;
+  load: (modules?: string[]) => Promise<void>;
+}) {
   const [selectedReport, setSelectedReport] = useState<number | null>(null);
   const [reportQuery, setReportQuery] = useState("");
   const [reportHostel, setReportHostel] = useState("all");
@@ -242,6 +248,10 @@ export function ReportsModule({ data }: { data: Data }) {
     setReportFrom("");
     setReportTo("");
     setReportStatus("all");
+    // The meter register lists a room's last eight readings, and the
+    // whole-unit report re-runs a past round from a "To" date — both need
+    // more history than the full load carries.
+    if (index === 1 || index === 9) void load(["meter-history"]);
   };
   return (
     <div className="table-v2">
