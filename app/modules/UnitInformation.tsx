@@ -1010,7 +1010,7 @@ export function UnitsModule({
                   </div>
                   <div className="room-list">
                     {rooms.map((room) => (
-                      <article key={room.id}>
+                      <article key={room.id} className="room-card">
                         <form
                           className="room-row editable-room"
                           onSubmit={(e) => {
@@ -1042,30 +1042,35 @@ export function UnitsModule({
                             <option value="attached">Attached</option>
                             <option value="non-attached">Non-attached</option>
                           </select>
-                          <button className="secondary compact">
-                            Save room
-                          </button>
-                          <button
-                            type="button"
-                            className="primary compact"
-                            onClick={() => setSelectedRoom(room)}
-                          >
-                            View room
-                          </button>
-                          <button
-                            type="button"
-                            className="danger compact"
-                            onClick={() =>
-                              save(
-                                { action: "room-delete", roomId: room.id },
-                                "Room deleted",
-                              )
-                            }
-                          >
-                            Delete room
-                          </button>
+                          <div className="room-actions">
+                            <button className="secondary compact">
+                              Save room
+                            </button>
+                            <button
+                              type="button"
+                              className="primary compact"
+                              onClick={() => setSelectedRoom(room)}
+                            >
+                              View room
+                            </button>
+                            <button
+                              type="button"
+                              className="danger compact"
+                              onClick={() =>
+                                save(
+                                  { action: "room-delete", roomId: room.id },
+                                  "Room deleted",
+                                )
+                              }
+                            >
+                              Delete room
+                            </button>
+                          </div>
                         </form>
                         <div className="bed-config">
+                          <small className="bed-config-caption">
+                            Room codes
+                          </small>
                           {room.beds.map((bed: Row) => (
                             <form
                               key={bed.id}

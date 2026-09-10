@@ -1,0 +1,1544 @@
+{
+ "live": [
+  "hostel-workspace",
+  "menu-open",
+  "module-content",
+  "sales-overview",
+  "search",
+  "total-payable",
+  "unit-form"
+ ],
+ "dead": [],
+ "media": {
+  "nav-groups": [
+   {
+    "line": 475,
+    "cond": "@media (max-height: 640px)",
+    "selector": ".nav-groups"
+   },
+   {
+    "line": 4731,
+    "cond": "@media (max-width: 900px)",
+    "selector": "/* The groups exist to label the rail on a wide screen. On a phone the nav is a plain list, so the wrappers step aside and let the links be the grid items directly. */ .nav-groups"
+   }
+  ],
+  "sidebar": [
+   {
+    "line": 480,
+    "cond": "@media (max-height: 640px)",
+    "selector": ".sidebar nav button, .sidebar nav a"
+   },
+   {
+    "line": 484,
+    "cond": "@media (max-height: 640px)",
+    "selector": ".sidebar .nav-copy small"
+   },
+   {
+    "line": 4664,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar"
+   },
+   {
+    "line": 4722,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar.menu-open .nav-toggle"
+   },
+   {
+    "line": 4741,
+    "cond": "@media (max-width: 900px)",
+    "selector": "/* Ten links across the top pushed the page itself below the fold, so the nav is closed until the Menu button opens it. */ .sidebar nav"
+   },
+   {
+    "line": 4745,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar.menu-open nav"
+   },
+   {
+    "line": 4755,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar nav button, .sidebar nav a"
+   },
+   {
+    "line": 4907,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".sidebar.menu-open nav"
+   }
+  ],
+  "nav-copy": [
+   {
+    "line": 484,
+    "cond": "@media (max-height: 640px)",
+    "selector": ".sidebar .nav-copy small"
+   },
+   {
+    "line": 4676,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-copy small, .phase-card, .nav-label, .source-pill"
+   },
+   {
+    "line": 4760,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-copy b"
+   }
+  ],
+  "module-metrics": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   },
+   {
+    "line": 4828,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".module-metrics"
+   },
+   {
+    "line": 4980,
+    "cond": "@media (max-width: 620px)",
+    "selector": "/* Both are flex strips; their wrapping is driven by flex-basis, so the grid columns here never applied. Left as a no-op removal rather than a layout change. */ .module-metrics strong"
+   }
+  ],
+  "stat-filter": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   },
+   {
+    "line": 5031,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".stat-filter strong"
+   }
+  ],
+  "report-grid": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   }
+  ],
+  "report-card": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   }
+  ],
+  "dash-stats": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   }
+  ],
+  "dash-stat": [
+   {
+    "line": 2536,
+    "cond": "@media (max-width: 1000px)",
+    "selector": ".module-metrics>article, .module-metrics>.stat-filter, .report-grid>.report-card, .dash-stats>.dash-stat"
+   }
+  ],
+  "room-hero-facts": [
+   {
+    "line": 4617,
+    "cond": "@media (max-width: 1180px)",
+    "selector": ".room-hero-facts"
+   },
+   {
+    "line": 4622,
+    "cond": "@media (max-width: 1180px)",
+    "selector": ".room-hero-facts>span:nth-child(4)"
+   },
+   {
+    "line": 4881,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts, .room-stat-grid, .amenity-grid, .room-edit-grid"
+   },
+   {
+    "line": 4885,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts>span"
+   },
+   {
+    "line": 4891,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts>span:first-child"
+   }
+  ],
+  "room-stat-grid": [
+   {
+    "line": 4627,
+    "cond": "@media (max-width: 1180px)",
+    "selector": ".room-stat-grid"
+   },
+   {
+    "line": 4864,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-header, .room-hero-card, .room-stat-grid, .room-overview-layout"
+   },
+   {
+    "line": 4881,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts, .room-stat-grid, .amenity-grid, .room-edit-grid"
+   }
+  ],
+  "room-overview-layout": [
+   {
+    "line": 4631,
+    "cond": "@media (max-width: 1180px)",
+    "selector": ".room-overview-layout"
+   },
+   {
+    "line": 4864,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-header, .room-hero-card, .room-stat-grid, .room-overview-layout"
+   },
+   {
+    "line": 4895,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-layout"
+   }
+  ],
+  "metrics-container": [
+   {
+    "line": 4638,
+    "cond": "@media (max-width: 1024px)",
+    "selector": ".metrics-container"
+   }
+  ],
+  "metric-card": [
+   {
+    "line": 4642,
+    "cond": "@media (max-width: 1024px)",
+    "selector": ".metric-card"
+   }
+  ],
+  "app-shell": [
+   {
+    "line": 4656,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".app-shell"
+   }
+  ],
+  "phase-card": [
+   {
+    "line": 4676,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-copy small, .phase-card, .nav-label, .source-pill"
+   }
+  ],
+  "nav-label": [
+   {
+    "line": 4676,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-copy small, .phase-card, .nav-label, .source-pill"
+   }
+  ],
+  "source-pill": [
+   {
+    "line": 4676,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-copy small, .phase-card, .nav-label, .source-pill"
+   }
+  ],
+  "brand": [
+   {
+    "line": 4680,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".brand"
+   }
+  ],
+  "sidebar-foot": [
+   {
+    "line": 4688,
+    "cond": "@media (max-width: 900px)",
+    "selector": "/* Name and role do not fit on a phone, but signing out still has to be reachable — it used to be its own element outside this block and would otherwise have vanished when it moved in here. */ .sidebar-foot"
+   },
+   {
+    "line": 4699,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar-foot > span, .sidebar-foot > div"
+   }
+  ],
+  "nav-toggle": [
+   {
+    "line": 4703,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-toggle"
+   },
+   {
+    "line": 4722,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar.menu-open .nav-toggle"
+   }
+  ],
+  "menu-open": [
+   {
+    "line": 4722,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar.menu-open .nav-toggle"
+   },
+   {
+    "line": 4745,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".sidebar.menu-open nav"
+   },
+   {
+    "line": 4907,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".sidebar.menu-open nav"
+   }
+  ],
+  "nav-group": [
+   {
+    "line": 4735,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".nav-group"
+   }
+  ],
+  "topbar": [
+   {
+    "line": 4765,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".topbar"
+   },
+   {
+    "line": 4917,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".topbar h1"
+   }
+  ],
+  "content": [
+   {
+    "line": 4770,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".content"
+   }
+  ],
+  "intro": [
+   {
+    "line": 4774,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".intro"
+   },
+   {
+    "line": 4779,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".intro h2"
+   }
+  ],
+  "hostel-grid": [
+   {
+    "line": 4783,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".hostel-grid"
+   },
+   {
+    "line": 4922,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".hostel-grid, .reservation-grid"
+   }
+  ],
+  "workspace-tabs": [
+   {
+    "line": 4787,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".workspace-tabs"
+   },
+   {
+    "line": 4791,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".workspace-tabs button"
+   }
+  ],
+  "section-heading": [
+   {
+    "line": 4795,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".section-heading"
+   }
+  ],
+  "availability-filters": [
+   {
+    "line": 4800,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".availability-filters"
+   },
+   {
+    "line": 4928,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".availability-filters, .form-grid, .unit-form .form-grid"
+   }
+  ],
+  "unit-filters": [
+   {
+    "line": 4804,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".unit-filters"
+   }
+  ],
+  "search": [
+   {
+    "line": 4808,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".search"
+   }
+  ],
+  "data-notes": [
+   {
+    "line": 4812,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".data-notes"
+   }
+  ],
+  "room-list": [
+   {
+    "line": 4816,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".room-list article"
+   },
+   {
+    "line": 4820,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".room-list select"
+   }
+  ],
+  "pricing-controls": [
+   {
+    "line": 4824,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".pricing-controls"
+   },
+   {
+    "line": 4986,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".rate-card-grid, .charge-grid, .pricing-controls"
+   },
+   {
+    "line": 5023,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".pricing-controls, .pricing-preview"
+   }
+  ],
+  "announcement-list": [
+   {
+    "line": 4832,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".announcement-list"
+   }
+  ],
+  "rate-card-grid": [
+   {
+    "line": 4836,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".rate-card-grid"
+   },
+   {
+    "line": 4986,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".rate-card-grid, .charge-grid, .pricing-controls"
+   }
+  ],
+  "editable-room": [
+   {
+    "line": 4840,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".editable-room"
+   },
+   {
+    "line": 4992,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".editable-room, .bed-config form, .bed-config label"
+   }
+  ],
+  "asset-actions": [
+   {
+    "line": 4844,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".asset-actions"
+   },
+   {
+    "line": 5041,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".asset-actions"
+   }
+  ],
+  "room-overview-backdrop": [
+   {
+    "line": 4851,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-backdrop"
+   }
+  ],
+  "room-overview-panel": [
+   {
+    "line": 4855,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-panel"
+   }
+  ],
+  "room-overview-header": [
+   {
+    "line": 4864,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-header, .room-hero-card, .room-stat-grid, .room-overview-layout"
+   },
+   {
+    "line": 4869,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-header"
+   }
+  ],
+  "room-hero-card": [
+   {
+    "line": 4864,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-overview-header, .room-hero-card, .room-stat-grid, .room-overview-layout"
+   },
+   {
+    "line": 4874,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-card"
+   }
+  ],
+  "amenity-grid": [
+   {
+    "line": 4881,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts, .room-stat-grid, .amenity-grid, .room-edit-grid"
+   }
+  ],
+  "room-edit-grid": [
+   {
+    "line": 4881,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-hero-facts, .room-stat-grid, .amenity-grid, .room-edit-grid"
+   }
+  ],
+  "room-bed-table": [
+   {
+    "line": 4899,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".room-bed-table>div"
+   }
+  ],
+  "topbar-note": [
+   {
+    "line": 4911,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".topbar-note"
+   }
+  ],
+  "reservation-grid": [
+   {
+    "line": 4922,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".hostel-grid, .reservation-grid"
+   }
+  ],
+  "form-grid": [
+   {
+    "line": 4928,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".availability-filters, .form-grid, .unit-form .form-grid"
+   },
+   {
+    "line": 4932,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".form-grid .wide"
+   },
+   {
+    "line": 9351,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9363,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   }
+  ],
+  "unit-form": [
+   {
+    "line": 4928,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".availability-filters, .form-grid, .unit-form .form-grid"
+   }
+  ],
+  "wide": [
+   {
+    "line": 4932,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".form-grid .wide"
+   }
+  ],
+  "asset-list": [
+   {
+    "line": 4937,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".asset-list, .service-form"
+   },
+   {
+    "line": 5036,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".asset-list article, .service-list article"
+   }
+  ],
+  "service-form": [
+   {
+    "line": 4937,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".asset-list, .service-form"
+   },
+   {
+    "line": 5018,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".service-form.expanded, .bed-config"
+   }
+  ],
+  "modal-backdrop": [
+   {
+    "line": 4941,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".modal-backdrop"
+   }
+  ],
+  "modal": [
+   {
+    "line": 4945,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".modal"
+   }
+  ],
+  "module-content": [
+   {
+    "line": 4949,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".module-content"
+   }
+  ],
+  "sales-overview": [
+   {
+    "line": 4953,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".sales-overview"
+   }
+  ],
+  "hostel-workspace": [
+   {
+    "line": 4957,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".hostel-workspace"
+   }
+  ],
+  "sticky-filters": [
+   {
+    "line": 4962,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".sticky-filters"
+   }
+  ],
+  "mobile-availability": [
+   {
+    "line": 4968,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".mobile-availability"
+   }
+  ],
+  "charge-grid": [
+   {
+    "line": 4986,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".rate-card-grid, .charge-grid, .pricing-controls"
+   }
+  ],
+  "bed-config": [
+   {
+    "line": 4992,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".editable-room, .bed-config form, .bed-config label"
+   },
+   {
+    "line": 5018,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".service-form.expanded, .bed-config"
+   }
+  ],
+  "drawer-tabs": [
+   {
+    "line": 4996,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".drawer-tabs"
+   }
+  ],
+  "total-payable": [
+   {
+    "line": 5003,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".total-payable, .modal-total, .cycle-banner, .payment-review>div"
+   }
+  ],
+  "modal-total": [
+   {
+    "line": 5003,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".total-payable, .modal-total, .cycle-banner, .payment-review>div"
+   }
+  ],
+  "cycle-banner": [
+   {
+    "line": 5003,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".total-payable, .modal-total, .cycle-banner, .payment-review>div"
+   }
+  ],
+  "payment-review": [
+   {
+    "line": 5003,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".total-payable, .modal-total, .cycle-banner, .payment-review>div"
+   }
+  ],
+  "ticket-summary": [
+   {
+    "line": 5008,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".ticket-summary"
+   }
+  ],
+  "top-button": [
+   {
+    "line": 5012,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".top-button"
+   }
+  ],
+  "expanded": [
+   {
+    "line": 5018,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".service-form.expanded, .bed-config"
+   }
+  ],
+  "pricing-preview": [
+   {
+    "line": 5023,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".pricing-controls, .pricing-preview"
+   }
+  ],
+  "settings-grid": [
+   {
+    "line": 5027,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".settings-grid"
+   }
+  ],
+  "service-list": [
+   {
+    "line": 5036,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".asset-list article, .service-list article"
+   }
+  ],
+  "reservation-hero": [
+   {
+    "line": 6343,
+    "cond": "@media (max-width: 1050px)",
+    "selector": ".reservation-hero"
+   },
+   {
+    "line": 6361,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-hero"
+   }
+  ],
+  "reservation-illustration": [
+   {
+    "line": 6347,
+    "cond": "@media (max-width: 1050px)",
+    "selector": ".reservation-illustration"
+   }
+  ],
+  "reservation-filter-panel": [
+   {
+    "line": 6351,
+    "cond": "@media (max-width: 1050px)",
+    "selector": ".reservation-filter-panel"
+   },
+   {
+    "line": 6375,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-filter-panel"
+   }
+  ],
+  "reservation-page": [
+   {
+    "line": 6357,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-page"
+   }
+  ],
+  "reservation-hero-side": [
+   {
+    "line": 6367,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-hero-side"
+   }
+  ],
+  "reservation-btn-primary": [
+   {
+    "line": 6371,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-btn-primary"
+   }
+  ],
+  "reservation-card-grid": [
+   {
+    "line": 6380,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-grid"
+   }
+  ],
+  "reservation-card-header": [
+   {
+    "line": 6386,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-header, .reservation-preferences, .reservation-payment-history"
+   }
+  ],
+  "reservation-preferences": [
+   {
+    "line": 6386,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-header, .reservation-preferences, .reservation-payment-history"
+   }
+  ],
+  "reservation-payment-history": [
+   {
+    "line": 6386,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-header, .reservation-preferences, .reservation-payment-history"
+   }
+  ],
+  "reservation-commitment": [
+   {
+    "line": 6392,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-commitment, .reservation-money-summary"
+   }
+  ],
+  "reservation-money-summary": [
+   {
+    "line": 6392,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-commitment, .reservation-money-summary"
+   },
+   {
+    "line": 6397,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-money-summary"
+   },
+   {
+    "line": 6401,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-money-summary>div+div"
+   }
+  ],
+  "reservation-card-footer": [
+   {
+    "line": 6406,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-footer"
+   }
+  ],
+  "reservation-card-actions": [
+   {
+    "line": 6410,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-actions"
+   },
+   {
+    "line": 6420,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-actions .reservation-btn"
+   }
+  ],
+  "reservation-main-actions": [
+   {
+    "line": 6415,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-main-actions"
+   }
+  ],
+  "reservation-btn": [
+   {
+    "line": 6420,
+    "cond": "@media (max-width: 760px)",
+    "selector": ".reservation-card-actions .reservation-btn"
+   }
+  ],
+  "pricing-filter-grid": [
+   {
+    "line": 7110,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".pricing-filter-grid"
+   },
+   {
+    "line": 7138,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-filter-grid"
+   },
+   {
+    "line": 7172,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-filter-grid, .pricing-promotion-grid"
+   }
+  ],
+  "pricing-action-row": [
+   {
+    "line": 7114,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".pricing-action-row"
+   },
+   {
+    "line": 7146,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-action-row"
+   }
+  ],
+  "pricing-select-all": [
+   {
+    "line": 7118,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".pricing-select-all"
+   },
+   {
+    "line": 7150,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-select-all"
+   }
+  ],
+  "pricing-hero": [
+   {
+    "line": 7125,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-hero"
+   }
+  ],
+  "pricing-hero-art": [
+   {
+    "line": 7130,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-hero-art"
+   }
+  ],
+  "pricing-editor": [
+   {
+    "line": 7134,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-editor"
+   },
+   {
+    "line": 7176,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-editor"
+   }
+  ],
+  "pricing-promotion-grid": [
+   {
+    "line": 7142,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-promotion-grid"
+   },
+   {
+    "line": 7172,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-filter-grid, .pricing-promotion-grid"
+   }
+  ],
+  "pricing-preview-header": [
+   {
+    "line": 7154,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-preview-header"
+   },
+   {
+    "line": 7186,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-preview-header"
+   }
+  ],
+  "pricing-preview-title": [
+   {
+    "line": 7159,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-preview-title small"
+   }
+  ],
+  "pricing-preview-count": [
+   {
+    "line": 7163,
+    "cond": "@media (max-width: 820px)",
+    "selector": ".pricing-preview-count"
+   },
+   {
+    "line": 7191,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-preview-count"
+   }
+  ],
+  "pricing-preview-card": [
+   {
+    "line": 7181,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".pricing-preview-card"
+   }
+  ],
+  "promotion-area-heading": [
+   {
+    "line": 7196,
+    "cond": "@media (max-width: 560px)",
+    "selector": ".promotion-area-heading"
+   }
+  ],
+  "selected-hostel-card": [
+   {
+    "line": 8051,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".selected-hostel-card"
+   },
+   {
+    "line": 8091,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary, .selected-hostel-card"
+   },
+   {
+    "line": 8116,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".selected-hostel-card"
+   }
+  ],
+  "selected-hostel-stats": [
+   {
+    "line": 8055,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".selected-hostel-stats"
+   },
+   {
+    "line": 8124,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".selected-hostel-stats"
+   },
+   {
+    "line": 8202,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".selected-hostel-stats"
+   }
+  ],
+  "hostel-directory-title": [
+   {
+    "line": 8063,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading"
+   },
+   {
+    "line": 8091,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary, .selected-hostel-card"
+   },
+   {
+    "line": 8098,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading"
+   },
+   {
+    "line": 8193,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary"
+   }
+  ],
+  "unit-directory-heading": [
+   {
+    "line": 8063,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading"
+   },
+   {
+    "line": 8091,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary, .selected-hostel-card"
+   },
+   {
+    "line": 8098,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading"
+   },
+   {
+    "line": 8104,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-count, .unit-directory-heading>span"
+   },
+   {
+    "line": 8193,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary"
+   }
+  ],
+  "unit-directory-toolbar--nested": [
+   {
+    "line": 8067,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".unit-directory-toolbar--nested"
+   },
+   {
+    "line": 8128,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".unit-directory-toolbar--nested"
+   }
+  ],
+  "unit-directory-search": [
+   {
+    "line": 8071,
+    "cond": "@media (max-width: 900px)",
+    "selector": ".unit-directory-search"
+   },
+   {
+    "line": 8132,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".unit-directory-search"
+   }
+  ],
+  "hostel-directory": [
+   {
+    "line": 8079,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory, .unit-directory"
+   }
+  ],
+  "unit-directory": [
+   {
+    "line": 8079,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory, .unit-directory"
+   }
+  ],
+  "unit-directory-toolbar": [
+   {
+    "line": 8091,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary, .selected-hostel-card"
+   },
+   {
+    "line": 8193,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary"
+   }
+  ],
+  "unit-directory-summary": [
+   {
+    "line": 8091,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary, .selected-hostel-card"
+   },
+   {
+    "line": 8136,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".unit-directory-summary"
+   },
+   {
+    "line": 8193,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".hostel-directory-title, .unit-directory-heading, .unit-directory-toolbar, .unit-directory-summary"
+   },
+   {
+    "line": 8206,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".unit-directory-summary"
+   }
+  ],
+  "hostel-directory-count": [
+   {
+    "line": 8104,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-count, .unit-directory-heading>span"
+   }
+  ],
+  "hostel-unit-navigation": [
+   {
+    "line": 8108,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-unit-navigation"
+   },
+   {
+    "line": 8112,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-unit-navigation>span"
+   }
+  ],
+  "selected-hostel-main": [
+   {
+    "line": 8120,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".selected-hostel-main"
+   },
+   {
+    "line": 8198,
+    "cond": "@media (max-width: 480px)",
+    "selector": ".selected-hostel-main"
+   }
+  ],
+  "hostel-directory-scroll": [
+   {
+    "line": 8141,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-scroll, .unit-directory-scroll"
+   }
+  ],
+  "unit-directory-scroll": [
+   {
+    "line": 8141,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-scroll, .unit-directory-scroll"
+   }
+  ],
+  "hostel-directory-table": [
+   {
+    "line": 8146,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-table, .unit-directory-table"
+   }
+  ],
+  "unit-directory-table": [
+   {
+    "line": 8146,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-table, .unit-directory-table"
+   }
+  ],
+  "hostel-directory-header": [
+   {
+    "line": 8151,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-header, .unit-directory-header"
+   }
+  ],
+  "unit-directory-header": [
+   {
+    "line": 8151,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-header, .unit-directory-header"
+   }
+  ],
+  "hostel-directory-row": [
+   {
+    "line": 8156,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-row, .unit-directory-row"
+   },
+   {
+    "line": 8167,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-row:hover, .hostel-directory-row:focus-visible, .unit-directory-row:hover"
+   }
+  ],
+  "unit-directory-row": [
+   {
+    "line": 8156,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-row, .unit-directory-row"
+   },
+   {
+    "line": 8167,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-row:hover, .hostel-directory-row:focus-visible, .unit-directory-row:hover"
+   }
+  ],
+  "hostel-directory-property": [
+   {
+    "line": 8173,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-property, .unit-directory-property, .unit-directory-owner"
+   }
+  ],
+  "unit-directory-property": [
+   {
+    "line": 8173,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-property, .unit-directory-property, .unit-directory-owner"
+   }
+  ],
+  "unit-directory-owner": [
+   {
+    "line": 8173,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-property, .unit-directory-property, .unit-directory-owner"
+   }
+  ],
+  "hostel-directory-action": [
+   {
+    "line": 8178,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-action, .unit-directory-action"
+   }
+  ],
+  "unit-directory-action": [
+   {
+    "line": 8178,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-action, .unit-directory-action"
+   }
+  ],
+  "hostel-directory-open": [
+   {
+    "line": 8183,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-open, .unit-directory-open"
+   }
+  ],
+  "unit-directory-open": [
+   {
+    "line": 8183,
+    "cond": "@media (max-width: 700px)",
+    "selector": ".hostel-directory-open, .unit-directory-open"
+   }
+  ],
+  "student-hostel-list-header": [
+   {
+    "line": 8665,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".student-hostel-list-header, .student-hostel-row"
+   },
+   {
+    "line": 8681,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-hostel-list-header"
+   }
+  ],
+  "student-hostel-row": [
+   {
+    "line": 8665,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".student-hostel-list-header, .student-hostel-row"
+   },
+   {
+    "line": 8685,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-hostel-row"
+   },
+   {
+    "line": 8724,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-hostel-row"
+   }
+  ],
+  "student-second-level-filters": [
+   {
+    "line": 8671,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".student-second-level-filters"
+   },
+   {
+    "line": 8750,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-second-level-filters"
+   }
+  ],
+  "student-search-field": [
+   {
+    "line": 8675,
+    "cond": "@media (max-width: 1250px)",
+    "selector": ".student-search-field"
+   },
+   {
+    "line": 8756,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-search-field, .student-reset-button"
+   }
+  ],
+  "student-hostel-property": [
+   {
+    "line": 8694,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-hostel-property"
+   },
+   {
+    "line": 8728,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-hostel-property"
+   },
+   {
+    "line": 8732,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-hostel-property p"
+   }
+  ],
+  "student-hostel-action": [
+   {
+    "line": 8698,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-hostel-action"
+   },
+   {
+    "line": 8702,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-hostel-action button"
+   }
+  ],
+  "student-selected-hostel-card": [
+   {
+    "line": 8706,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-selected-hostel-card"
+   },
+   {
+    "line": 8736,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-selected-hostel-card"
+   }
+  ],
+  "student-selected-hostel-total": [
+   {
+    "line": 8710,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-selected-hostel-total"
+   },
+   {
+    "line": 8741,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-selected-hostel-total"
+   }
+  ],
+  "student-results-heading": [
+   {
+    "line": 8714,
+    "cond": "@media (max-width: 920px)",
+    "selector": ".student-results-heading"
+   },
+   {
+    "line": 8760,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-results-heading"
+   },
+   {
+    "line": 8764,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-results-heading>span"
+   }
+  ],
+  "student-hostel-page": [
+   {
+    "line": 8720,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-hostel-page"
+   }
+  ],
+  "student-reset-button": [
+   {
+    "line": 8756,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-search-field, .student-reset-button"
+   }
+  ],
+  "student-pagination": [
+   {
+    "line": 8768,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-pagination"
+   }
+  ],
+  "student-pagination-buttons": [
+   {
+    "line": 8773,
+    "cond": "@media (max-width: 650px)",
+    "selector": ".student-pagination-buttons"
+   }
+  ],
+  "table-v2": [
+   {
+    "line": 9351,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9357,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-toolbar"
+   },
+   {
+    "line": 9363,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9367,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-add-panel"
+   }
+  ],
+  "v2-expand-panel": [
+   {
+    "line": 9351,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9363,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   }
+  ],
+  "v2-add-panel": [
+   {
+    "line": 9351,
+    "cond": "@media (max-width: 1100px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9363,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-expand-panel .form-grid, .table-v2 .v2-add-panel .form-grid"
+   },
+   {
+    "line": 9367,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-add-panel"
+   }
+  ],
+  "v2-toolbar": [
+   {
+    "line": 9357,
+    "cond": "@media (max-width: 620px)",
+    "selector": ".table-v2 .v2-toolbar"
+   }
+  ],
+  "meter-entry-table": [
+   {
+    "line": 9607,
+    "cond": "@media (max-width: 720px)",
+    "selector": ".meter-entry-table td.entry-col input"
+   }
+  ],
+  "entry-col": [
+   {
+    "line": 9607,
+    "cond": "@media (max-width: 720px)",
+    "selector": ".meter-entry-table td.entry-col input"
+   }
+  ],
+  "billing-invoice-head": [
+   {
+    "line": 9922,
+    "cond": "@media (max-width: 640px)",
+    "selector": ".billing-invoice-head"
+   }
+  ],
+  "billing-invoice-figures": [
+   {
+    "line": 9923,
+    "cond": "@media (max-width: 640px)",
+    "selector": ".billing-invoice-figures"
+   }
+  ]
+ }
+}

@@ -144,6 +144,9 @@ function Chrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [showTop, setShowTop] = useState(false);
+  // Phone-only: the nav rail collapses behind a Menu button. Ignored on a
+  // wide screen, where the rail is always a column.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setShowTop(window.scrollY > 650);
@@ -177,7 +180,7 @@ function Chrome({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <div className="sidebar-trigger" aria-hidden="true" />
-      <aside className="sidebar">
+      <aside className={`sidebar${menuOpen ? " menu-open" : ""}`}>
         <div className="brand">
           <span className="brand-mark">
             <BrandIcon />
@@ -187,7 +190,21 @@ function Chrome({ children }: { children: ReactNode }) {
             <small>Management console</small>
           </div>
         </div>
-        <nav className="nav-groups">
+        {/* Phone only. The rail is a permanent column on a wide screen, but
+            on a phone ten links across the top pushed the actual page below
+            the fold — so there it collapses behind this. */}
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-expanded={menuOpen}
+          aria-controls="primary-nav"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span aria-hidden="true">{menuOpen ? "✕" : "☰"}</span>
+          <span className="nav-toggle-text">Menu</span>
+        </button>
+        <nav className="nav-groups" id="primary-nav">
           {navGroups.map((group, index) => {
             const items = group.items.filter((item) =>
               navigation.some((allowed) => allowed.href === item.href),
@@ -201,6 +218,10 @@ function Chrome({ children }: { children: ReactNode }) {
                     key={item.href}
                     href={item.href}
                     className={pathname === item.href ? "active" : ""}
+                    /* Navigating does not unmount the rail, so the phone
+                       menu would otherwise stay open over the page the tap
+                       just asked for. */
+                    onClick={() => setMenuOpen(false)}
                   >
                     <span className="nav-icon">
                       <item.Icon />

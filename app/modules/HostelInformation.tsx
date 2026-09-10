@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  CheckInModal,
   CourseOptions,
   DEPOSIT_MONTHS,
   Empty,
@@ -110,8 +111,14 @@ const Metric = ({
 const isRoomAvailable = (bed: Row) =>
   bed.status === "vacant" || bed.availabilityState === "available-now";
 
-const roomStatus = (bed: Row): "available" | "occupied" | "unavailable" => {
+const roomStatus = (
+  bed: Row,
+): "available" | "awaiting-check-in" | "occupied" | "unavailable" => {
   if (isRoomAvailable(bed)) return "available";
+  // Sold and held for a converted booking, but the student hasn't arrived —
+  // its own state so staff can tell it apart from a room that is genuinely
+  // out of service.
+  if (bed.status === "reserved") return "awaiting-check-in";
   if (bed.status === "occupied") return "occupied";
   return "unavailable";
 };
@@ -157,13 +164,16 @@ export function HostelModule({
   const [manageReservation, setManageReservation] = useState<Row | null>(
     null,
   );
+  // Holds the tenancy row (not the reservation) being checked in — the
+  // action works on the assignment the booking created.
+  const [checkInTenancy, setCheckInTenancy] = useState<Row | null>(null);
   const [chargeOpen, setChargeOpen] = useState(false);
   const [charges, setCharges] = useState<Record<string, number>>(blankCharges);
   const [reservationKind, setReservationKind] = useState("individual");
   const [reservationQuery, setReservationQuery] = useState("");
   const [reservationHostelFilter, setReservationHostelFilter] = useState("all");
   const [reservationStatusTab, setReservationStatusTab] = useState<
-    "all" | "reserved" | "converted" | "cancelled"
+    "all" | "reserved" | "converted" | "checked-in" | "cancelled"
   >("reserved");
   // Converted reservations still collect balance payments, so staff need to
   // slice them by payment progress the same way Finance does for invoices.
@@ -239,6 +249,11 @@ export function HostelModule({
       occupied: data.bedSpaces.filter((bed) => bed.status === "occupied")
         .length,
       vacant: data.bedSpaces.filter((bed) => bed.status === "vacant").length,
+      // Held for a converted booking whose student hasn't arrived yet: not
+      // sellable, but not occupied either, so it belongs in neither of the
+      // two counts above.
+      awaitingCheckIn: data.bedSpaces.filter((bed) => bed.status === "reserved")
+        .length,
       special: data.bedSpaces.filter((bed) => bed.status === "special-use")
         .length,
     }),
@@ -381,10 +396,32 @@ export function HostelModule({
       .length,
     cancelled: data.reservations.filter((r) => r.status === "cancelled")
       .length,
+    checkedIn: 0, // filled in below, once the tenancy lookup exists
   };
   const convertedReservations = data.reservations.filter(
     (r) => r.status === "converted",
   );
+  // The tenancy each converted booking became, keyed by reservation, so the
+  // card can tell whether the student has actually turned up and offer the
+  // check-in action without sending staff over to the Tenants module.
+  const tenancyByReservation = new Map(
+    data.students
+      .filter((student) => student.sourceReservationId)
+      .map((student) => [String(student.sourceReservationId), student]),
+  );
+  const tenancyFor = (reservation: Row) =>
+    tenancyByReservation.get(String(reservation.id)) || null;
+  const isAwaitingCheckIn = (reservation: Row) => {
+    const tenancy = tenancyFor(reservation);
+    return Boolean(
+      tenancy && tenancy.bedStatus === "reserved" && !tenancy.checkedInAt,
+    );
+  };
+  const isCheckedIn = (reservation: Row) =>
+    Boolean(tenancyFor(reservation)?.checkedInAt);
+  const awaitingCheckIn = convertedReservations.filter(isAwaitingCheckIn);
+  const checkedInReservations = convertedReservations.filter(isCheckedIn);
+  reservationCounts.checkedIn = checkedInReservations.length;
   const convertedPaymentCounts = {
     all: convertedReservations.length,
     partial: convertedReservations.filter(
@@ -411,9 +448,17 @@ export function HostelModule({
       reservationStatusTab !== "converted" ||
       reservationPaymentFilter === "all" ||
       (reservation.paymentStatus || "unpaid") === reservationPaymentFilter;
+    // "Checked in" is a slice of the converted bookings rather than a
+    // reservation status of its own — the student arriving doesn't change
+    // the booking, it changes the tenancy underneath it.
+    const matchesStatus =
+      reservationStatusTab === "all"
+        ? true
+        : reservationStatusTab === "checked-in"
+          ? reservation.status === "converted" && isCheckedIn(reservation)
+          : reservation.status === reservationStatusTab;
     return (
-      (reservationStatusTab === "all" ||
-        reservation.status === reservationStatusTab) &&
+      matchesStatus &&
       matchesPayment &&
       (reservationHostelFilter === "all" ||
         String(reservation.preferredHostelId || "") ===
@@ -710,7 +755,11 @@ export function HostelModule({
           <Metric
             label="OVERALL OCCUPANCY"
             value={`${unitOccupancyRate}%`}
-            note={`${totals.vacant} beds vacant now`}
+            note={`${totals.vacant} beds vacant now${
+              totals.awaitingCheckIn
+                ? ` · ${totals.awaitingCheckIn} awaiting check-in`
+                : ""
+            }`}
             tone="coral"
           />
         </section>
@@ -815,6 +864,7 @@ export function HostelModule({
                 >
                   <option value="all">All Status</option>
                   <option value="available">Available (reservable)</option>
+                  <option value="awaiting-check-in">Awaiting check-in</option>
                   <option value="occupied">Occupied</option>
                   <option value="unavailable">Unavailable</option>
                 </select>
@@ -1098,9 +1148,20 @@ export function HostelModule({
                 onClick={() => setReservationStatusTab("converted")}
               >
                 Converted ({reservationCounts.converted})
-                {pendingRoomReturns.length > 0 && (
-                  <span>{pendingRoomReturns.length}</span>
+                {pendingRoomReturns.length + awaitingCheckIn.length > 0 && (
+                  <span>
+                    {pendingRoomReturns.length + awaitingCheckIn.length}
+                  </span>
                 )}
+              </button>
+              <button
+                type="button"
+                className={
+                  reservationStatusTab === "checked-in" ? "active" : ""
+                }
+                onClick={() => setReservationStatusTab("checked-in")}
+              >
+                Checked in ({reservationCounts.checkedIn})
               </button>
               <button
                 type="button"
@@ -1360,7 +1421,22 @@ export function HostelModule({
                         <p style={{ margin: 0, fontSize: '13px' }}>
                           Payable <strong>{money(totalPayable)}</strong> · Paid{" "}
                           <strong>{money(totalPaid)}</strong> ·{" "}
-                          {creditBalance > 0 ? (
+                          {/* Nobody is going to collect on a cancelled
+                              booking, so showing what it "owes" reads as a
+                              live debt that will never be chased. Money
+                              already taken is the opposite problem — it has
+                              to go back. */}
+                          {isCancelled ? (
+                            totalPaid > 0 ? (
+                              <strong style={{ color: '#b91c1c' }}>
+                                Refund due {money(totalPaid)}
+                              </strong>
+                            ) : (
+                              <strong style={{ color: '#6b7280' }}>
+                                Nothing to collect
+                              </strong>
+                            )
+                          ) : creditBalance > 0 ? (
                             <strong style={{ color: '#166534' }}>
                               Credit {money(creditBalance)}
                             </strong>
@@ -1377,6 +1453,22 @@ export function HostelModule({
                           )}
                         </p>
 
+                        {/* Where the student is in the arrival process.
+                            The booking's own status stops at "converted",
+                            so this reads the tenancy underneath it. */}
+                        {r.status === "converted" &&
+                          r.reservationType !== "group" &&
+                          (isAwaitingCheckIn(r) ? (
+                            <p className="reservation-checkin-note awaiting">
+                              Room held · student has not arrived yet
+                            </p>
+                          ) : isCheckedIn(r) ? (
+                            <p className="reservation-checkin-note done">
+                              Checked in{" "}
+                              {dateLabel(tenancyFor(r)?.checkInDate)}
+                            </p>
+                          ) : null)}
+
                         {(r.status === "reserved" ||
                           r.status === "converted") && (
                           <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
@@ -1392,11 +1484,25 @@ export function HostelModule({
                               </button>
                             )}
 
+                            {/* The arrival is the next thing to do on this
+                                booking, so it leads over Change room. */}
+                            {isAwaitingCheckIn(r) && (
+                              <button
+                                type="button"
+                                className="reservation-btn reservation-btn-convert"
+                                style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                disabled={busy}
+                                onClick={() => setCheckInTenancy(tenancyFor(r))}
+                              >
+                                Check in
+                              </button>
+                            )}
+
                             {r.status === "converted" &&
                               r.reservationType !== "group" && (
                                 <button
                                   type="button"
-                                  className="reservation-btn reservation-btn-convert"
+                                  className="reservation-btn reservation-btn-secondary"
                                   style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                   disabled={busy}
                                   onClick={() => setChangeRoomReservation(r)}
@@ -2264,6 +2370,15 @@ export function HostelModule({
             onDone={() => setChangeRoomReservation(null)}
           />
         </Modal>
+      )}
+      {checkInTenancy && (
+        <CheckInModal
+          tenancy={checkInTenancy}
+          data={data}
+          save={save}
+          busy={busy}
+          onClose={() => setCheckInTenancy(null)}
+        />
       )}
       {manageReservation && (
         <Modal
@@ -3196,12 +3311,18 @@ function ReservationManageDetails({
           <strong className="paid" style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}>{money(totalPaid)}</strong>
         </div>
         <div style={{ padding: '8px 4px', overflow: 'hidden' }}>
-          <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>Balance required</span>
+          <span style={{ fontSize: '10px', display: 'block', whiteSpace: 'nowrap' }}>
+            {isCancelled ? "Refund due" : "Balance required"}
+          </span>
           <strong
             style={{ fontSize: '13px', display: 'block', wordBreak: 'break-all' }}
-            className={balanceRequired > 0 ? "outstanding" : "settled"}
+            className={
+              (isCancelled ? totalPaid : balanceRequired) > 0
+                ? "outstanding"
+                : "settled"
+            }
           >
-            {money(balanceRequired)}
+            {money(isCancelled ? totalPaid : balanceRequired)}
           </strong>
         </div>
       </div>
@@ -3491,7 +3612,7 @@ function ReservationManageDetails({
                     </svg>
                     <span>
                       <strong>{money(unallocatedPaid)}</strong> of the money on file for this
-                      reservation isn't itemized against any charge above — likely a payment
+                      reservation isn&apos;t itemized against any charge above — likely a payment
                       that only partly covers a larger item (usually the deposit). Charges here
                       can only be marked fully paid, so this amount needs checking against the
                       actual payment record before it can be assigned.
@@ -3573,17 +3694,19 @@ function ReservationManageDetails({
               className="reservation-btn reservation-btn-cancel"
               style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
               disabled={busy}
-              onClick={() => {
+              onClick={async () => {
                 const confirmed = confirm(
                   `Cancel reservation ${r.referenceNo}? The room is released and payment history is kept for your records.`,
                 );
-                if (confirmed) {
-                  save(
-                    { action: "reservation-cancel", reservationId: r.id },
-                    "Reservation cancelled",
-                  );
-                  onDone();
-                }
+                if (!confirmed) return;
+                // Await it, and only close on success — closing regardless
+                // dismissed the dialog on a refusal too, so the action just
+                // looked like it had quietly done nothing.
+                const ok = await save(
+                  { action: "reservation-cancel", reservationId: r.id },
+                  "Reservation cancelled",
+                );
+                if (ok) onDone();
               }}
             >
               Cancel
@@ -3594,17 +3717,18 @@ function ReservationManageDetails({
             className="reservation-btn reservation-btn-danger"
             style={{ flex: 1, padding: '5px', fontSize: '11px', justifyContent: 'center' }}
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
               const confirmed = confirm(
                 `Permanently delete reservation ${r.referenceNo}? This also erases its payment history.`,
               );
-              if (confirmed) {
-                save(
-                  { action: "reservation-delete", reservationId: r.id },
-                  "Reservation deleted",
-                );
-                onDone();
-              }
+              if (!confirmed) return;
+              const ok = await save(
+                { action: "reservation-delete", reservationId: r.id },
+                "Reservation deleted",
+              );
+              // A refused delete keeps the dialog open, so the reason on
+              // screen still has something to refer to.
+              if (ok) onDone();
             }}
           >
             Delete

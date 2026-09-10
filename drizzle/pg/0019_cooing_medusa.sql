@@ -1,0 +1,1 @@
+ALTER TABLE "accommodation_assignments" ADD COLUMN "checked_in_at" text;

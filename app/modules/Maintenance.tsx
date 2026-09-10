@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
   DocumentTile,
@@ -10,6 +10,7 @@ import {
   ReportCard,
   SearchIcon,
   SearchSelect,
+  Stat,
   StatusPill,
   blockOf,
   dateLabel,
@@ -160,7 +161,15 @@ export function MaintenanceModule({
   const [tab, setTab] = useState("tickets");
   const [modal, setModal] = useState("");
   const [ticket, setTicket] = useState<Row | null>(null);
-  const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
+  // Drives which extra field the update form shows: who pays (student), the
+  // receipt (management), or the unit's owner (owner). Seeded from the
+  // ticket each time the drawer opens.
+  const [replyResponsibility, setReplyResponsibility] = useState("management");
+  // Opens on the work still to do. Finished tickets stay reachable in their
+  // own tab rather than padding out the list staff work from every day —
+  // by the end of a year the completed ones outnumber the live ones many
+  // times over.
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("open");
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketHostel, setTicketHostel] = useState("all");
   const [ticketCategory, setTicketCategory] = useState("");
@@ -175,6 +184,12 @@ export function MaintenanceModule({
   const [editingMeter, setEditingMeter] = useState<Row | null>(null);
   const [meterRoomId, setMeterRoomId] = useState("");
   const [meterHostelId, setMeterHostelId] = useState("");
+  // A meter that failed and was swapped out. The new one starts again from
+  // zero, so that month spans two of them and the form has to collect the
+  // outgoing meter's final reading as well as the new one's.
+  const [meterReplaced, setMeterReplaced] = useState(false);
+  const [oldMeterFinal, setOldMeterFinal] = useState("");
+  const [newMeterValue, setNewMeterValue] = useState("");
   const [meterRoomType, setMeterRoomType] = useState("");
   const meterMonths = [
     ...new Set(
@@ -208,6 +223,12 @@ export function MaintenanceModule({
     "in-progress",
   ];
   const closedStatuses = ["completed", "closed"];
+  const openCount = data.tickets.filter((item) =>
+    openStatuses.includes(item.status),
+  ).length;
+  const closedCount = data.tickets.filter((item) =>
+    closedStatuses.includes(item.status),
+  ).length;
   const filteredTickets = data.tickets.filter((item) => {
     const search = ticketQuery.trim().toLowerCase();
     const text =
@@ -254,11 +275,30 @@ export function MaintenanceModule({
           : String(b.readingDate).localeCompare(String(a.readingDate)),
       )[0];
     if (!previous) return null;
-    const usage = Number(reading.readingValue) - Number(previous.readingValue);
+    // A replaced meter makes the count appear to fall. The month is really
+    // two halves: what the old meter still recorded before it came out, plus
+    // everything the new one has counted since it went in from zero.
+    const usage =
+      reading.replacedMeterFinal !== null &&
+      reading.replacedMeterFinal !== undefined
+        ? Math.max(
+            0,
+            Number(reading.replacedMeterFinal) - Number(previous.readingValue),
+          ) + Math.max(0, Number(reading.readingValue))
+        : Number(reading.readingValue) - Number(previous.readingValue);
     if (!(usage > 0)) return { usage: 0, amount: 0 };
     const amount = Math.ceil(usage * Number(reading.electricityRate || 0));
     return { usage, amount };
   };
+  /** The reading a new one for this room will be measured against. */
+  const lastReadingForRoom = (roomId: string) =>
+    data.meterReadings
+      .filter((candidate: Row) => String(candidate.roomId) === String(roomId))
+      .sort((a: Row, b: Row) =>
+        a.readingDate === b.readingDate
+          ? Number(b.id) - Number(a.id)
+          : String(b.readingDate).localeCompare(String(a.readingDate)),
+      )[0];
   const filteredCosts = [
     ...data.tickets
       .filter(
@@ -393,6 +433,54 @@ export function MaintenanceModule({
     (sum, row) => sum + row.amount,
     0,
   );
+  // Which billing month this round of readings will be charged in: the
+  // earliest cycle whose cut-off falls on or after the reading date, since
+  // billing pairs the newest reading up to its cut-off with the one before.
+  // Who a student-borne repair can be charged to: the people actually
+  // living in the unit it happened in, since that is who could be
+  // responsible. The reporter is always included even if they have since
+  // moved out, so an existing nomination never disappears from the list.
+  const chargeableStudents = useMemo(() => {
+    if (!ticket) return [] as Row[];
+    const inUnit = data.students.filter(
+      (student) =>
+        student.assignmentId &&
+        ((ticket.unitId && String(student.unitId) === String(ticket.unitId)) ||
+          (ticket.roomId && String(student.roomId) === String(ticket.roomId))),
+    );
+    const known = new Set(inUnit.map((student) => String(student.id)));
+    for (const id of [ticket.studentId, ticket.chargedStudentId]) {
+      if (!id || known.has(String(id))) continue;
+      const student = data.students.find(
+        (row) => String(row.id) === String(id),
+      );
+      if (student) {
+        inUnit.push(student);
+        known.add(String(id));
+      }
+    }
+    return inUnit.sort((left, right) =>
+      String(left.fullName).localeCompare(String(right.fullName)),
+    );
+  }, [data.students, ticket]);
+
+  const ticketReceipts = useMemo(
+    () =>
+      ticket
+        ? data.attachments.filter(
+            (attachment) =>
+              attachment.contextType === "ticket-receipt" &&
+              String(attachment.recordId) === String(ticket.id),
+          )
+        : [],
+    [data.attachments, ticket],
+  );
+
+  const entryBillingCycle = [...data.billingCycles]
+    .sort((left, right) =>
+      String(left.cutoffDate).localeCompare(String(right.cutoffDate)),
+    )
+    .find((cycle) => String(cycle.cutoffDate) >= entryDate);
   const pendingCountFor = (hostelId: string | number) => {
     const rooms = meterRooms.filter(
       (room) => String(room.hostelId) === String(hostelId),
@@ -535,51 +623,20 @@ export function MaintenanceModule({
       {tab === "tickets" && (
         <>
           <section className="module-metrics">
-            <button
-              className={
-                ticketStatusFilter === "all"
-                  ? "active stat-filter"
-                  : "stat-filter"
+            <Stat value={data.tickets.length} label="Reported" />
+            <Stat
+              value={
+                data.tickets.filter((item) => item.status === "submitted").length
               }
-              onClick={() => setTicketStatusFilter("all")}
-            >
-              <strong>{data.tickets.length}</strong>
-              <small>Reported</small>
-            </button>
-            <button
-              className={
-                ticketStatusFilter === "open"
-                  ? "active stat-filter"
-                  : "stat-filter"
+              label="Not yet attended"
+            />
+            <Stat
+              value={
+                data.tickets.filter((item) => item.status === "waiting-parts")
+                  .length
               }
-              onClick={() => setTicketStatusFilter("open")}
-            >
-              <strong>
-                {
-                  data.tickets.filter((item) =>
-                    openStatuses.includes(item.status),
-                  ).length
-                }
-              </strong>
-              <small>Open / pending / in progress</small>
-            </button>
-            <button
-              className={
-                ticketStatusFilter === "completed"
-                  ? "active stat-filter"
-                  : "stat-filter"
-              }
-              onClick={() => setTicketStatusFilter("completed")}
-            >
-              <strong>
-                {
-                  data.tickets.filter((item) =>
-                    closedStatuses.includes(item.status),
-                  ).length
-                }
-              </strong>
-              <small>Completed / closed</small>
-            </button>
+              label="Waiting on parts"
+            />
             {data.currentUser?.roleKey !== "tenant" && (
               <button className="stat-filter" onClick={() => setTab("costs")}>
                 <strong>
@@ -594,6 +651,28 @@ export function MaintenanceModule({
               </button>
             )}
           </section>
+          {/* Which list you are looking at, not a filter on one list — a
+              finished ticket is a record, an open one is a job, and mixing
+              them makes the day's work harder to see. */}
+          <div className="workspace-tabs ticket-status-tabs">
+            {(
+              [
+                ["open", "Open", openCount, "pending"],
+                ["completed", "Completed", closedCount, "done"],
+                ["all", "All tickets", data.tickets.length, ""],
+              ] as [string, string, number, string][]
+            ).map(([key, label, count, tone]) => (
+              <button
+                key={key}
+                type="button"
+                className={ticketStatusFilter === key ? "active" : ""}
+                onClick={() => setTicketStatusFilter(key)}
+              >
+                {label}
+                <span className={`tab-count ${tone}`.trim()}>{count}</span>
+              </button>
+            ))}
+          </div>
           <section className="panel">
             <div className="v2-toolbar">
               <label className="v2-search">
@@ -621,7 +700,7 @@ export function MaintenanceModule({
                 onClick={() => {
                   setTicketQuery("");
                   setTicketHostel("all");
-                  setTicketStatusFilter("all");
+                  setTicketStatusFilter("open");
                 }}
               >
                 Reset filters
@@ -676,7 +755,12 @@ export function MaintenanceModule({
                       <td>
                         <button
                           className="secondary compact"
-                          onClick={() => setTicket(t)}
+                          onClick={() => {
+                            setTicket(t);
+                            setReplyResponsibility(
+                              t.costResponsibility || "management",
+                            );
+                          }}
                         >
                           Open
                         </button>
@@ -688,8 +772,18 @@ export function MaintenanceModule({
             </div>
             {!filteredTickets.length && (
               <Empty
-                title="No maintenance tickets"
-                text="Submit the first staff or student ticket."
+                title={
+                  ticketStatusFilter === "open"
+                    ? "Nothing outstanding"
+                    : ticketStatusFilter === "completed"
+                      ? "Nothing finished yet"
+                      : "No maintenance tickets"
+                }
+                text={
+                  data.tickets.length
+                    ? "No ticket in this tab matches the current search and hostel filter."
+                    : "Submit the first staff or student ticket."
+                }
               />
             )}
           </section>
@@ -747,7 +841,12 @@ export function MaintenanceModule({
                   }}
                 >
                   {hostel.name}
-                  <span className="tab-count">
+                  {/* Colour carries the state, so a hostel that still needs
+                      readings is distinguishable from a finished one without
+                      reading the number. */}
+                  <span
+                    className={`tab-count ${pending ? "pending" : "done"}`}
+                  >
                     {pending ? `${pending} left` : "done"}
                   </span>
                 </button>
@@ -867,6 +966,13 @@ export function MaintenanceModule({
                       ? `${entryDirty.length} unsaved · estimated ${money(entryTotalAmount, true)} for this hostel`
                       : `Estimated ${money(entryTotalAmount, true)} for this hostel`}
                   </small>
+                  {/* Staff key readings in without seeing Finance, so say
+                      here where the money actually lands. */}
+                  <small className="meter-entry-destination">
+                    {entryBillingCycle
+                      ? `Bills as an electricity line on the ${entryBillingCycle.periodLabel} invoices (cut-off ${dateLabel(entryBillingCycle.cutoffDate)}), split between each room's occupants.`
+                      : `No billing month covers ${dateLabel(entryDate)} yet — these will be charged by the first cycle prepared with a cut-off on or after this date.`}
+                  </small>
                 </div>
                 <div className="button-row">
                   <button
@@ -920,6 +1026,9 @@ export function MaintenanceModule({
                   setMeterRoomId("");
                   setMeterHostelId("");
                   setMeterRoomType("");
+                  setMeterReplaced(false);
+                  setOldMeterFinal("");
+                  setNewMeterValue("");
                   setModal("meter");
                 }}
               >
@@ -1005,6 +1114,18 @@ export function MaintenanceModule({
                             room ? String(room.hostelId) : "",
                           );
                           setMeterRoomType(room ? room.roomType : "");
+                          // Editing a replacement reading reopens the form in
+                          // the same shape it was saved in.
+                          const wasReplaced =
+                            r.replacedMeterFinal !== null &&
+                            r.replacedMeterFinal !== undefined;
+                          setMeterReplaced(wasReplaced);
+                          setOldMeterFinal(
+                            wasReplaced ? String(r.replacedMeterFinal) : "",
+                          );
+                          setNewMeterValue(
+                            wasReplaced ? String(r.readingValue ?? "") : "",
+                          );
                           setModal("meter");
                         }}
                       >
@@ -1109,14 +1230,20 @@ export function MaintenanceModule({
               note="Management, owner and student responsibility"
             />
             <ReportCard
-              title="Student penalties"
+              title="Charged to students"
               value={money(
                 data.tickets.reduce(
-                  (sum, t) => sum + Number(t.studentCharge || 0),
+                  (sum, t) =>
+                    // The amount lives in actualCost now; studentCharge is
+                    // only still read for tickets raised before the separate
+                    // penalty field was removed.
+                    t.costResponsibility === "student"
+                      ? sum + Number(t.studentCharge || t.actualCost || 0)
+                      : sum + Number(t.studentCharge || 0),
                   0,
                 ),
               )}
-              note="Includes door unlocking and additional requests"
+              note="Repairs and penalties billed to the tenant"
             />
             <ReportCard
               title="Owner responsibility"
@@ -1126,16 +1253,26 @@ export function MaintenanceModule({
               )}
               note="Tickets assigned to house owner"
             />
-            <article className="panel fee-reference">
-              <h3>Door unlocking fee</h3>
-              <p>
-                <b>{money(50)}</b> during office hours
-              </p>
-              <p>
-                <b>{money(100)}</b> outside office hours
-              </p>
-            </article>
           </section>
+          {/* A standing price list, not a figure for the period — so it sits
+              apart from the three totals above rather than pretending to be
+              a fourth one. */}
+          <aside className="fee-reference">
+            <div>
+              <small>STANDING CHARGE</small>
+              <h4>Door unlocking fee</h4>
+            </div>
+            <dl>
+              <div>
+                <dt>Office hours</dt>
+                <dd>{money(50)}</dd>
+              </div>
+              <div>
+                <dt>Outside office hours</dt>
+                <dd>{money(100)}</dd>
+              </div>
+            </dl>
+          </aside>
           <section className="panel">
             <div className="section-heading">
               <div>
@@ -1242,15 +1379,35 @@ export function MaintenanceModule({
               </div>
               <div>
                 <span>Responsibility</span>
-                <b>{titleCase(ticket.costResponsibility)}</b>
+                <b>
+                  {titleCase(ticket.costResponsibility)}
+                  {/* Who the money actually lands on, spelled out — the
+                      word "Student" alone doesn't say which one. */}
+                  {ticket.costResponsibility === "student" && (
+                    <small className="responsibility-target">
+                      {data.students.find(
+                        (student) =>
+                          String(student.id) ===
+                          String(ticket.chargedStudentId ?? ticket.studentId),
+                      )?.fullName || "Nobody selected yet"}
+                    </small>
+                  )}
+                  {ticket.costResponsibility === "owner" && (
+                    <small className="responsibility-target">
+                      {ticket.ownerName || "No owner recorded"}
+                    </small>
+                  )}
+                </b>
               </div>
               <div>
-                <span>Actual cost</span>
-                <b>{money(ticket.actualCost)}</b>
-              </div>
-              <div>
-                <span>Student charge</span>
-                <b>{money(ticket.studentCharge)}</b>
+                <span>
+                  {ticket.costResponsibility === "owner"
+                    ? "Charge to owner"
+                    : ticket.costResponsibility === "student"
+                      ? "Charge to student"
+                      : "Actual cost"}
+                </span>
+                <b>{money(ticket.studentCharge ?? ticket.actualCost)}</b>
               </div>
             </section>
             <TicketAttachments
@@ -1261,6 +1418,23 @@ export function MaintenanceModule({
               )}
               onDeleted={() => load(["attachments"])}
             />
+            {/* Kept separate from the fault photos above: this is the proof
+                of what the repair cost, and it is what gates completion. */}
+            {ticketReceipts.length > 0 && (
+              <section className="drawer-section">
+                <div className="section-title">
+                  <div>
+                    <small>PROOF OF SPEND</small>
+                    <h3>Receipts</h3>
+                  </div>
+                </div>
+                <TicketAttachments
+                  attachments={ticketReceipts}
+                  onDeleted={() => load(["attachments"])}
+                  compact
+                />
+              </section>
+            )}
             <section className="drawer-section">
               <div className="section-title">
                 <div>
@@ -1307,11 +1481,40 @@ export function MaintenanceModule({
                 onSubmit={async (e) => {
                   e.preventDefault();
                   const f = e.currentTarget;
+                  // Read every field up front: React clears currentTarget
+                  // once this handler awaits, so anything pulled off the
+                  // event after the upload below would come back empty.
+                  const values = formValues(e);
+                  // The receipt goes up BEFORE the save, because the server
+                  // refuses to complete a management-paid repair that has
+                  // none — attaching it afterwards would fail that check on
+                  // the very update that supplies it.
+                  const receipt = (
+                    f.elements.namedItem(
+                      "receiptAttachment",
+                    ) as HTMLInputElement | null
+                  )?.files?.[0];
+                  if (receipt) {
+                    try {
+                      await uploadAttachment(
+                        receipt,
+                        "ticket-receipt",
+                        ticket.id,
+                        data.currentUser?.displayName,
+                      );
+                      await load(["attachments"]);
+                    } catch {
+                      // uploadAttachment surfaces its own message; stop here
+                      // rather than posting an update the receipt is missing
+                      // from.
+                      return;
+                    }
+                  }
                   const result = await save(
                     {
                       action: "ticket-message",
                       ticketId: ticket.id,
-                      ...formValues(e),
+                      ...values,
                     },
                     "Ticket update posted",
                   );
@@ -1366,7 +1569,10 @@ export function MaintenanceModule({
                         Cost responsibility
                         <select
                           name="costResponsibility"
-                          defaultValue={ticket.costResponsibility}
+                          value={replyResponsibility}
+                          onChange={(event) =>
+                            setReplyResponsibility(event.target.value)
+                          }
                         >
                           <option value="management">Management</option>
                           <option value="owner">House owner</option>
@@ -1374,23 +1580,76 @@ export function MaintenanceModule({
                         </select>
                       </label>
                       <label>
-                        Actual cost
+                        {/* One amount per ticket, named after whoever bears
+                            it. Under Management it is a cost the company
+                            absorbed; under Owner or Student it is what that
+                            party is charged. */}
+                        {replyResponsibility === "owner"
+                          ? "Charge to owner"
+                          : replyResponsibility === "student"
+                            ? "Charge to student"
+                            : "Actual cost"}
                         <input
                           name="actualCost"
                           type="number"
                           min="0"
                           defaultValue={ticket.actualCost ?? ""}
                         />
+                        {replyResponsibility === "owner" && (
+                          <small className="field-note">
+                            {ticket.ownerName
+                              ? `Charged to ${ticket.ownerName}, the registered owner of ${ticket.unitCode || "this unit"} — recorded for reporting, no invoice is raised.`
+                              : `No owner is recorded for ${ticket.unitCode || "this unit"}. Add one under Properties & units so this has somewhere to land.`}
+                          </small>
+                        )}
+                        {replyResponsibility === "student" && (
+                          <small className="field-note">
+                            Added to the chosen student&apos;s next monthly
+                            invoice once this ticket is completed.
+                          </small>
+                        )}
                       </label>
-                      <label>
-                        Student charge / penalty
-                        <input
-                          name="studentCharge"
-                          type="number"
-                          min="0"
-                          defaultValue={ticket.studentCharge ?? ""}
-                        />
-                      </label>
+                      {replyResponsibility === "student" && (
+                        <label>
+                          Charge to
+                          <select
+                            name="chargedStudentId"
+                            defaultValue={String(
+                              ticket.chargedStudentId ?? ticket.studentId ?? "",
+                            )}
+                          >
+                            <option value="">Select the student</option>
+                            {chargeableStudents.map((student: Row) => (
+                              <option key={student.id} value={student.id}>
+                                {student.fullName}
+                                {student.roomCode ? ` — ${student.roomCode}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <small className="field-note">
+                            Defaults to whoever reported it. Change it when
+                            someone else is responsible — this is the person the
+                            charge appears on next month.
+                          </small>
+                        </label>
+                      )}
+                      {replyResponsibility === "management" && (
+                        <label className="wide">
+                          Receipt {ticketReceipts.length ? "" : "(required to complete)"}
+                          <input
+                            name="receiptAttachment"
+                            type="file"
+                            accept={ATTACHMENT_ACCEPT}
+                          />
+                          <small
+                            className={`field-note${ticketReceipts.length ? "" : " field-note-warn"}`}
+                          >
+                            {ticketReceipts.length
+                              ? `${ticketReceipts.length} receipt${ticketReceipts.length === 1 ? "" : "s"} already attached — add another only if there is more to show.`
+                              : "Company money is going out, so proof of spend is needed before this ticket can be completed."}
+                          </small>
+                        </label>
+                      )}
                     </>
                   )}
                   <label className="wide">
@@ -1410,6 +1669,61 @@ export function MaintenanceModule({
                 </button>
               </form>
             </section>
+            {/* Tickets get raised against the wrong room or the wrong
+                student, and a wrong ticket is worse than no ticket — it
+                carries a cost and a responsibility. Removing one is a
+                separate, deliberate action at the very bottom, away from
+                Post update. */}
+            {data.currentUser?.roleKey !== "tenant" && (
+              <section className="drawer-section drawer-danger">
+                <div>
+                  <strong>Delete this ticket</strong>
+                  <small>
+                    Removes the ticket, its conversation and its attachments
+                    for good. Any general costing recorded against it is kept.
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      !window.confirm(
+                        `Delete ${ticket.ticketNo} — ${ticket.subject}?\n\nThis cannot be undone.`,
+                      )
+                    )
+                      return;
+                    // Attachments go through the files API so the stored
+                    // file is removed too, not just its database row.
+                    const messageIds = data.ticketMessages
+                      .filter((m) => m.ticketId === ticket.id)
+                      .map((m) => String(m.id));
+                    const doomed = data.attachments.filter(
+                      (attachment) =>
+                        (["ticket", "ticket-receipt"].includes(
+                          attachment.contextType,
+                        ) &&
+                          String(attachment.recordId) === String(ticket.id)) ||
+                        (attachment.contextType === "ticket-update" &&
+                          messageIds.includes(String(attachment.recordId))),
+                    );
+                    for (const attachment of doomed)
+                      await fetch(
+                        `${BASE_PATH}/api/files?id=${attachment.id}`,
+                        { method: "DELETE" },
+                      );
+                    const ok = await save(
+                      { action: "ticket-delete", ticketId: ticket.id },
+                      "Ticket deleted",
+                    );
+                    if (ok) setTicket(null);
+                  }}
+                >
+                  Delete ticket
+                </button>
+              </section>
+            )}
           </aside>
         </div>
       )}
@@ -1897,7 +2211,10 @@ export function MaintenanceModule({
                   category: "access-card-key",
                   subject: "Door unlocking request",
                   description: `Unlock request (${titleCase(String(values.subcategory))})`,
-                  studentCharge: charge,
+                  // The amount goes in actualCost like every other
+                  // student-borne ticket — there is no separate penalty
+                  // figure any more.
+                  actualCost: charge,
                   costResponsibility: "student",
                   ...values,
                 },
@@ -2075,30 +2392,125 @@ export function MaintenanceModule({
                 defaultValue={editingMeter?.readingDate || today}
               />
             </label>
-            <label>
-              Reading value
+            {!meterReplaced ? (
+              <label>
+                Reading value
+                <input
+                  name="readingValue"
+                  type="number"
+                  step="0.01"
+                  required
+                  defaultValue={editingMeter?.readingValue ?? ""}
+                />
+              </label>
+            ) : (
+              <>
+                <label>
+                  Old meter — final reading
+                  <input
+                    name="replacedMeterFinal"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={oldMeterFinal}
+                    onChange={(event) => setOldMeterFinal(event.target.value)}
+                    placeholder="What it read when it came out"
+                  />
+                </label>
+                <label>
+                  New meter — reading now
+                  <input
+                    name="readingValue"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={newMeterValue}
+                    onChange={(event) => setNewMeterValue(event.target.value)}
+                    placeholder="Starts again from 0"
+                  />
+                </label>
+              </>
+            )}
+            {/* The whole point of the switch: without the old meter's final
+                reading the month reads as the count going backwards, and the
+                cycle charges nothing at all. */}
+            <label className="wide meter-replaced-toggle">
               <input
-                name="readingValue"
-                type="number"
-                step="0.01"
-                required
-                defaultValue={editingMeter?.readingValue ?? ""}
+                type="checkbox"
+                checked={meterReplaced}
+                onChange={(event) => {
+                  setMeterReplaced(event.target.checked);
+                  setOldMeterFinal("");
+                  setNewMeterValue("");
+                }}
               />
+              <span>
+                <b>The meter was replaced this round</b>
+                <small>
+                  The old one failed and a new one went in, so it starts again
+                  from zero. Tick this and record both readings — otherwise
+                  this month bills nothing.
+                </small>
+              </span>
             </label>
-            <label>
-              Reading type
-              <select
-                name="readingType"
-                defaultValue={editingMeter?.readingType || "monthly"}
-              >
-                <option value="monthly">Monthly</option>
-                <option value="check-in">Check-in</option>
-                <option value="check-out">Check-out</option>
-                <option value="semester-break">
-                  Semester break / special split
-                </option>
-              </select>
-            </label>
+            {meterReplaced &&
+              (() => {
+                const previous = lastReadingForRoom(
+                  meterRoomId || String(editingMeter?.roomId || ""),
+                );
+                const oldFinal = Number(oldMeterFinal);
+                const fresh = Number(newMeterValue);
+                if (!previous || !oldMeterFinal || !newMeterValue) return null;
+                const before = Number(previous.readingValue);
+                const carried = Math.max(0, oldFinal - before);
+                const usage = carried + Math.max(0, fresh);
+                const rate = Number(previous.electricityRate || 0);
+                return (
+                  <p className="wide field-note meter-replaced-sum">
+                    Last recorded {before} on {dateLabel(previous.readingDate)}.
+                    Old meter {before} → {oldFinal} = {carried.toFixed(2)} kWh,
+                    new meter 0 → {fresh} = {Math.max(0, fresh).toFixed(2)} kWh.
+                    This round bills{" "}
+                    <strong>
+                      {usage.toFixed(2)} kWh
+                      {rate ? ` · ${money(Math.ceil(usage * rate))}` : ""}
+                    </strong>
+                    {oldFinal < before && (
+                      <>
+                        {" "}
+                        — but the old meter&apos;s final reading is below its
+                        last recorded one, so check it.
+                      </>
+                    )}
+                  </p>
+                );
+              })()}
+            {meterReplaced ? (
+              // Fixed by the switch above rather than offered as a choice —
+              // the two would only ever contradict each other.
+              <label>
+                Reading type
+                <input value="Meter replaced" readOnly disabled />
+                <input type="hidden" name="readingType" value="meter-reset" />
+              </label>
+            ) : (
+              <label>
+                Reading type
+                <select
+                  name="readingType"
+                  defaultValue={editingMeter?.readingType || "monthly"}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="check-in">Check-in</option>
+                  <option value="check-out">Check-out</option>
+                  <option value="semester-break">
+                    Semester break / special split
+                  </option>
+                </select>
+              </label>
+            )}
             <label>
               Submitted by
               <input

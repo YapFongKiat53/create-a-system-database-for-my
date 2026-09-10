@@ -1,0 +1,1386 @@
+[
+ {
+  "severity": "high",
+  "kind": "NRIC 栏填的是名字",
+  "unit": "D2-0208",
+  "imported": false,
+  "detail": "NRIC = \"CHIN WAI CHEONG\"",
+  "action": "补上正确的身分证号"
+ },
+ {
+  "severity": "high",
+  "kind": "两张表的业主名字不一致",
+  "unit": "0706",
+  "imported": false,
+  "detail": "OWNER DETAILS: \"FOO SWEE LIN\" / AGREEMENT: \"LIM YING NU\"",
+  "action": "确认哪一个才是登记业主"
+ },
+ {
+  "severity": "high",
+  "kind": "两张表的业主名字不一致",
+  "unit": "SR2A",
+  "imported": true,
+  "detail": "OWNER DETAILS: \"KEMBANGAN KLASIK (M) SDN BHD\" / AGREEMENT: \"MOHD JEDEFZAN BIN TULEMUN\"",
+  "action": "确认哪一个才是登记业主"
+ },
+ {
+  "severity": "medium",
+  "kind": "NRIC 格式不对",
+  "unit": "0604",
+  "imported": false,
+  "detail": "\"6990621-10-5181\"",
+  "action": "核对身分证/公司注册号"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "1304",
+  "imported": true,
+  "detail": "到期日 2020-07-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "1309",
+  "imported": true,
+  "detail": "到期日 2020-07-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "1310",
+  "imported": true,
+  "detail": "到期日 2020-07-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "1312",
+  "imported": true,
+  "detail": "到期日 2023-04-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "16-2",
+  "imported": true,
+  "detail": "到期日 2026-03-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "16-3",
+  "imported": true,
+  "detail": "到期日 2026-03-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D1-0415",
+  "imported": true,
+  "detail": "到期日 2024-02-29",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D1-0502",
+  "imported": true,
+  "detail": "到期日 2026-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D1-0805",
+  "imported": true,
+  "detail": "到期日 2026-01-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D1-0912",
+  "imported": true,
+  "detail": "到期日 2025-10-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D1-1417",
+  "imported": true,
+  "detail": "到期日 2025-12-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0310",
+  "imported": true,
+  "detail": "到期日 2023-04-30",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0409",
+  "imported": true,
+  "detail": "到期日 2025-11-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0412",
+  "imported": true,
+  "detail": "到期日 2025-11-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0505",
+  "imported": true,
+  "detail": "到期日 2023-05-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0708",
+  "imported": true,
+  "detail": "到期日 2025-06-30",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-0912",
+  "imported": true,
+  "detail": "到期日 2025-12-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D2-1213",
+  "imported": true,
+  "detail": "到期日 2024-03-29",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0109",
+  "imported": true,
+  "detail": "到期日 2026-04-30",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0116",
+  "imported": true,
+  "detail": "到期日 2025-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0313",
+  "imported": true,
+  "detail": "到期日 2025-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0405",
+  "imported": true,
+  "detail": "到期日 2024-05-15",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0413",
+  "imported": true,
+  "detail": "到期日 2024-01-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0415",
+  "imported": true,
+  "detail": "到期日 2024-12-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0705",
+  "imported": true,
+  "detail": "到期日 2023-02-28",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0706",
+  "imported": true,
+  "detail": "到期日 2025-07-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0714",
+  "imported": true,
+  "detail": "到期日 2022-09-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-0916",
+  "imported": true,
+  "detail": "到期日 2026-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-1010",
+  "imported": true,
+  "detail": "到期日 2025-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-1013",
+  "imported": true,
+  "detail": "到期日 2022-04-30",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-1113",
+  "imported": true,
+  "detail": "到期日 2025-08-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-1202",
+  "imported": true,
+  "detail": "到期日 2024-10-15",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "D3-1510",
+  "imported": true,
+  "detail": "到期日 2024-02-29",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "SR23",
+  "imported": true,
+  "detail": "到期日 2025-10-15",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "SR2A",
+  "imported": true,
+  "detail": "到期日 2025-11-14",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "SR3",
+  "imported": true,
+  "detail": "到期日 2026-03-31",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "SR31",
+  "imported": true,
+  "detail": "到期日 2026-01-15",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "合约已过期",
+  "unit": "SR5",
+  "imported": true,
+  "detail": "到期日 2021-04-30",
+  "action": "确认已续约还是资料没更新"
+ },
+ {
+  "severity": "medium",
+  "kind": "同一人留了不同电话",
+  "unit": "D2-0505, D3-0415",
+  "imported": true,
+  "detail": "CHAI SIA CHANG（610110-10-5937）: 012-6557810 / 012-2244888",
+  "action": "确认哪一个是现用号码"
+ },
+ {
+  "severity": "medium",
+  "kind": "有业主但没有合约条款",
+  "unit": "D1-0614",
+  "imported": true,
+  "detail": "没有租金、没有起讫日",
+  "action": "补上 AGREEMENT 那张表的资料"
+ },
+ {
+  "severity": "medium",
+  "kind": "有业主但没有合约条款",
+  "unit": "D2-1109",
+  "imported": true,
+  "detail": "没有租金、没有起讫日",
+  "action": "补上 AGREEMENT 那张表的资料"
+ },
+ {
+  "severity": "medium",
+  "kind": "有业主但没有合约条款",
+  "unit": "SR12",
+  "imported": true,
+  "detail": "没有租金、没有起讫日",
+  "action": "补上 AGREEMENT 那张表的资料"
+ },
+ {
+  "severity": "medium",
+  "kind": "没有联络电话",
+  "unit": "D1-0614",
+  "imported": true,
+  "detail": "空白",
+  "action": "补上电话"
+ },
+ {
+  "severity": "medium",
+  "kind": "没有联络电话",
+  "unit": "SR12",
+  "imported": true,
+  "detail": "空白",
+  "action": "补上电话"
+ },
+ {
+  "severity": "medium",
+  "kind": "电话写 N/A",
+  "unit": "1101",
+  "imported": false,
+  "detail": "\"N/A\"",
+  "action": "补上电话"
+ },
+ {
+  "severity": "low",
+  "kind": "一份合约涵盖多间 unit",
+  "unit": "16-2",
+  "imported": true,
+  "detail": "Excel 写 \"16-2 / 16-3\"",
+  "action": "确认租金要不要分摊到各间"
+ },
+ {
+  "severity": "low",
+  "kind": "一份合约涵盖多间 unit",
+  "unit": "16-3",
+  "imported": true,
+  "detail": "Excel 写 \"16-2 / 16-3\"",
+  "action": "确认租金要不要分摊到各间"
+ },
+ {
+  "severity": "low",
+  "kind": "一间 unit 多位业主",
+  "unit": "D1-1417",
+  "imported": true,
+  "detail": "PANG SIEW YEE / LOW PEY CHEONG / GOH MAY KGIE",
+  "action": "确认要不要拆成主要/次要联络人"
+ },
+ {
+  "severity": "low",
+  "kind": "地址没有邮递区号",
+  "unit": "0907",
+  "imported": false,
+  "detail": "\"18, JALAN BURUNG MERBAH, TAMAN BUKIT MALURI, KEPONG,\"",
+  "action": "补齐地址"
+ },
+ {
+  "severity": "low",
+  "kind": "电话带备注",
+  "unit": "D1-1201",
+  "imported": false,
+  "detail": "\"012-2980389 (AGENT)\"",
+  "action": "确认是本人还是代理的号码"
+ },
+ {
+  "severity": "low",
+  "kind": "电话格式不寻常",
+  "unit": "D2-0909",
+  "imported": true,
+  "detail": "\"012-372 7200\"",
+  "action": "核对号码"
+ },
+ {
+  "severity": "low",
+  "kind": "电话格式不寻常",
+  "unit": "D3-1409",
+  "imported": true,
+  "detail": "\"011-261528380\"",
+  "action": "核对号码"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "0905, 1106",
+  "imported": false,
+  "detail": "HO PENG KIN",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "1201, 1311",
+  "imported": false,
+  "detail": "NGU IK TSE",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "1307, 1308",
+  "imported": false,
+  "detail": "ONG SOON GUAN",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "16-2, 16-3",
+  "imported": true,
+  "detail": "IKTIBAR HARTA SDN BHD",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "D2-0203, D2-1213",
+  "imported": true,
+  "detail": "CHEW HIU MUN",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "D2-0505, D3-0415",
+  "imported": true,
+  "detail": "CHAI SIA CHANG",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "D3-0705, D3-0714",
+  "imported": true,
+  "detail": "CHOW SEH YEE",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "同一位业主持有多间",
+  "unit": "SR23, SR2A, SR31",
+  "imported": true,
+  "detail": "KEMBANGAN KLASIK (M) SDN BHD",
+  "action": "确认是同一人（不是同名）"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0206",
+  "imported": false,
+  "detail": "Excel 写 \"0206\"，业主 HUSSEIN BIN HAMZAH",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0504",
+  "imported": false,
+  "detail": "Excel 写 \"0504\"，业主 TAN HUI PENG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0507",
+  "imported": false,
+  "detail": "Excel 写 \"0507\"，业主 CHEE YOOK MOY",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0512",
+  "imported": false,
+  "detail": "Excel 写 \"0512\"，业主 ROHANI BINTI ABU BAKAR",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0604",
+  "imported": false,
+  "detail": "Excel 写 \"0604\"，业主 CHAN TUCK WAI",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0706",
+  "imported": false,
+  "detail": "Excel 写 \"0706\"，业主 FOO SWEE LIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0708",
+  "imported": false,
+  "detail": "Excel 写 \"0708\"，业主 LIM MONG KEUNG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0801",
+  "imported": false,
+  "detail": "Excel 写 \"0801\"，业主 YAP AH SIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0802",
+  "imported": false,
+  "detail": "Excel 写 \"0802\"，业主 YAP KIM SANG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0905",
+  "imported": false,
+  "detail": "Excel 写 \"0905\"，业主 HO PENG KIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "0907",
+  "imported": false,
+  "detail": "Excel 写 \"0907\"，业主 YEONG WEI SIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1006",
+  "imported": false,
+  "detail": "Excel 写 \"1006\"，业主 KWAN LAI KUEN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1012",
+  "imported": false,
+  "detail": "Excel 写 \"1012\"，业主 LAI YOKE KIEW",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1101",
+  "imported": false,
+  "detail": "Excel 写 \"1101\"，业主 SOO YEN SIANG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1106",
+  "imported": false,
+  "detail": "Excel 写 \"1106\"，业主 HO PENG KIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1201",
+  "imported": false,
+  "detail": "Excel 写 \"1201\"，业主 NGU IK TSE",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1206",
+  "imported": false,
+  "detail": "Excel 写 \"1206\"，业主 LIM YING NU",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1307",
+  "imported": false,
+  "detail": "Excel 写 \"1307\"，业主 ONG SOON GUAN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1308",
+  "imported": false,
+  "detail": "Excel 写 \"1308\"，业主 ONG SOON GUAN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1311",
+  "imported": false,
+  "detail": "Excel 写 \"1311\"，业主 NGU IK TSE",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "1405",
+  "imported": false,
+  "detail": "Excel 写 \"1405\"，业主 WANG HUN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D1-0219",
+  "imported": false,
+  "detail": "Excel 写 \"D1-02-19\"，业主 LIM EE HEE",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D1-0313",
+  "imported": false,
+  "detail": "Excel 写 \"D1-03-13\"，业主 MOHAMAD RIDZUAN BIN AHMAD",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D1-1201",
+  "imported": false,
+  "detail": "Excel 写 \"D1-12-01\"，业主 MAH KHUAN YENG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D1-1202",
+  "imported": false,
+  "detail": "Excel 写 \"D1-12-02\"，业主 YIP CHOONG SING",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D1-1306",
+  "imported": false,
+  "detail": "Excel 写 \"D1-13-06\"，业主 SYNERGY MANAGEMENT",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D2-0203",
+  "imported": false,
+  "detail": "Excel 写 \"D2-02-03\"，业主 CHEW HIU MUN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D2-0208",
+  "imported": false,
+  "detail": "Excel 写 \"D2-02-08\"，业主 CHIN WAI CHEONG",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D2-0616",
+  "imported": false,
+  "detail": "Excel 写 \"D2-06-16\"，业主 FAZLIZA DIANA BINTI HUSSAIN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D3-0208",
+  "imported": false,
+  "detail": "Excel 写 \"D3-02-08\"，业主 YONG CHENG CHEN",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D3-0311",
+  "imported": false,
+  "detail": "Excel 写 \"D3-03-11\"，业主 YONG CHENG KAI",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D3-0614",
+  "imported": false,
+  "detail": "Excel 写 \"D3-06-14\"，业主 MOHD AZUAR BIN YAAKUB",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "系统里没有这间 unit",
+  "unit": "D3-0902",
+  "imported": false,
+  "detail": "Excel 写 \"D3-09-02\"，业主 ALL-INVORY ENTERPRISE SDN BHD",
+  "action": "确认是不是公司管的；是的话要先建 unit"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-0809",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1107",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1210",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1303",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1306",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-13A02A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-13A07",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-13A11",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-13A11A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1702",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1706",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1707",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1708",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1709",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1710",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1712",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1808",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1901",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NB-1915",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-0801",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1001",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1007",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1009",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1011",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1111",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1203",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1208",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1303",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1305",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1307",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1311",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1312A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-13A10",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1511A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1512",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1602A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1605",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1607",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1609",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1703",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1712",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1809",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1812A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1903",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NC-1911A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-0811A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1002",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1006",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1102A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1105",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1111",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1111A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1201",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1211",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1301",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1303",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1310",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1311A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-13A05",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-13A11A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1503",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1505",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1509",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1510",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1512",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1605",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1610",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1705",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1709",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1711",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1711A",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1801",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1805",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1811",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1903",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ },
+ {
+  "severity": "info",
+  "kind": "这次的档案没有这间的业主",
+  "unit": "NE-1911",
+  "imported": false,
+  "detail": "Nadayu 801",
+  "action": "等后续的档案"
+ }
+]

@@ -771,6 +771,13 @@
     background: var(--ok-fill);
   }
   
+  /* Paid for and held, but the student hasn't arrived — amber so it reads
+     as "not sellable, not yet occupied" at a glance. */
+  .unit-status.reserved {
+    color: var(--warn-text);
+    background: var(--warn-fill);
+  }
+
   .unit-status.return-planned {
     color: var(--bad-text);
     background: var(--bad-fill);
@@ -2017,6 +2024,24 @@
   .subsection-head h4 {
     margin: 0;
   }
+
+  /* A subsection head can carry more than one action (e.g. Check in next to
+     Move out) — keep them on one row, wrapping only when they run out of
+     room rather than stacking against the heading. */
+  .subsection-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  /* Same idea in a table's action column: the row-level Check in button
+     sits beside Open profile and wraps under it when the column is tight. */
+  .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: center;
+  }
   
   .drawer-tabs {
     position: sticky;
@@ -2336,8 +2361,13 @@
        <article><strong>value</strong><span>label</span></article> and Maintenance
        renders clickable <button class="stat-filter">, so both are handled; the
        label is ordered above the value to match .metric-card.
+       ReportCard (Maintenance costing) renders
+       <article class="report-card"><small>label</small><strong>value</strong><p>note</p></article>
+       — same three parts as .dash-stat, so .report-grid joins the family
+       instead of carrying a second, half-finished set of card styles.
        ========================================= */
   .module-metrics,
+  .report-grid,
   .dash-stats {
     display: flex;
     flex-flow: row wrap;
@@ -2351,9 +2381,12 @@
   
   .module-metrics>article,
   .module-metrics>.stat-filter,
+  .report-grid>.report-card,
   .dash-stats>.dash-stat {
     display: flex;
-    flex: 1 1 200px;
+    /* Basis sized so five stats still sit on one row inside a workspace
+       panel (Tenants gained an "Awaiting check-in" figure). */
+    flex: 1 1 170px;
     min-width: 0;
     flex-direction: column;
     justify-content: center;
@@ -2367,6 +2400,7 @@
   
   .module-metrics>article>strong,
   .module-metrics>.stat-filter>strong,
+  .report-grid>.report-card>strong,
   .dash-stats>.dash-stat>strong {
     order: 2;
     margin-bottom: 4px;
@@ -2381,6 +2415,7 @@
   
   .module-metrics>article>span,
   .module-metrics>.stat-filter>small,
+  .report-grid>.report-card>small,
   .dash-stats>.dash-stat .dash-stat-head small {
     order: 1;
     margin-bottom: 8px;
@@ -2389,10 +2424,16 @@
     font-weight: 600;
     letter-spacing: 0.14em;
     text-transform: uppercase;
+    /* Longer labels ("Current occupants", "Awaiting check-in") wrap to two
+       lines in a narrow column — reserve both on every card so the big
+       numbers below stay on one baseline across the row. */
+    min-height: 2.2em;
   }
   
+  .report-grid>.report-card>p,
   .dash-stats>.dash-stat>span {
     order: 3;
+    margin: 0;
     color: var(--muted);
     font-size: 11px;
   }
@@ -2406,28 +2447,36 @@
   .dash-stats>.dash-stat .dash-stat-head small {
     order: 0;
     margin-bottom: 0;
+    /* Some labels ("Awaiting check-in") wrap to two lines in a narrow
+       column — reserve both lines on every card so the big numbers below
+       stay on one baseline across the row. */
+    min-height: 2.2em;
   }
   
   /* Tones cycle in the same order as the Hostel Information bar. */
   .module-metrics>*:nth-child(4n + 1),
+  .report-grid>*:nth-child(4n + 1),
   .dash-stats>*:nth-child(4n + 1) {
     border-top-color: var(--green, var(--green-mid));
     background-color: var(--ok-fill);
   }
   
   .module-metrics>*:nth-child(4n + 2),
+  .report-grid>*:nth-child(4n + 2),
   .dash-stats>*:nth-child(4n + 2) {
     border-top-color: var(--navy, #263959);
     background-color: var(--paper);
   }
   
   .module-metrics>*:nth-child(4n + 3),
+  .report-grid>*:nth-child(4n + 3),
   .dash-stats>*:nth-child(4n + 3) {
     border-top-color: var(--sand, #d2ae75);
     background-color: var(--warn-wash);
   }
   
   .module-metrics>*:nth-child(4n + 4),
+  .report-grid>*:nth-child(4n + 4),
   .dash-stats>*:nth-child(4n + 4) {
     border-top-color: var(--coral, #e37e67);
     background-color: var(--bad-wash);
@@ -2467,11 +2516,23 @@
     color: var(--ink);
   }
   
+  /* The Tenants bar carries five figures. Below full width it wraps
+     three-and-two rather than four-and-one, which leaves a lone stretched
+     card. Scoped to that bar so the four-stat bars elsewhere keep their
+     single row. */
+  @media (max-width: 1450px) {
+
+    .module-metrics.student-directory-metrics>article {
+      flex-basis: 30%;
+    }
+  }
+
   /* Narrow screens: wrap two-and-two instead of leaving one card stretched. */
   @media (max-width: 1000px) {
   
     .module-metrics>article,
     .module-metrics>.stat-filter,
+    .report-grid>.report-card,
     .dash-stats>.dash-stat {
       flex-basis: 45%;
       min-height: 104px;
@@ -2502,11 +2563,23 @@
   
   .dash-stats {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* Five headline figures: beds, occupied, vacant, awaiting check-in,
+       outstanding. */
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: var(--sp-4);
     margin-bottom: 16px;
   }
-  
+
+  /* Five across needs a wide screen. On a typical laptop the columns get
+     too narrow for the outstanding figure, so step down to three before the
+     two-column rule further below takes over. */
+  @media (max-width: 1450px) {
+
+    .dash-stats {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
   .dash-stat {
     min-width: 0;
     padding: var(--sp-4);
@@ -2567,8 +2640,11 @@
     line-height: 1;
   }
   
+  /* Money is the widest value on the row and the stat columns are narrow
+     (five of them), so it steps down to the same size as other long values
+     rather than overflowing its card. */
   .dash-stat strong.money {
-    font-size: 28px;
+    font-size: 22px;
   }
 
   /* Priority label and publish date sat flush against each other. */
@@ -3264,16 +3340,27 @@
     font-size: 11px;
   }
   
+  /* Floats above the modal layer (z-index 100). It used to sit in the page
+     flow, so a refusal triggered from inside a dialog — "this student has
+     already checked in", "money has already been collected" — rendered
+     behind the backdrop and the action just looked like it did nothing. */
   .error-banner {
+    position: fixed;
+    top: var(--sp-4);
+    left: 50%;
+    z-index: 200;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--sp-5);
-    margin: 16px 32px 0;
+    width: min(680px, calc(100vw - 32px));
+    transform: translateX(-50%);
     padding: var(--sp-3) var(--sp-4);
     border: 1px solid var(--bad-line);
+    border-radius: var(--r-md);
     color: var(--bad-text);
     background: var(--bad-wash);
+    box-shadow: var(--shadow-lg);
   }
   
   .notice-banner {
@@ -3513,11 +3600,455 @@
     gap: var(--sp-2);
   }
   
+  /* Four label/value pairs at the head of the ticket drawer. Only the
+     narrow-screen override existed, so on a normal screen there was no grid
+     and no stacking — every caption ran straight into its value
+     ("Assigned toNot assigned"). */
+  .ticket-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-3) var(--sp-4);
+  }
+
+  .ticket-summary>div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .ticket-summary span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .ticket-summary b {
+    color: var(--ink);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  /* =========================================
+       9c. DESKTOP BASES THAT WERE MISSING
+       Each of these classes existed only inside a @media block, so the
+       narrow-screen override had nothing to override and the desktop view
+       fell back to raw block layout — labels running into their inputs and
+       every control on its own line. These are the bases those overrides
+       always assumed.
+       ========================================= */
+
+  /* Unit drawer → Rooms. Every room is one card: without a boundary the
+     four of them run together and a room code reads as if it belonged to
+     whichever room happened to sit above it. */
+  .room-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5, 20px);
+  }
+
+  /* A hairline on white was not enough to read as a boundary — the four
+     rooms still looked like one long list. Stronger rule, real padding and
+     a lift off the page so each room is unmistakably its own box. */
+  .room-list>.room-card {
+    padding: var(--sp-4);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Label, type and bathroom across the top; the actions get their own row
+     below. Six across fits the page but not the drawer this lives in — the
+     selects truncate to "Non-attache" and the last button clips off. */
+  .editable-room {
+    display: grid;
+    grid-template-columns: minmax(90px, 0.8fr) 1fr 1fr;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+
+  .room-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  /* Buttons sized to their text — stretched across a third of the card each
+     they read as the loudest thing in the section, which they are not. */
+  .room-actions button {
+    flex: 0 0 auto;
+  }
+
+  /* The codes belong to the room above, so they sit inside its card on a
+     tinted, ruled-off shelf rather than floating between two rooms. */
+  .bed-config {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: var(--sp-2);
+    margin-top: var(--sp-4);
+    padding: var(--sp-3);
+    /* --tint is a whisper against white; this shelf needs to be seen as a
+       separate area, so it gets the next step of grey and its own rule. */
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--subtle);
+  }
+
+  .bed-config-caption {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Each code sits on its own white row so it separates from the shelf it
+     is on, and from the code above it. */
+  .bed-config form {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: var(--sp-2);
+    align-items: center;
+    padding: var(--sp-2);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+  }
+
+  /* The rail is a permanent column on a wide screen, so the Menu button is
+     phone-only — it is switched on inside the <=900px block. */
+  .nav-toggle {
+    display: none;
+  }
+
+  /* Unit drawer → Wi-Fi service / access cards. Another pair that only had
+     narrow-screen rules, so every line of a record ran into the next
+     ("...5220998073Dedicated · MAXIS FIBRE..."). */
+  .asset-list,
+  .service-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  .asset-list>article,
+  .service-list>article {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--sp-1) var(--sp-3);
+    align-items: start;
+    padding: var(--sp-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+
+  .asset-list>article>div,
+  .service-list>article>div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .asset-list>article strong,
+  .service-list>article strong {
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  .asset-list>article small,
+  .service-list>article small {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .asset-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--r-sm);
+    background: var(--nav-active-bg);
+    color: var(--nav-active-fg);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  /* Actions sit under the detail column, not squeezed beside the icon. */
+  .asset-list>article>.asset-actions,
+  .service-list>article>.asset-actions {
+    display: flex;
+    /* Explicit: something upstream stacks these into a column, which makes
+       two short buttons fill the whole card. */
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    grid-column: 2;
+    margin-top: var(--sp-1);
+  }
+
+  /* Sized to their text — stretched across the card they read louder than
+     the record they belong to. */
+  .asset-actions>button {
+    flex: 0 0 auto;
+  }
+
+  /* People & access → Reminder messages. */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--sp-4);
+    align-items: start;
+  }
+
+  .settings-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-5);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+
+  .settings-card>label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .settings-card textarea {
+    min-height: 96px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    background: var(--surface);
+    /* A textarea otherwise falls back to the browser's monospace face. */
+    font: inherit;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  .settings-card>button {
+    align-self: flex-start;
+  }
+
+  /* Card heading: title on the left, its toggle on the right. */
+  .card-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .card-title small {
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .card-title h3 {
+    margin: 2px 0 0;
+    font-size: 16px;
+  }
+
+  .settings-note {
+    padding: var(--sp-4) var(--sp-5);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--tint);
+  }
+
+  .settings-note strong {
+    display: block;
+    margin-bottom: var(--sp-1);
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  .settings-note p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  /* Billing's latest-cycle banner: summary left, its action right. */
+  .cycle-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding: var(--sp-4) var(--sp-5);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+
+  .cycle-banner small {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .cycle-banner h3 {
+    margin: 2px 0;
+    font-size: 18px;
+  }
+
+  .cycle-banner p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  /* Offered only when a record has ended up in a state the normal flow
+     cannot produce. Amber rather than red — nothing is being destroyed, a
+     mismatch is being corrected — and quieter than the primary action it
+     sits under. */
+  .record-fix {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--warn-line, #fde68a);
+    border-radius: var(--r-md);
+    background: var(--warn-wash);
+  }
+
+  .record-fix strong {
+    display: block;
+    color: var(--warn-text);
+    font-size: 13px;
+  }
+
+  .record-fix small {
+    display: block;
+    max-width: 56ch;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  /* A destructive action parked at the bottom of a drawer, explained before
+     it is offered and visually separated from the normal controls above. */
+  .drawer-danger {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--bad-line);
+    background: var(--bad-wash);
+  }
+
+  .drawer-danger strong {
+    display: block;
+    color: var(--bad-text);
+    font-size: 13px;
+  }
+
+  .drawer-danger small {
+    display: block;
+    max-width: 52ch;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  /* The person or company the cost lands on, under the responsibility
+     word itself. */
+  .responsibility-target {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .conversation {
+    margin-bottom: var(--sp-5, 20px);
+  }
+
   .conversation article {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
     max-width: 88%;
     padding: var(--sp-3);
     border-radius: var(--r-sm);
     background: var(--paper);
+  }
+
+  /* Author and the role/date line sat flush against each other, reading as
+     one run-on word ("FooStaff · 08 Sept 2026"). */
+  .conversation article>div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) var(--sp-2);
+    align-items: baseline;
+  }
+
+  .conversation article>div:first-child b {
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  .conversation article>div:first-child small {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .conversation article p {
+    margin: 0;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* The status a message moved the ticket to — a chip, not another
+     sentence, so it doesn't compete with the message itself. */
+  .conversation article>span {
+    align-self: flex-start;
+    padding: 2px var(--sp-2);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   
   .conversation article.student-message {
@@ -3529,6 +4060,49 @@
     align-self: flex-end;
     border-bottom-right-radius: 2px;
     background: var(--ok-fill);
+  }
+
+  /* The reply form had no styles at all, so its first label rendered inline
+     and the textarea floated up beside the caption instead of sitting under
+     it. The fields inside .form-grid below were fine — only this outer
+     wrapper was missing. */
+  .ticket-reply {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--line);
+  }
+
+  .ticket-reply>label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .ticket-reply textarea {
+    width: 100%;
+    min-height: 84px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    background: var(--surface);
+    /* Without this a textarea falls back to the browser's monospace. */
+    font: inherit;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  .ticket-reply>button {
+    align-self: flex-start;
   }
 
   .attachment-list strong {
@@ -3976,11 +4550,18 @@
   /* --- <= 1250px --- */
   @media (max-width: 1250px) {
   
-    .dash-stats,
-    .report-grid {
+    /* .report-grid is a flex strip like .module-metrics, not a grid — it
+       wraps on flex-basis (see the narrow-screen rule in section 9b). */
+    .dash-stats {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-  
+
+    /* An odd number of stats leaves one on its own row — let it span rather
+       than sit half-width against empty space. */
+    .dash-stats>.dash-stat:last-child:nth-child(odd) {
+      grid-column: 1 / -1;
+    }
+
     .dash-row-a,
     .dash-row-b {
       grid-template-columns: 1fr;
@@ -4006,25 +4587,8 @@
       grid-template-columns: 1fr 1fr;
     }
   
-    .rate-card-grid,
-    .lot-grid {
+    .rate-card-grid {
       grid-template-columns: repeat(3, 1fr);
-    }
-  
-    .quick-payment {
-      grid-template-columns: 1fr 1fr;
-    }
-  
-    .quick-payment button {
-      grid-column: 1/-1;
-    }
-  
-    .payment-form {
-      grid-template-columns: 1fr 1fr;
-    }
-  
-    .payment-form button {
-      grid-column: 1 / -1;
     }
   
     .pricing-controls {
@@ -4041,10 +4605,6 @@
   
     .room-row select {
       grid-column: 1 / -1;
-    }
-  
-    .split-registers {
-      grid-template-columns: 1fr 1fr;
     }
   
     .settings-grid {
@@ -4111,10 +4671,9 @@
     }
   
     .nav-copy small,
-    .phase-card,
-    .nav-label,
-    .nav-mark,
-    .source-pill {
+  .phase-card,
+  .nav-label,
+  .source-pill {
       display: none;
     }
   
@@ -4141,9 +4700,34 @@
       display: none;
     }
   
+    .nav-toggle {
+      display: inline-flex;
+      position: absolute;
+      top: var(--sp-4);
+      /* Clears the sign-out button, which is pinned to the same corner. */
+      right: 52px;
+      align-items: center;
+      gap: var(--sp-2);
+      height: 34px;
+      padding: 0 var(--sp-3);
+      border: 1px solid var(--nav-line);
+      border-radius: var(--r-sm);
+      background: var(--surface);
+      color: var(--nav-fg);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .sidebar.menu-open .nav-toggle {
+      border-color: var(--nav-active-fg);
+      background: var(--nav-active-bg);
+      color: var(--nav-active-fg);
+    }
+
     /* The groups exist to label the rail on a wide screen. On a phone the
-       nav is a strip of icons, so the wrappers step aside and let the links
-       be the grid items directly. */
+       nav is a plain list, so the wrappers step aside and let the links be
+       the grid items directly. */
     .nav-groups {
       display: contents;
     }
@@ -4152,20 +4736,30 @@
       display: contents;
     }
 
+    /* Ten links across the top pushed the page itself below the fold, so
+       the nav is closed until the Menu button opens it. */
     .sidebar nav {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      display: none;
     }
-  
+
+    .sidebar.menu-open nav {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-1);
+      margin-top: var(--sp-3);
+      padding-top: var(--sp-3);
+      border-top: 1px solid var(--nav-line);
+    }
+
     .sidebar nav button,
     .sidebar nav a {
-      justify-content: center;
-      padding: var(--sp-2) var(--sp-1);
+      justify-content: flex-start;
+      padding: var(--sp-2) var(--sp-3);
     }
-  
+
     .nav-copy b {
-      font-size: 11px;
-      text-align: center;
+      font-size: 12px;
+      text-align: left;
     }
   
     .topbar {
@@ -4227,20 +4821,6 @@
       grid-column: 1 / -1;
     }
   
-    .availability-summary {
-      width: 100%;
-      grid-template-columns: repeat(3, 1fr);
-    }
-  
-    .inventory-rule {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-  
-    .payment-mix {
-      justify-content: flex-start;
-    }
-  
     .pricing-controls {
       grid-template-columns: 1fr 1fr !important;
     }
@@ -4249,15 +4829,11 @@
       grid-template-columns: 1fr 1fr;
     }
   
-    .split-registers,
-    .announcement-list,
-    .report-list,
-    .expanded-grid {
+    .announcement-list {
       grid-template-columns: 1fr;
     }
   
-    .rate-card-grid,
-    .lot-grid {
+    .rate-card-grid {
       grid-template-columns: 1fr 1fr;
     }
   
@@ -4327,8 +4903,9 @@
   
   /* --- <= 620px --- */
   @media (max-width: 620px) {
-    .sidebar nav {
-      grid-template-columns: 1fr 1fr;
+    /* One column: two 12px labels side by side wrap awkwardly on a phone. */
+    .sidebar.menu-open nav {
+      grid-template-columns: 1fr;
     }
   
     .topbar-note {
@@ -4373,8 +4950,7 @@
       padding-top: var(--sp-2);
     }
   
-    .sales-overview,
-    .desktop-availability {
+    .sales-overview {
       display: none;
     }
   
@@ -4397,89 +4973,17 @@
       background: #f3f1f1;
     }
   
-    .availability-card {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-3);
-      padding: var(--sp-4);
-      border: 1px solid var(--line-strong);
-      border-left: 4px solid var(--green-mid);
-      border-radius: var(--r-sm);
-      background: var(--ok-wash);
-    }
-  
-    .availability-card .card-title {
-      display: flex;
-      justify-content: space-between;
-      gap: var(--sp-2);
-    }
-  
-    .availability-card code {
-      color: var(--info-text);
-      background: transparent;
-      font-size: 18px;
-      font-weight: 800;
-    }
-  
-    .availability-card p {
-      margin: 3px 0 0;
-      color: var(--muted);
-      font-size: 10px;
-    }
-  
-    .mobile-card-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--sp-3);
-      padding: var(--sp-3) 0;
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-    }
-  
-    .mobile-card-grid>div {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-1);
-    }
-  
-    .mobile-card-grid small,
-    .mobile-reservation>small {
-      color: var(--muted);
-      font-size: 10px;
-    }
-  
-    .mobile-card-grid strong {
-      font-size: 10px;
-    }
-  
-    .mobile-reservation {
-      padding: var(--sp-2);
-      border-radius: var(--r-sm);
-      background: var(--warn-fill);
-    }
-  
-    .mobile-reservation p {
-      color: var(--warn-text);
-    }
-  
-    .availability-summary {
-      padding: 0 var(--sp-4) var(--sp-3);
-      grid-template-columns: 1fr;
-    }
-  
-    .module-metrics,
-    .report-grid {
-      grid-template-columns: 1fr 1fr;
-    }
-  
+    /* Both are flex strips; their wrapping is driven by flex-basis, so the
+       grid columns here never applied. Left as a no-op removal rather than
+       a layout change. */
+
     .module-metrics strong {
       font-size: 22px;
     }
   
     .rate-card-grid,
-    .lot-grid,
-    .charge-grid,
-    .pricing-controls {
+  .charge-grid,
+  .pricing-controls {
       grid-template-columns: 1fr !important;
     }
   
@@ -4491,11 +4995,6 @@
   
     .drawer-tabs {
       top: 81px;
-    }
-  
-    .quick-payment,
-    .reservation-money {
-      grid-template-columns: 1fr;
     }
   
     .total-payable,
@@ -4510,40 +5009,19 @@
       grid-template-columns: 1fr;
     }
   
-    .report-list article {
-      grid-template-columns: auto 1fr;
-    }
-  
-    .report-list article button {
-      grid-column: 1/-1;
-    }
-  
     .top-button {
       right: 12px;
       bottom: 12px;
     }
   
-    .inventory-rule {
-      padding: var(--sp-3) var(--sp-4);
-    }
-  
-    .payment-form,
     .service-form.expanded,
-    .bed-config {
+  .bed-config {
       grid-template-columns: 1fr;
     }
   
     .pricing-controls,
     .pricing-preview {
       padding: var(--sp-4);
-    }
-  
-    .service-form .service-wide {
-      grid-column: auto;
-    }
-  
-    .gender-vacancy {
-      grid-template-columns: repeat(3, 1fr);
     }
   
     .settings-grid {
@@ -4565,9 +5043,6 @@
       margin-left: 0;
     }
   
-    .report-filters {
-      grid-template-columns: 1fr !important;
-    }
   }
   
   /* =========================================================
@@ -5556,6 +6031,134 @@
   .reservation-charge-selected-total strong {
     color: var(--reservation-navy);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* A standing price list rather than a figure for the period — a slim
+     strip under the totals bar, so it reads as reference material and not
+     as another metric card. */
+  .fee-reference {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4) var(--sp-8, 32px);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding: var(--sp-4) var(--sp-6);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--paper);
+  }
+
+  .fee-reference small {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .fee-reference h4 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 15px;
+  }
+
+  .fee-reference dl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-6);
+    margin: 0;
+  }
+
+  .fee-reference dl>div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .fee-reference dt {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .fee-reference dd {
+    margin: 0;
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* Last warning before invoices go out: rooms whose meters nobody read,
+     which would otherwise bill rent only with no sign anything was missed. */
+  .billing-meter-warning {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin-bottom: 16px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--warn-line, #fde68a);
+    border-radius: var(--r-md);
+    background: var(--warn-wash);
+  }
+
+  .billing-meter-warning strong {
+    color: var(--warn-text);
+    font-size: 13px;
+  }
+
+  .billing-meter-warning span {
+    color: var(--ink);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .billing-meter-warning small {
+    max-height: 60px;
+    overflow-y: auto;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  /* The harder half of the same warning: a room with no reading at all is
+     not deferring its usage, it is losing it, and no amount of waiting
+     fixes that. Set apart from the sentence above rather than merged into
+     it, because the two ask for different urgency. */
+  .billing-meter-warning .billing-meter-never {
+    margin-top: 2px;
+    padding-top: var(--sp-2);
+    border-top: 1px solid var(--warn-line, #fde68a);
+    color: var(--bad-text);
+    font-weight: 600;
+  }
+
+  /* Where a converted booking sits in the arrival process. Amber while the
+     room is held for someone who hasn't turned up, green once they have. */
+  .reservation-checkin-note {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    margin: 0;
+    padding: var(--sp-1) var(--sp-2);
+    border-radius: var(--r-md);
+    font-size: 11px;
+    font-weight: 700;
+    align-self: flex-start;
+  }
+
+  .reservation-checkin-note.awaiting {
+    color: var(--warn-text);
+    background: var(--warn-fill);
+  }
+
+  .reservation-checkin-note.done {
+    color: var(--green-dark);
+    background: var(--ok-fill);
   }
 
   /* Flags money on file that isn't tied to a specific charge — e.g. a
@@ -7549,12 +8152,6 @@
       display: none;
     }
   
-    .hostel-directory-body,
-    .unit-directory-body {
-      display: grid;
-      gap: var(--sp-2);
-    }
-  
     .hostel-directory-row,
     .unit-directory-row {
       grid-template-columns: 1fr 1fr;
@@ -8085,12 +8682,6 @@
       display: none;
     }
   
-    .student-hostel-list {
-      display: grid;
-      gap: var(--sp-3);
-      padding: var(--sp-4);
-    }
-  
     .student-hostel-row {
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: var(--sp-4);
@@ -8193,6 +8784,26 @@
      a separate panel. Scoped entirely under .table-v2 so it
      doesn't affect any module that hasn't been redesigned yet.
      ========================================================= */
+  /* The same toolbar markup is also used outside .table-v2 — Maintenance's
+     costing register and meter screens — where the scoped rules below never
+     applied, leaving the date labels jammed against their inputs. This is
+     the unscoped baseline; the .table-v2 rules still win inside a table. */
+  .v2-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .v2-toolbar>label:not(.v2-search) {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
   .table-v2 .v2-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -8421,6 +9032,13 @@
   .table-v2 .status-pill.status-due {
     color: var(--bad-text);
     background: var(--bad-fill);
+  }
+
+  /* Paid and holding a room, but not yet living in it — amber, the same
+     "pending action" tone the maintenance in-progress states use. */
+  .table-v2 .status-pill.status-awaiting-check-in {
+    color: var(--warn-text);
+    background: var(--warn-fill);
   }
 
   .table-v2 .status-pill.status-rented,
@@ -8768,16 +9386,47 @@
 
 .meter-hostel-tabs .tab-count {
   margin-left: 0;
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-sm);
-  color: white;
-  background: var(--muted);
+  padding: 2px var(--sp-2);
+  border-radius: 999px;
   font-size: 10px;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
-.meter-hostel-tabs button.active .tab-count {
-  background: var(--green);
+/* The badge says how much work is left, so it is coloured by that and not
+   by which tab happens to be selected — a solid brand pill on the active tab
+   made a hostel with 16 rooms outstanding look like the finished one. */
+.meter-hostel-tabs .tab-count.pending {
+  color: var(--warn-text);
+  background: var(--warn-fill);
+}
+
+.meter-hostel-tabs .tab-count.done {
+  /* --green-dark is an alias of the brand indigo, which would put indigo
+     text on a green pill. --ok-text is the actual green. */
+  color: var(--ok-text);
+  background: var(--ok-fill);
+}
+
+/* A file input dressed as a button. Without this the native control renders
+   inside the label — "Upload updated CSVChoose File No file chosen" — and
+   stretches what should be a button into a full-width box beside its two
+   plain siblings. */
+.file-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.file-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .meter-toolbar {
@@ -8941,7 +9590,17 @@
 }
 
 .meter-entry-footer small {
+  display: block;
   color: var(--muted);
+}
+
+/* Says which invoice month these readings turn into. Sits under the running
+   total, one shade quieter than it. */
+.meter-entry-destination {
+  max-width: 62ch;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 @media (max-width: 720px) {
@@ -9394,6 +10053,13 @@
 
 .rate-form-current b { color: var(--ink); font-variant-numeric: tabular-nums; }
 
+/* A value that is probably a typo but might be legitimate (a replaced
+   meter) — flagged, never blocking. */
+.field-note-warn {
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
 .field-note.rate-up { color: var(--coral); }
 .field-note.rate-down { color: var(--green); }
 
@@ -9574,4 +10240,139 @@
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* =========================================
+   WHOLE-UNIT ELECTRICITY (Reports)
+   A block let is invoiced as one lump sum, so this report
+   answers it twice: what each unit costs, then what each
+   of its rooms used. The two tables sit under the panel's
+   own heading, so their headings step down a level rather
+   than competing with it.
+   ========================================= */
+.whole-unit-heading {
+  padding: var(--sp-5) var(--sp-6) var(--sp-2);
+}
+
+.whole-unit-heading h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.whole-unit-summary .table-wrap td strong {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not a figure, so it must not look like one sitting in a money column —
+   this unit has no room meters and never will. */
+.tnb-direct-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* =========================================
+   METER REPLACEMENT (Maintenance → Meter readings)
+   A failed meter is swapped for one that starts at zero,
+   so the month spans two of them. The switch below turns
+   one reading field into two and shows the arithmetic
+   before it is saved — the alternative is a month that
+   silently bills nothing.
+   ========================================= */
+.meter-replaced-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: 4px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-soft, var(--paper));
+  cursor: pointer;
+}
+
+.meter-replaced-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.meter-replaced-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.meter-replaced-toggle b {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.meter-replaced-toggle small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.meter-replaced-sum {
+  padding: var(--sp-2) var(--sp-4);
+  border-left: 3px solid var(--brand);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--brand-soft);
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.meter-replaced-sum strong {
+  color: var(--brand-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+/* =========================================
+   TICKET STATUS TABS (Maintenance → Tickets)
+   Open work and finished records are two different
+   lists, not one list with a filter on it. The count
+   badge is coloured by what it means — amber for jobs
+   still waiting, green for ones closed off — rather
+   than by which tab happens to be selected.
+   ========================================= */
+.ticket-status-tabs {
+  margin-bottom: 12px;
+}
+
+.ticket-status-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ticket-status-tabs .tab-count {
+  padding: 2px var(--sp-2);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--subtle);
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticket-status-tabs .tab-count.pending {
+  color: var(--warn-text);
+  background: var(--warn-fill);
+}
+
+/* --green-dark is an alias of the brand indigo; --ok-text is the real green. */
+.ticket-status-tabs .tab-count.done {
+  color: var(--ok-text);
+  background: var(--ok-fill);
 }

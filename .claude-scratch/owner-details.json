@@ -1,0 +1,1335 @@
+[
+ {
+  "unitCode": "0206",
+  "excelUnit": "0206",
+  "ownerName": "HUSSEIN BIN HAMZAH",
+  "ownerIdentityNo": "880903-06-5453",
+  "contact": "013-4154863",
+  "address": "24, JALAN SULTAN MUHAMMAD 9/9, SEKSYEN 9, 40100 SHAH ALAM, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0504",
+  "excelUnit": "0504",
+  "ownerName": "TAN HUI PENG",
+  "ownerIdentityNo": "860923-59-5066",
+  "contact": "012-6210239",
+  "address": "4, LORONG UDANG KETAK 3, TAMAN SRI SEGAMBUT, 52000 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2022-03-01",
+  "leaseEndDate": "2023-02-28",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "0507",
+  "excelUnit": "0507",
+  "ownerName": "CHEE YOOK MOY",
+  "ownerIdentityNo": "501127-08-5618",
+  "contact": "019-2132919",
+  "address": "1-05-07, PANGSAPURI SERI ATRIA, JALAN NOVA U5/71A, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0512",
+  "excelUnit": "0512",
+  "ownerName": "ROHANI BINTI ABU BAKAR",
+  "ownerIdentityNo": "800804-01-5546",
+  "contact": "012-6333008",
+  "address": "16, JALAN NOVA U5/51, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0604",
+  "excelUnit": "0604",
+  "ownerName": "CHAN TUCK WAI",
+  "ownerIdentityNo": "6990621-10-5181",
+  "contact": "012-2190855",
+  "address": "64, JALAN 20/2, 46300 PETALING JAYA, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0706",
+  "excelUnit": "0706",
+  "ownerName": "FOO SWEE LIN",
+  "ownerIdentityNo": "790918-14-6302",
+  "contact": "012-6796269",
+  "address": "61, JALAN SR 7/5, SERDANG RAYA, 43300 SERI KEMBANGAN, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "nameConflict": "LIM YING NU",
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-10-16",
+  "leaseEndDate": "2024-10-15",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "0708",
+  "excelUnit": "0708",
+  "ownerName": "LIM MONG KEUNG",
+  "ownerIdentityNo": "580313-06-5061",
+  "contact": "019-9837886",
+  "address": "895 L, PERSIARAN HAKIM 2 BATU BURUK 20400 KUALA TERENGGANU, TERENGGANU",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0801",
+  "excelUnit": "0801",
+  "ownerName": "YAP AH SIN",
+  "ownerIdentityNo": "570409-10-5436",
+  "contact": "012-9011003",
+  "address": "40, JALAN JAMBU BERTEH, TAMAN BATU, 51200 JALAN KUCHING, KUALA LUMPUR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0802",
+  "excelUnit": "0802",
+  "ownerName": "YAP KIM SANG",
+  "ownerIdentityNo": "510927-14-5011",
+  "contact": "012-9011003",
+  "address": "40, JALAN JAMBU BERTEH, TAMAN BATU, 51200 JALAN KUCHING, KUALA LUMPUR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0905",
+  "excelUnit": "0905",
+  "ownerName": "HO PENG KIN",
+  "ownerIdentityNo": "620820-10-6159",
+  "contact": "019-2271011",
+  "address": "31, JALAN UDANG PASIR 1, TAMAN MEGAH KEPONG, 52100 KUALA LUMPUR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "0907",
+  "excelUnit": "0907",
+  "ownerName": "YEONG WEI SIN",
+  "ownerIdentityNo": "740802-14-5409",
+  "contact": "012-7716392",
+  "address": "18, JALAN BURUNG MERBAH, TAMAN BUKIT MALURI, KEPONG,",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1006",
+  "excelUnit": "1006",
+  "ownerName": "KWAN LAI KUEN",
+  "ownerIdentityNo": "621031-10-5422",
+  "contact": "019-2271011",
+  "address": "31, JALAN UDANG PASIR 1, TAMAN MEGAH KEPONG, 52100 KUALA LUMPUR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1012",
+  "excelUnit": "1012",
+  "ownerName": "LAI YOKE KIEW",
+  "ownerIdentityNo": "560907-05-5276",
+  "contact": "016-2883087",
+  "address": "1-10-17, PANGSAPURI SERI ATRIA, JALAN NOVA U5/71A, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1101",
+  "excelUnit": "1101",
+  "ownerName": "SOO YEN SIANG",
+  "ownerIdentityNo": "721124-14-5421",
+  "contact": "N/A",
+  "address": "11, JALAN FREKUENSI U16/115, ELMINA EAST, SEKSYEN U16, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1106",
+  "excelUnit": "1106",
+  "ownerName": "HO PENG KIN",
+  "ownerIdentityNo": "620820-10-6159",
+  "contact": "019-2271011",
+  "address": "31, JALAN UDANG PASIR 1, TAMAN MEGAH KEPONG, 52100 KUALA LUMPUR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1201",
+  "excelUnit": "1201",
+  "ownerName": "NGU IK TSE",
+  "ownerIdentityNo": "780604-13-5476",
+  "contact": "012-4272451",
+  "address": "100, JALAN WAWASAN 3/8, PUSAT BANDAR PUCHONG, 47100 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 900.0,
+  "leaseStartDate": "2021-09-15",
+  "leaseEndDate": "2023-09-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1206",
+  "excelUnit": "1206",
+  "ownerName": "LIM YING NU",
+  "ownerIdentityNo": "911020-14-5678",
+  "contact": "014-7200141",
+  "address": "9, JALAN MARGOSA SD 10/5C, BANDAR SRI DAMANSARA, 52200 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1304",
+  "excelUnit": "1304",
+  "ownerName": "ANDREW CHIEW",
+  "ownerIdentityNo": "820904-07-5069",
+  "contact": "017-3691382",
+  "address": "UNIT B-1-3A, SUBANG PARKHOMES, JALAN KEMAJUAN SUBANG, 47500 SUBANG JAYA, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2017-08-01",
+  "leaseEndDate": "2020-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1307",
+  "excelUnit": "1307",
+  "ownerName": "ONG SOON GUAN",
+  "ownerIdentityNo": "721219-07-5489",
+  "contact": "012-2971171",
+  "address": "100, JALAN WAWASAN 3/8, PUSAT BANDAR PUCHONG, 47100 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2022-08-01",
+  "leaseEndDate": "2024-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1308",
+  "excelUnit": "1308",
+  "ownerName": "ONG SOON GUAN",
+  "ownerIdentityNo": "721219-07-5489",
+  "contact": "012-2971171",
+  "address": "100, JALAN WAWASAN 3/8, PUSAT BANDAR PUCHONG, 47100 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "1309",
+  "excelUnit": "1309",
+  "ownerName": "TEH HOOI LEE",
+  "ownerIdentityNo": "641008-07-5630",
+  "contact": "012-2323300",
+  "address": "100, JALAN WAWASAN 3/8, PUSAT BANDAR PUCHONG, 47100 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2017-08-01",
+  "leaseEndDate": "2020-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1310",
+  "excelUnit": "1310",
+  "ownerName": "HOOI UNITED HOLDINGS SDN BHD",
+  "ownerIdentityNo": "585398-A",
+  "contact": "012-2323300",
+  "address": "12, JALAN SERI BERINGIN 3, BUKIT DAMANSARA, 50490 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2017-08-01",
+  "leaseEndDate": "2020-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1311",
+  "excelUnit": "1311",
+  "ownerName": "NGU IK TSE",
+  "ownerIdentityNo": "780604-13-5476",
+  "contact": "012-4272451",
+  "address": "100, JALAN WAWASAN 3/8, PUSAT BANDAR PUCHONG, 47100 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 900.0,
+  "leaseStartDate": "2021-01-15",
+  "leaseEndDate": "2023-01-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1312",
+  "excelUnit": "1312",
+  "ownerName": "ONG SOON CHENG",
+  "ownerIdentityNo": "760511-07-5162",
+  "contact": "012-4760337",
+  "address": "J-10-1, VISTA CONDO LEBUH RELAU 2, 11900 BAYAN LEPAS, PENANG, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2020-04-15",
+  "leaseEndDate": "2023-04-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "1405",
+  "excelUnit": "1405",
+  "ownerName": "WANG HUN",
+  "ownerIdentityNo": "641009-10-7067",
+  "contact": "019-2345650",
+  "address": "8, JALAN TAMING MAJU 5, TAMAN TAMING MAJU, BALAKONG 43300 SERI KEMBANGAN",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-03-01",
+  "leaseEndDate": "2024-02-29",
+  "agreementNotes": "Agreement signed: NO · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "16-2",
+  "excelUnit": "16-2 / 16-3",
+  "ownerName": "IKTIBAR HARTA SDN BHD",
+  "ownerIdentityNo": "941886-T",
+  "contact": "019-2100256",
+  "address": "19-3, JALAN NOVA U5/N, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 7400.0,
+  "leaseStartDate": "2024-04-01",
+  "leaseEndDate": "2026-03-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "16-3",
+  "excelUnit": "16-2 / 16-3",
+  "ownerName": "IKTIBAR HARTA SDN BHD",
+  "ownerIdentityNo": "941886-T",
+  "contact": "019-2100256",
+  "address": "19-3, JALAN NOVA U5/N, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 7400.0,
+  "leaseStartDate": "2024-04-01",
+  "leaseEndDate": "2026-03-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0113",
+  "excelUnit": "D1-01-13",
+  "ownerName": "NG SIN RAEI",
+  "ownerIdentityNo": "780907-10-5362",
+  "contact": "016-3335938",
+  "address": "D1-01-13, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2024-01-01",
+  "leaseEndDate": "2026-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0210",
+  "excelUnit": "D1-02-10",
+  "ownerName": "ROHANA ABDUL SAMAD",
+  "ownerIdentityNo": "590806-01-5774",
+  "contact": "013-3958391",
+  "address": "508 BLOCK 19 (KASIA C), JALAN NURI 7/1D, 47810 SEKSYEN 7, KOTA DAMANSARA, PETALING JAYA, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1200.0,
+  "leaseStartDate": "2024-01-01",
+  "leaseEndDate": "2026-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0219",
+  "excelUnit": "D1-02-19",
+  "ownerName": "LIM EE HEE",
+  "ownerIdentityNo": "721210-07-5183",
+  "contact": "011-10949311",
+  "address": "PANGSAPURI SERI SURIA, 2-3-3, JALAN KABURETER 34/13, SEKYSEN 34, 40470 SHAH ALAM, SELANGOR D.E MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "service",
+  "servicePercentage": 18.0,
+  "leaseStartDate": "2025-01-02",
+  "leaseEndDate": "2026-01-01",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0313",
+  "excelUnit": "D1-03-13",
+  "ownerName": "MOHAMAD RIDZUAN BIN AHMAD",
+  "ownerIdentityNo": "911105-08-6013",
+  "contact": "011-16164988",
+  "address": "KAMPUNG SUNGAI NIPAH BAROH, 36100 BAGAN DATUK, PERAK, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2023-05-01",
+  "leaseEndDate": "2025-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0415",
+  "excelUnit": "D1-04-15",
+  "ownerName": "NOR IKHWAN BIN MOHAMAD YUSOF",
+  "ownerIdentityNo": "850218-08-6435",
+  "contact": "012-5556232",
+  "address": "MAHKAMAH SESYEN/ MAJISTRET TELUK INTAN, 36000 TELUK INTAN, PERAK, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1200.0,
+  "leaseStartDate": "2022-03-01",
+  "leaseEndDate": "2024-02-29",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0501",
+  "excelUnit": "D1-05-01",
+  "ownerName": "ONG SIEW HUA",
+  "ownerIdentityNo": "580909-08-6058",
+  "contact": "017-8888098",
+  "address": "D1-05-01, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1150.0,
+  "leaseStartDate": "2024-10-01",
+  "leaseEndDate": "2026-09-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0502",
+  "excelUnit": "D1-05-02",
+  "ownerName": "ADA HO JI EE",
+  "ownerIdentityNo": "861225-38-6536",
+  "contact": "012-5693849",
+  "address": "65, SOLOK WAH KEONG, TAMAN WAH KEONG, 31400 IPOH PERAK, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1200.0,
+  "leaseStartDate": "2024-09-01",
+  "leaseEndDate": "2026-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0614",
+  "excelUnit": "D1-06-14",
+  "ownerName": "YAP WAY MING",
+  "ownerIdentityNo": "620119-10-5991",
+  "contact": "",
+  "address": "13, JALAN NOVA U5/91D, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "D1-0805",
+  "excelUnit": "D1-08-05",
+  "ownerName": "WONG MEI KHEE",
+  "ownerIdentityNo": "801001-14-5368",
+  "contact": "012-6882035",
+  "address": "4, JALAN ZUHRAH U5/156, TAMAN SUBANG MURNI, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1200.0,
+  "leaseStartDate": "2024-02-01",
+  "leaseEndDate": "2026-01-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-0912",
+  "excelUnit": "D1-09-12",
+  "ownerName": "ANANTHAN SANMUGAM",
+  "ownerIdentityNo": "790221-08-5191",
+  "contact": "016-2128643",
+  "address": "D1-09-12, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-10-15",
+  "leaseEndDate": "2025-10-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-1017",
+  "excelUnit": "D1-10-17",
+  "ownerName": "VINCENT LIM CHEE YANG",
+  "ownerIdentityNo": "840924-14-5915",
+  "contact": "012-3730514",
+  "address": "NO 39, JALAN 22, TAMAN DATO SENU SENTUL, 51000 KUALA LUMPUR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2025-06-01",
+  "leaseEndDate": "2027-05-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-1201",
+  "excelUnit": "D1-12-01",
+  "ownerName": "MAH KHUAN YENG",
+  "ownerIdentityNo": "661115-06-5188",
+  "contact": "012-2980389 (AGENT)",
+  "address": "D1-12-01, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-05-01",
+  "leaseEndDate": "2024-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-1202",
+  "excelUnit": "D1-12-02",
+  "ownerName": "YIP CHOONG SING",
+  "ownerIdentityNo": "681101-08-5303",
+  "contact": "012-6811730",
+  "address": "25, JALAN BK 5/11E, BANDAR KINRARA 47180 PUCHONG SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-01-01",
+  "leaseEndDate": "2023-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-1306",
+  "excelUnit": "D1-13-06",
+  "ownerName": "SYNERGY MANAGEMENT",
+  "ownerIdentityNo": "002173414-D",
+  "contact": "010-8682038",
+  "address": "27A, JALAN SS21/34, DAMANSARA UTAMA, 47400 PETALING JAYA, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 900.0,
+  "leaseStartDate": "2021-11-01",
+  "leaseEndDate": "2023-10-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D1-1417",
+  "excelUnit": "D1-14-17",
+  "ownerName": "PANG SIEW YEE / LOW PEY CHEONG / GOH MAY KGIE",
+  "ownerIdentityNo": "890901-14-6128 / 760108-14-5781 / 881030-14-5044",
+  "contact": "012-8266497",
+  "address": "23, JALAN URANUS U5/128F, SUBANG PELANGI, SEKSYEN U5, 40150 SHAH ALAM, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-01-01",
+  "leaseEndDate": "2025-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 4 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0203",
+  "excelUnit": "D2-02-03",
+  "ownerName": "CHEW HIU MUN",
+  "ownerIdentityNo": "871207-12-6132",
+  "contact": "017-3313488",
+  "address": "D2-02-03, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "D2-0208",
+  "excelUnit": "D2-02-08",
+  "ownerName": "CHIN WAI CHEONG",
+  "ownerIdentityNo": "CHIN WAI CHEONG",
+  "contact": "012-6291858",
+  "address": "D2-02-08, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1300.0,
+  "leaseStartDate": "2023-10-01",
+  "leaseEndDate": "2025-09-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0310",
+  "excelUnit": "D2-03-10",
+  "ownerName": "NUR ANINA BINTI MUHAMMAD",
+  "ownerIdentityNo": "840612-14-5182",
+  "contact": "012-2052104",
+  "address": "LOT 5776, LORONG PINANG KAMPUNG MELAYU SUBANG 40150 SHAH ALAM, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2021-05-01",
+  "leaseEndDate": "2023-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0409",
+  "excelUnit": "D2-04-09",
+  "ownerName": "MOHD JEDEFZAN BIN TULEMUN",
+  "ownerIdentityNo": "770719-01-5985",
+  "contact": "019-3915747",
+  "address": "BEGA RESIDENSI 1, PERSIARAN MULTIMEDIA, SCIENC PARK 2, CYBERJAYA 63300 SEPANG SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-11-15",
+  "leaseEndDate": "2025-11-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0412",
+  "excelUnit": "D2-04-12",
+  "ownerName": "HOW LIN LIN",
+  "ownerIdentityNo": "780921-14-5934",
+  "contact": "012-6399921",
+  "address": "NO 14, JALAN BRP 6/9, BUKIT RAHMAN PUTRA, 47000 SUNGAI BULOH , SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-11-15",
+  "leaseEndDate": "2025-11-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0504",
+  "excelUnit": "D2-05-04",
+  "ownerName": "JASON BOO JUN YI",
+  "ownerIdentityNo": "871224-23-5057",
+  "contact": "012-2818343",
+  "address": "LOT 112, JALAN PERINDUSTRIAN 9, TG AGAS 84000, MUAR, JOHOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2024-12-01",
+  "leaseEndDate": "2026-11-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0505",
+  "excelUnit": "D2-05-05",
+  "ownerName": "CHAI SIA CHANG",
+  "ownerIdentityNo": "610110-10-5937",
+  "contact": "012-6557810",
+  "address": "NO 65, JALAN INDAH 3, TAMAN TASIK INDAH, BATU 5, JALAN IPOH, 51200 KUALA LUMPUR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2020-06-01",
+  "leaseEndDate": "2023-05-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0616",
+  "excelUnit": "D2-06-16",
+  "ownerName": "FAZLIZA DIANA BINTI HUSSAIN",
+  "ownerIdentityNo": "751028-03-5326",
+  "contact": "019-2151028",
+  "address": "D2-06-16, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-08-15",
+  "leaseEndDate": "2025-08-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0708",
+  "excelUnit": "D2-07-08",
+  "ownerName": "TOON CHOON KWAI",
+  "ownerIdentityNo": "720827-08-6419",
+  "contact": "016-6836028",
+  "address": "B-719, TAMAN SENTOSA, 17500 TANAH MERAH KELANTAN MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-07-01",
+  "leaseEndDate": "2025-06-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0815",
+  "excelUnit": "D2-08-15",
+  "ownerName": "AZWIRA MOHD AMIN",
+  "ownerIdentityNo": "740423-14-5441",
+  "contact": "018-3559600",
+  "address": "D2-08-15, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2025-08-01",
+  "leaseEndDate": "2028-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D2-0816",
+  "excelUnit": "D2-08-16",
+  "ownerName": "MOHD RIZAM BIN MOHAMAD RUSLAN",
+  "ownerIdentityNo": "730727-10-5511",
+  "contact": "019-2520570",
+  "address": "D2-08-16, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1150.0,
+  "leaseStartDate": "2025-01-01",
+  "leaseEndDate": "2027-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0909",
+  "excelUnit": "D2-09-09",
+  "ownerName": "CHOO YEAN LENG",
+  "ownerIdentityNo": "780307-08-6700",
+  "contact": "012-372 7200",
+  "address": "D2-09-09, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 980.0,
+  "leaseStartDate": "2024-12-01",
+  "leaseEndDate": "2027-11-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-0912",
+  "excelUnit": "D2-09-12",
+  "ownerName": "LEE CHAI HA",
+  "ownerIdentityNo": "790307-13-5962",
+  "contact": "012-2071004",
+  "address": "D2-09-12, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1400.0,
+  "leaseStartDate": "2023-09-01",
+  "leaseEndDate": "2025-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D2-1109",
+  "excelUnit": "D2-11-09",
+  "ownerName": "MOHAMED FASLUDEEN BIN ABDUL HADI",
+  "ownerIdentityNo": "741001-08-7311",
+  "contact": "010-2652274",
+  "address": "NO 46, JALAN SETIA VILLA 5, CYBERJAYA, 63000 CYBERJAYA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "D2-1213",
+  "excelUnit": "D2-12-13",
+  "ownerName": "CHEW HIU MUN",
+  "ownerIdentityNo": "871207-12-6132",
+  "contact": "017-3313488",
+  "address": "D2-12-13, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-03-01",
+  "leaseEndDate": "2024-03-29",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0101",
+  "excelUnit": "D3-01-01",
+  "ownerName": "LEE WOEI HOW",
+  "ownerIdentityNo": "781005-10-6176",
+  "contact": "012-2352011",
+  "address": "945, JALAN SS 17/38, 46400 PETALING JAYA SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2024-01-01",
+  "leaseEndDate": "2026-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0109",
+  "excelUnit": "D3-01-09",
+  "ownerName": "CHIN KUAN YAN",
+  "ownerIdentityNo": "700527-06-5044",
+  "contact": "019-3727218",
+  "address": "A7-7 MUTIARA UPPER EAST AMPANG, KG PANDAN 55100 KL, WP, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "service",
+  "servicePercentage": 18.0,
+  "leaseStartDate": "2025-05-01",
+  "leaseEndDate": "2026-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0116",
+  "excelUnit": "D3-01-16",
+  "ownerName": "SURI IZUATI BINTI SAMSURI",
+  "ownerIdentityNo": "760326-14-5712",
+  "contact": "012-3160758",
+  "address": "20, JALAN PUKAT SATU 19/23A, SEKSYEN 19, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-09-01",
+  "leaseEndDate": "2025-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0208",
+  "excelUnit": "D3-02-08",
+  "ownerName": "YONG CHENG CHEN",
+  "ownerIdentityNo": "631002-10-6214",
+  "contact": "019-7790745",
+  "address": "D3-02-08, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-08-01",
+  "leaseEndDate": "2024-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0213",
+  "excelUnit": "D3-02-13",
+  "ownerName": "HABIBATUL'SYUADAH BT ABDULLAH",
+  "ownerIdentityNo": "890625-03-5500",
+  "contact": "013-4655191",
+  "address": "305-BLOK 19, JALAN NURI 7/1D, KOTA DAMANSARA, 47810 PETALING JAYA, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1250.0,
+  "leaseStartDate": "2024-09-15",
+  "leaseEndDate": "2026-09-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0311",
+  "excelUnit": "D3-03-11",
+  "ownerName": "YONG CHENG KAI",
+  "ownerIdentityNo": "720909-10-5169",
+  "contact": "012-2125755",
+  "address": "55, JALAN WANGSA JAYA 1, TAMAN WANGSA JAYA, 53300 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2022-05-15",
+  "leaseEndDate": "2023-05-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 1 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0313",
+  "excelUnit": "D3-03-13",
+  "ownerName": "LENG MYAN FYAN",
+  "ownerIdentityNo": "740325-14-5800",
+  "contact": "016-3751789",
+  "address": "7, JALAN LANG PERUT PUTIH 3, KEPONG BARU 52100 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2022-09-01",
+  "leaseEndDate": "2025-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0405",
+  "excelUnit": "D3-04-05",
+  "ownerName": "JULIANA LAILA BINTI MOHD NOOR",
+  "ownerIdentityNo": "801020-03-5754",
+  "contact": "019-9557029",
+  "address": "D3-04-05, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-05-16",
+  "leaseEndDate": "2024-05-15",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0413",
+  "excelUnit": "D3-04-13",
+  "ownerName": "GOH HOOI LENG",
+  "ownerIdentityNo": "710717-10-5472",
+  "contact": "012-9885571",
+  "address": "54, JALAN WANGSA 3/1, TAMAN WANGSA PERMAI, 52200 KEPONG, KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-02-01",
+  "leaseEndDate": "2024-01-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0415",
+  "excelUnit": "D3-04-15",
+  "ownerName": "CHAI SIA CHANG",
+  "ownerIdentityNo": "610110-10-5937",
+  "contact": "012-2244888",
+  "address": "65, JALAN INDAH 3, TAMAN TASIK INDAH BATU 5, JALAN IPOH, 51200 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-01-01",
+  "leaseEndDate": "2024-12-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0614",
+  "excelUnit": "D3-06-14",
+  "ownerName": "MOHD AZUAR BIN YAAKUB",
+  "ownerIdentityNo": "800201-03-5425",
+  "contact": "019-2685597",
+  "address": "LOT 1464, LORONG KUBUR TOK KENALI KUBANG KERIAN 16150 KOTA BHARU KELANTAN, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2023-03-01",
+  "leaseEndDate": "2025-02-28",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0705",
+  "excelUnit": "D3-07-05",
+  "ownerName": "CHOW SEH YEE",
+  "ownerIdentityNo": "811010-14-5502",
+  "contact": "012-2817640",
+  "address": "36, JALAN BESAR SELAYANG BARU BT CAVES 68100 SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2020-03-01",
+  "leaseEndDate": "2023-02-28",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-0706",
+  "excelUnit": "D3-07-06",
+  "ownerName": "LIM YI JIAN",
+  "ownerIdentityNo": "860706-38-6321",
+  "contact": "012-2447837",
+  "address": "NO 21, JALAN NOVA U5/62, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "service",
+  "servicePercentage": 18.0,
+  "leaseStartDate": "2024-08-01",
+  "leaseEndDate": "2025-07-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0714",
+  "excelUnit": "D3-07-14",
+  "ownerName": "CHOW SEH YEE",
+  "ownerIdentityNo": "811010-14-5502",
+  "contact": "012-2817640",
+  "address": "36, JALAN BESAR SELAYANG BARU BT CAVES 68100 SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 950.0,
+  "leaseStartDate": "2019-09-15",
+  "leaseEndDate": "2022-09-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0902",
+  "excelUnit": "D3-09-02",
+  "ownerName": "ALL-INVORY ENTERPRISE SDN BHD",
+  "ownerIdentityNo": "453129-M",
+  "contact": "012-3492500",
+  "address": "NO 3-37, JALAN PUTERI 4/8, BANDAR PUTERI PUCHONG, 47100 PUCHONG, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1150.0,
+  "leaseStartDate": "2024-11-01",
+  "leaseEndDate": "2026-10-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-0916",
+  "excelUnit": "D3-09-16",
+  "ownerName": "TAN SIEW FOONG",
+  "ownerIdentityNo": "630427-10-7728",
+  "contact": "016-6615611",
+  "address": "1519, JALAN 37, TAMAN KEPONG, 52100 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2024-09-01",
+  "leaseEndDate": "2026-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-1010",
+  "excelUnit": "D3-10-10",
+  "ownerName": "VIKNESWARAN A/L SUBRAMANIAM",
+  "ownerIdentityNo": "680619-08-5741",
+  "contact": "012-6011950",
+  "address": "NO 2, JALAN UNGU U9/34C, SUNWAY KAYANGAN, SEKSYEN U9, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-09-01",
+  "leaseEndDate": "2025-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-1013",
+  "excelUnit": "D3-10-13",
+  "ownerName": "LAI MOON YEE",
+  "ownerIdentityNo": "840716-14-6518",
+  "contact": "012-228295",
+  "address": "5, JALAN BEE ENG 3, TAMAN TAYNTON 56000 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1150.0,
+  "leaseStartDate": "2019-05-01",
+  "leaseEndDate": "2022-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-1113",
+  "excelUnit": "D3-11-13",
+  "ownerName": "WONG KIM LAN",
+  "ownerIdentityNo": "630625-10-7112",
+  "contact": "016-2207067",
+  "address": "B1-23A-09, PLAZA MEDAN PUTRA, JALAN MEDAN PUTRA 6, BANDAR MENJALARA 52200 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1100.0,
+  "leaseStartDate": "2022-09-01",
+  "leaseEndDate": "2025-08-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "D3-1202",
+  "excelUnit": "D3-12-02",
+  "ownerName": "EMILY TAN",
+  "ownerIdentityNo": "540610-10-5836",
+  "contact": "017-2463130",
+  "address": "613, BLOCK C, PALM SPRING CONDO, JALAN PJU 3/29, KOTA DAMANSARA, 47810 PETALING JAYA, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-10-16",
+  "leaseEndDate": "2024-10-15",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-1409",
+  "excelUnit": "D3-14-09",
+  "ownerName": "LEE XIANG YEE",
+  "ownerIdentityNo": "890701-14-6414",
+  "contact": "011-261528380",
+  "address": "D3-14-09, PANGSAPURI DAMAI, JALAN TASIK RAJA LUMU U4/17, TAMAN SUBANG DELIMA, 40150 SHAH ALAM, SELANGOR",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1150.0,
+  "leaseStartDate": "2025-07-01",
+  "leaseEndDate": "2028-06-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 3 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "D3-1510",
+  "excelUnit": "D3-15-10",
+  "ownerName": "SURESH KUMAR A/L R BALASINGHAM",
+  "ownerIdentityNo": "700108-04-5217",
+  "contact": "019-3258817",
+  "address": "A-27-02, FIVE STONES CONDO, JALAN SS2/72, 47300 PETALING JAYA, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "DAMAI AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 900.0,
+  "leaseStartDate": "2022-03-01",
+  "leaseEndDate": "2024-02-29",
+  "agreementNotes": "Agreement signed: YES · Stamping: NO · Option to renew: 2 · TA uploaded: NO"
+ },
+ {
+  "unitCode": "SR12",
+  "excelUnit": "SR12",
+  "ownerName": "TANG TECK HENG",
+  "ownerIdentityNo": "650519-10-5947",
+  "contact": "",
+  "address": "1944, JALAN G1 TAMAN MELAWATI 53100 KL, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS"
+  ]
+ },
+ {
+  "unitCode": "SR23",
+  "excelUnit": "SR 23",
+  "ownerName": "KEMBANGAN KLASIK (M) SDN BHD",
+  "ownerIdentityNo": "240675-V",
+  "contact": "012-6591920",
+  "address": "21B, LORONG DATO YUSOF SHAHBUDIN 20, TAMAN SENTOSA, 41200 KLANG, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 2000.0,
+  "leaseStartDate": "2025-04-16",
+  "leaseEndDate": "2025-10-15",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "SR2A",
+  "excelUnit": "SR 2A",
+  "ownerName": "KEMBANGAN KLASIK (M) SDN BHD",
+  "ownerIdentityNo": "240675-V",
+  "contact": "012-6591920",
+  "address": "21B, LORONG DATO YUSOF SHAHBUDIN 20, TAMAN SENTOSA, 41200 KLANG, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "nameConflict": "MOHD JEDEFZAN BIN TULEMUN",
+  "agreementType": "rental",
+  "monthlyLeaseRental": 1000.0,
+  "leaseStartDate": "2022-11-15",
+  "leaseEndDate": "2025-11-14",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 3 · TA uploaded: PENDING"
+ },
+ {
+  "unitCode": "SR3",
+  "excelUnit": "SR 3",
+  "ownerName": "LEE ENG YIK",
+  "ownerIdentityNo": "761115-14-5311",
+  "contact": "019-2100256",
+  "address": "19-3, JALAN NOVA U5/N, SUBANG BESTARI, 40150 SHAH ALAM, SELANGOR, MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 4400.0,
+  "leaseStartDate": "2024-04-01",
+  "leaseEndDate": "2026-03-31",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "SR31",
+  "excelUnit": "SR 31",
+  "ownerName": "KEMBANGAN KLASIK (M) SDN BHD",
+  "ownerIdentityNo": "240675-V",
+  "contact": "012-6591920",
+  "address": "21B, LORONG DATO YUSOF SHAHBUDIN 20, TAMAN SENTOSA, 41200 KLANG, SELANGOR MALAYSIA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 2000.0,
+  "leaseStartDate": "2025-04-16",
+  "leaseEndDate": "2026-01-15",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 1 · TA uploaded: YES"
+ },
+ {
+  "unitCode": "SR5",
+  "excelUnit": "SR 5",
+  "ownerName": "LEE JIA YUH",
+  "ownerIdentityNo": "810814-04-5123",
+  "contact": "012-6695851",
+  "address": "775-B, JALAN KESIDANG 3/11, KAMPUNG LAPAN, 75200 MELAKA",
+  "sources": [
+   "OWNER DETAILS",
+   "ATRIA & OTHERS AGREEMENT"
+  ],
+  "agreementType": "rental",
+  "monthlyLeaseRental": 2200.0,
+  "leaseStartDate": "2019-05-01",
+  "leaseEndDate": "2021-04-30",
+  "agreementNotes": "Agreement signed: YES · Stamping: YES · Option to renew: 2 · TA uploaded: YES"
+ }
+]

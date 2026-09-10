@@ -40,6 +40,13 @@ export const hostelUnits = pgTable(
     leaseEndDate: text("lease_end_date"),
     surrenderDate: text("surrender_date"),
     surrenderNotes: text("surrender_notes").notNull().default(""),
+    // How this unit's electricity reaches the tenant. "meter" is the normal
+    // case: staff read the room meters and the cycle charges the movement.
+    // "tnb-direct" units have no room meters to read — SR12 and SR31 are
+    // billed straight off the TNB bill instead — so they must not be charged
+    // from readings, and must not be nagged for a meter round that will
+    // never happen.
+    electricityBilling: text("electricity_billing").notNull().default("meter"),
   },
   (table) => [
     uniqueIndex("hostel_unit_unique").on(table.hostelId, table.unitCode),
@@ -180,6 +187,14 @@ export const accommodationAssignments = pgTable("accommodation_assignments", {
   agreementEndDate: text("agreement_end_date"),
   agreementDuration: text("agreement_duration").notNull().default(""),
   checkOutDate: text("check_out_date"),
+  // Set when staff confirm the student has physically arrived and taken the
+  // keys. Until then a converted reservation holds the bed (bed_spaces
+  // status 'reserved') without counting as occupied — check_in_date at that
+  // point is still only the *planned* date carried over from the booking,
+  // and gets corrected here if they actually arrived on a different day.
+  // Null on the tenancies imported from the pre-system spreadsheets: those
+  // students were already living in, so their bed is 'occupied' outright.
+  checkedInAt: text("checked_in_at"),
   checkInMeter: doublePrecision("check_in_meter"),
   checkOutMeter: doublePrecision("check_out_meter"),
   sourceReservationId: bigint("source_reservation_id", { mode: "number" }),
@@ -500,6 +515,14 @@ export const maintenanceTickets = pgTable("maintenance_tickets", {
   estimatedCost: doublePrecision("estimated_cost"),
   actualCost: doublePrecision("actual_cost"),
   studentCharge: doublePrecision("student_charge"),
+  // Who actually pays a student-borne charge. student_id above is whoever
+  // *reported* the fault, which is often not the person responsible for it
+  // — a roommate broke it, or staff raised the ticket with no student
+  // attached at all. Null means "bill the reporter", which keeps every
+  // ticket raised before this column existed billing exactly as it did.
+  chargedStudentId: bigint("charged_student_id", { mode: "number" }).references(
+    () => studentProfiles.id,
+  ),
   // The billing cycle that already charged studentCharge to the student.
   // Without this the monthly run re-bills every completed ticket in every
   // subsequent cycle, since "completed and chargeable" stays true forever.
@@ -594,6 +617,13 @@ export const meterReadings = pgTable("meter_readings", {
   readingDate: text("reading_date").notNull(),
   readingValue: doublePrecision("reading_value").notNull(),
   readingType: text("reading_type").notNull().default("monthly"),
+  // Set only on the first reading taken from a replacement meter, and then
+  // it holds the FINAL reading of the meter that was taken out. A new meter
+  // starts again from zero, so the month it was swapped spans two of them:
+  //   usage = (old meter's final - old meter's previous) + this reading
+  // Without it the cycle sees the count go backwards and charges nothing,
+  // silently losing that month. Null on every ordinary reading.
+  replacedMeterFinal: doublePrecision("replaced_meter_final"),
   submittedBy: text("submitted_by").notNull().default("Maintenance Team"),
   notes: text("notes").notNull().default(""),
   createdAt: text("created_at")

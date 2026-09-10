@@ -264,6 +264,9 @@ function selectRawBeds(db: ReturnType<typeof getDb>) {
       unitCode: hostelUnits.unitCode,
       unitStatus: hostelUnits.status,
       unitSurrenderDate: hostelUnits.surrenderDate,
+      // "tnb-direct" units have no room meters — the whole-unit electricity
+      // report has to say that rather than report them as unread.
+      electricityBilling: hostelUnits.electricityBilling,
       gender: hostelUnits.gender,
       roomLabel: hostelRooms.roomLabel,
       configuredRoomType: hostelRooms.roomType,
@@ -368,11 +371,16 @@ function deriveBeds(rawBeds: RawBed[], today: string) {
             ? nextDay(bed.agreementEndDate)
             : null,
       availabilityState:
-        bed.status === "vacant" || agreementEnded
-          ? "available-now"
-          : bed.status === "occupied" && bed.agreementEndDate
-            ? "upcoming"
-            : "unavailable",
+        // A bed held for a converted booking is never sellable, whatever
+        // dates sit on its assignment — the student has paid for it and is
+        // simply not here yet.
+        bed.status === "reserved"
+          ? "unavailable"
+          : bed.status === "vacant" || agreementEnded
+            ? "available-now"
+            : bed.status === "occupied" && bed.agreementEndDate
+              ? "upcoming"
+              : "unavailable",
     };
   });
 }
@@ -390,6 +398,10 @@ function deriveHostels(
       bedSpaces: rows.length,
       occupied: rows.filter((bed) => bed.status === "occupied").length,
       vacant: rows.filter((bed) => bed.status === "vacant").length,
+      // Converted and paid for, but the student hasn't arrived yet: the bed
+      // is physically empty (so Maintenance can still clean/inspect it) but
+      // is not sellable to anyone else.
+      awaitingCheckIn: rows.filter((bed) => bed.status === "reserved").length,
       vacantFemale: rows.filter(
         (bed) => bed.status === "vacant" && bed.gender === "female",
       ).length,
@@ -450,6 +462,15 @@ function selectStudents(db: ReturnType<typeof getDb>) {
       parkingDeposit: accommodationAssignments.parkingDeposit,
       checkInDate: accommodationAssignments.checkInDate,
       checkOutDate: accommodationAssignments.checkOutDate,
+      // Null while the tenancy is converted-but-not-arrived. The Tenants
+      // list uses it to show the "Check in" action, and the bed status
+      // alongside it is what the counters key off.
+      checkedInAt: accommodationAssignments.checkedInAt,
+      checkInMeter: accommodationAssignments.checkInMeter,
+      bedStatus: bedSpaces.status,
+      // Lets the reservation screens find the tenancy a booking became, so
+      // they can offer check-in from the card the sale was converted on.
+      sourceReservationId: accommodationAssignments.sourceReservationId,
       leaseStartDate: accommodationAssignments.agreementStartDate,
       leaseEndDate: accommodationAssignments.agreementEndDate,
       assignmentStatus: accommodationAssignments.status,
@@ -905,7 +926,11 @@ function moduleForAction(action: string) {
   if (/^bed-/.test(action)) return "units-general";
   if (/^(unit-|access-card|room-|service-)/.test(action))
     return action === "unit-owner" ? "units-owner" : "units-general";
-  if (/^(student-|school-|course-)/.test(action)) return "students";
+  // Check-in changes a tenancy's state and its room's status, so it is
+  // gated like the other tenant actions. The remaining assignment-* actions
+  // are follow-up flags raised from the sales screens and stay ungated.
+  if (/^(student-|school-|course-|assignment-check-in)/.test(action))
+    return "students";
   if (/^parking-/.test(action)) return "parking";
   if (/^(ticket-|meter-|general-cost)/.test(action)) return "maintenance";
   if (/^billing-/.test(action)) return "finance";
@@ -2038,6 +2063,7 @@ export async function GET(request: Request) {
       courseRows,
       categoryRateRows,
       settingRows,
+      salesPersonRows,
     ] = await Promise.all([
       selectRawBeds(db),
       db
@@ -2301,6 +2327,12 @@ export async function GET(request: Request) {
           estimatedCost: maintenanceTickets.estimatedCost,
           actualCost: maintenanceTickets.actualCost,
           studentCharge: maintenanceTickets.studentCharge,
+          // Who a student-borne charge actually bills to, and the unit's
+          // registered owner — the drawer names both rather than making
+          // staff go and look them up elsewhere.
+          chargedStudentId: maintenanceTickets.chargedStudentId,
+          ownerName: unitOwnerDetails.ownerName,
+          ownerEmail: unitOwnerDetails.ownerEmail,
           createdAt: maintenanceTickets.createdAt,
           updatedAt: maintenanceTickets.updatedAt,
         })
@@ -2308,6 +2340,10 @@ export async function GET(request: Request) {
         .leftJoin(
           studentProfiles,
           eq(maintenanceTickets.studentId, studentProfiles.id),
+        )
+        .leftJoin(
+          unitOwnerDetails,
+          eq(maintenanceTickets.unitId, unitOwnerDetails.unitId),
         )
         .leftJoin(
           hostelProperties,
@@ -2332,6 +2368,7 @@ export async function GET(request: Request) {
           readingDate: meterReadings.readingDate,
           readingValue: meterReadings.readingValue,
           readingType: meterReadings.readingType,
+          replacedMeterFinal: meterReadings.replacedMeterFinal,
           submittedBy: meterReadings.submittedBy,
           notes: meterReadings.notes,
           createdAt: meterReadings.createdAt,
@@ -2446,6 +2483,20 @@ export async function GET(request: Request) {
       db.select().from(courses).orderBy(asc(courses.name)),
       db.select().from(hostelCategoryRates),
       db.select().from(systemSettings),
+      // Who has actually sold a tenancy, straight from the tenancies. This
+      // used to be read off the data/student-assignments.json seed file,
+      // which meant the dropdown emptied out to just the fallback the moment
+      // that file was cleared — everyone real (Foo, Catherine, Michael…) is
+      // recorded here, not there.
+      db
+        .selectDistinct({ name: accommodationAssignments.salesperson })
+        .from(accommodationAssignments)
+        .where(
+          and(
+            isNotNull(accommodationAssignments.salesperson),
+            ne(accommodationAssignments.salesperson, ""),
+          ),
+        ),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -2484,10 +2535,10 @@ export async function GET(request: Request) {
     }));
     const salesPeople = [
       ...new Set([
-        ...importedAssignments
-          .map((record) => record.assignment.salesperson)
-          .filter(Boolean),
+        ...salesPersonRows.map((row) => row.name).filter(Boolean),
+        ...studentRows.map((row) => row.salesperson).filter(Boolean),
         ...reservationRows.map((row) => row.salesPerson).filter(Boolean),
+        // Keeps the picker usable on a database with no tenancies yet.
         "Irena",
       ]),
     ].sort();
@@ -2566,9 +2617,9 @@ export async function GET(request: Request) {
             (row) => row.settingKey === "auto-billing-cutoff-day",
           )?.settingValue ?? 24,
         ),
-        autoBillingDueDays: Number(
-          settingRows.find((row) => row.settingKey === "auto-billing-due-days")
-            ?.settingValue ?? 14,
+        autoBillingDueDay: Number(
+          settingRows.find((row) => row.settingKey === "auto-billing-due-day")
+            ?.settingValue ?? 5,
         ),
       },
       tickets: ticketRows,
@@ -2692,20 +2743,15 @@ export async function GET(request: Request) {
     }
     return Response.json(responseData);
   } catch (error) {
-    const diagnostic =
-      error instanceof Error
-        ? {
-            message: error.message,
-            name: error.name,
-            code: (error as { code?: string }).code,
-            errno: (error as { errno?: string | number }).errno,
-            cause:
-              error.cause instanceof Error
-                ? error.cause.message
-                : error.cause,
-          }
-        : { message: "Unable to load hostel records" };
-    return Response.json({ error: diagnostic }, { status: 500 });
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to load hostel records",
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -2745,7 +2791,12 @@ async function runScheduledBilling(db: ReturnType<typeof getDb>) {
     lastAutoBillingCheck = todayKL;
 
     const cutoffDay = Math.min(28, Math.max(1, Number(value("auto-billing-cutoff-day", "24"))));
-    const dueDays = Math.max(0, Number(value("auto-billing-due-days", "14")));
+    // Rent falls due on a fixed day of the following month — the house rule
+    // tenants are told, and the day the payment reminders are keyed to. It
+    // is a calendar day, not an offset from the cut-off: "cut-off + 14 days"
+    // lands on a different date every month (a short February drifts it by
+    // three days), so the reminders and the real due date would disagree.
+    const dueDay = Math.min(28, Math.max(1, Number(value("auto-billing-due-day", "5"))));
 
     // Before the cut-off day the month is not finished, so the period that
     // should exist by now is the previous one.
@@ -2764,8 +2815,7 @@ async function runScheduledBilling(db: ReturnType<typeof getDb>) {
 
     const iso = (date: Date) => date.toISOString().slice(0, 10);
     const cutoff = new Date(Date.UTC(periodYear, periodMonth, cutoffDay));
-    const due = new Date(cutoff);
-    due.setUTCDate(due.getUTCDate() + dueDays);
+    const due = new Date(Date.UTC(periodYear, periodMonth + 1, dueDay));
     // Only the empty container — see the comment above this function for why
     // this does not go on to bill anyone.
     await ensureBillingCycle(db, {
@@ -2824,11 +2874,17 @@ async function computeCycleInvoices(
   invoicesToInsert: PendingInvoice[];
   maintenanceTicketsByStudent: Map<number, number[]>;
   depositIdsByAssignment: Map<number, number[]>;
+  // Occupied rooms that get no electricity line this cycle because nobody
+  // took a reading since the last billing run. Reported so a forgotten
+  // meter round shows up as a warning before invoices go out, instead of
+  // silently producing a month of rent-only bills.
+  unreadMeterRooms: { roomCode: string; lastReadingDate: string | null }[];
 }> {
   const empty = {
     invoicesToInsert: [] as PendingInvoice[],
     maintenanceTicketsByStudent: new Map<number, number[]>(),
     depositIdsByAssignment: new Map<number, number[]>(),
+    unreadMeterRooms: [] as { roomCode: string; lastReadingDate: string | null }[],
   };
   const cutoffDate = input.cutoffDate;
   const invoiceFrequency = input.invoiceFrequency || "on-request";
@@ -2840,12 +2896,16 @@ async function computeCycleInvoices(
         room_code: string;
         monthly_rental: number | null;
         room_id: number;
+        unit_id: number;
+        unit_code: string;
         electricity_rate: number;
+        electricity_billing: string;
         check_in_date: string | null;
       }>(sql`
         SELECT a.id assignment_id, a.student_id, s.full_name student_name,
                u.unit_code || '-' || r.room_label room_code,
-               a.monthly_rental, r.id room_id, h.electricity_rate, a.check_in_date
+               a.monthly_rental, r.id room_id, u.id unit_id, u.unit_code,
+               h.electricity_rate, u.electricity_billing, a.check_in_date
         FROM accommodation_assignments a
         JOIN student_profiles s ON s.id=a.student_id
         JOIN bed_spaces b ON a.bed_space_id=b.id
@@ -2873,8 +2933,72 @@ async function computeCycleInvoices(
           const studentIds = [
             ...new Set(pending.map((row) => Number(row.student_id))),
           ];
+          // ---- Block lets ------------------------------------------------
+          // Some units are taken as a whole by one party (CENTEX / Weststar
+          // Aviation): one tenancy carries the unit's rent and the students
+          // living there are recorded at zero. Their electricity belongs to
+          // whoever took the unit, not to each student, so it is worked out
+          // per unit rather than per room. Decided here, before the meter
+          // readings are fetched, because those have to cover every room of
+          // such a unit — including rooms whose occupants are already billed,
+          // or which are empty.
+          // Units whose electricity does not come from room meters at all —
+          // the landlord is invoiced by TNB for the whole unit and charges
+          // that on directly. There is nothing to read and nothing for this
+          // cycle to compute, so they are held out of the usage maths and out
+          // of the "nobody read these meters" warning alike.
+          const tnbDirectUnitIds = new Set(
+            active
+              .filter((row) => row.electricity_billing === "tnb-direct")
+              .map((row) => Number(row.unit_id)),
+          );
+          const unitsWithZeroRent = new Set<number>();
+          const payersByUnit = new Map<
+            number,
+            { assignmentId: number; rent: number }[]
+          >();
+          for (const row of active) {
+            const unitId = Number(row.unit_id);
+            const rent = Number(row.monthly_rental ?? 0);
+            if (rent > 0) {
+              if (!payersByUnit.has(unitId)) payersByUnit.set(unitId, []);
+              payersByUnit
+                .get(unitId)!
+                .push({ assignmentId: Number(row.assignment_id), rent });
+            } else unitsWithZeroRent.add(unitId);
+          }
+          // Only a unit where somebody pays AND somebody pays nothing. A
+          // normal shared flat, where each occupant pays their own rent,
+          // keeps the per-room split.
+          const wholeUnitIds = new Set(
+            [...unitsWithZeroRent].filter(
+              (unitId) =>
+                (payersByUnit.get(unitId) || []).length > 0 &&
+                !tnbDirectUnitIds.has(unitId),
+            ),
+          );
+          const blockLetRooms = wholeUnitIds.size
+            ? await db.execute<{ room_id: number; unit_id: number; room_code: string }>(sql`
+                SELECT r.id room_id, u.id unit_id, u.unit_code || '-' || r.room_label room_code
+                FROM hostel_rooms r JOIN hostel_units u ON u.id = r.unit_id
+                WHERE u.id IN (${sql.join([...wholeUnitIds].map((id) => sql`${id}`), sql`, `)})
+                ORDER BY u.id, r.room_label
+              `)
+            : [];
+          const roomsByUnit = new Map<number, number[]>();
+          const roomLabelById = new Map<number, string>();
+          for (const row of blockLetRooms) {
+            const unitId = Number(row.unit_id);
+            if (!roomsByUnit.has(unitId)) roomsByUnit.set(unitId, []);
+            roomsByUnit.get(unitId)!.push(Number(row.room_id));
+            roomLabelById.set(Number(row.room_id), String(row.room_code));
+          }
+
           const roomIds = [
-            ...new Set(pending.map((row) => Number(row.room_id))),
+            ...new Set([
+              ...pending.map((row) => Number(row.room_id)),
+              ...blockLetRooms.map((row) => Number(row.room_id)),
+            ]),
           ];
           const idList = (ids: number[]) =>
             sql.join(
@@ -2927,12 +3051,14 @@ async function computeCycleInvoices(
                 room_id: number;
                 reading_value: number;
                 reading_date: string;
+                replaced_meter_final: number | null;
               }>(sql`
-                SELECT room_id, reading_value, reading_date FROM (
+                SELECT room_id, reading_value, reading_date, replaced_meter_final FROM (
                   SELECT
                     COALESCE(mr.room_id, bs.room_id) AS room_id,
                     mr.reading_value,
                     mr.reading_date,
+                    mr.replaced_meter_final,
                     ROW_NUMBER() OVER (
                       PARTITION BY COALESCE(mr.room_id, bs.room_id)
                       ORDER BY mr.reading_date DESC, mr.id DESC
@@ -2959,12 +3085,65 @@ async function computeCycleInvoices(
               )
                 staleMeterRooms.add(Number(row.room_id));
           const readingsByRoom = new Map<number, number[]>();
+          const lastReadingByRoom = new Map<number, string>();
+          // Rooms whose newest reading came off a meter that had just been
+          // swapped in, keyed to the outgoing meter's final reading.
+          const replacedFinalByRoom = new Map<number, number>();
           for (const row of readingRows) {
             const roomId = Number(row.room_id);
             const list = readingsByRoom.get(roomId) || [];
             list.push(Number(row.reading_value));
             readingsByRoom.set(roomId, list);
+            if (!lastReadingByRoom.has(roomId)) {
+              lastReadingByRoom.set(roomId, String(row.reading_date));
+              if (row.replaced_meter_final !== null)
+                replacedFinalByRoom.set(roomId, Number(row.replaced_meter_final));
+            }
           }
+
+          // How many kWh a room moved between its two newest readings. A
+          // swapped meter is the awkward case: the new one starts from zero,
+          // so the count appears to go backwards and the month is made of two
+          // halves — what the old meter still recorded before it came out,
+          // plus everything the new one has counted since.
+          const roomMovement = (roomId: number) => {
+            if (staleMeterRooms.has(roomId)) return 0;
+            const readings = readingsByRoom.get(roomId) || [];
+            if (readings.length < 2) return 0;
+            const [current, previous] = readings;
+            const replacedFinal = replacedFinalByRoom.get(roomId);
+            if (replacedFinal !== undefined)
+              return Math.max(0, replacedFinal - previous) + Math.max(0, current);
+            return current > previous ? current - previous : 0;
+          };
+          // Every occupied room that will bill no electricity, and why: the
+          // meter was never read, or it hasn't been read since the previous
+          // cycle already charged the movement up to that point.
+          const unreadMeterRooms = [
+            ...new Map(
+              active
+                .filter(
+                  (row) =>
+                    // A TNB-billed unit has no room meters; listing it here
+                    // would send staff to read something that isn't there.
+                    row.electricity_billing !== "tnb-direct" &&
+                    (staleMeterRooms.has(Number(row.room_id)) ||
+                      (readingsByRoom.get(Number(row.room_id)) || []).length < 2),
+                )
+                .map((row) => [
+                  String(row.room_code),
+                  {
+                    roomCode: String(row.room_code),
+                    lastReadingDate:
+                      lastReadingByRoom.get(Number(row.room_id)) || null,
+                  },
+                ]),
+            ).values(),
+          ].sort((left, right) =>
+            left.roomCode.localeCompare(right.roomCode, undefined, {
+              numeric: true,
+            }),
+          );
 
           type OccupantRow = {
             assignment_id: number;
@@ -3001,8 +3180,19 @@ async function computeCycleInvoices(
             if (readings.length < 2) return { usage: 0, amount: 0 };
             const current = readings[0];
             const previous = readings[1];
-            if (!(current > previous)) return { usage: 0, amount: 0 };
             const occupants = occupantsByRoom.get(roomId) || [];
+            // A swapped meter breaks the interval maths below: a tenant's
+            // check-in reading was taken off the old meter, so it cannot be
+            // compared with a number from the new one. The month's total is
+            // still known — it just cannot be apportioned by when people came
+            // and went, so the roommates share it equally.
+            if (replacedFinalByRoom.has(roomId)) {
+              const movement = roomMovement(roomId);
+              if (!movement || !occupants.length) return { usage: 0, amount: 0 };
+              const usage = movement / occupants.length;
+              return { usage, amount: Math.ceil(usage * electricityRate) };
+            }
+            if (!(current > previous)) return { usage: 0, amount: 0 };
             const intervals = occupants
               .map((occupant) => ({
                 id: Number(occupant.assignment_id),
@@ -3046,6 +3236,107 @@ async function computeCycleInvoices(
             return { usage, amount: Math.ceil(usage * electricityRate) };
           };
 
+          // The unit's whole electricity bill, kept per room so the payer's
+          // statement can show what each room used rather than one opaque
+          // figure.
+          const unitElectricity = new Map<
+            number,
+            { rooms: { roomId: number; usage: number; amount: number }[]; usage: number; amount: number }
+          >();
+          for (const unitId of wholeUnitIds) {
+            const rate = Number(
+              active.find((row) => Number(row.unit_id) === unitId)
+                ?.electricity_rate || 0,
+            );
+            const rooms: { roomId: number; usage: number; amount: number }[] = [];
+            let usage = 0;
+            for (const roomId of roomsByUnit.get(unitId) || []) {
+              const roomUsage = roomMovement(roomId);
+              if (!roomUsage) continue;
+              usage += roomUsage;
+              rooms.push({
+                roomId,
+                usage: roomUsage,
+                amount: Math.ceil(roomUsage * rate),
+              });
+            }
+            unitElectricity.set(unitId, {
+              rooms,
+              usage,
+              amount: Math.ceil(usage * rate),
+            });
+          }
+
+          // What one payer owes of their unit's electricity. Normally the
+          // only payer takes all of it; where a unit has more than one
+          // (SR3 has two separate contracts) it splits in proportion to the
+          // rent each carries.
+          type RoomUsage = { roomId: number; usage: number; amount: number };
+          const noElectricity = {
+            usage: 0,
+            amount: 0,
+            rooms: [] as RoomUsage[],
+            unitUsage: 0,
+            share: 0,
+          };
+          const wholeUnitElectricityFor = (unitId: number, assignmentId: number) => {
+            const total = unitElectricity.get(unitId);
+            if (!total) return noElectricity;
+            const payers = payersByUnit.get(unitId) || [];
+            const index = payers.findIndex(
+              (payer) => payer.assignmentId === assignmentId,
+            );
+            // A covered student pays nothing — the unit's bill is the
+            // payer's, not theirs.
+            if (index < 0) return noElectricity;
+            if (payers.length === 1)
+              return { ...total, unitUsage: total.usage, share: 1 };
+            // Rounded on the running total rather than each payer's own
+            // share, so the payers' amounts add back up to exactly the
+            // unit's bill instead of each rounding up and collecting a
+            // ringgit more between them than the unit was charged.
+            const rentTotal = payers.reduce((sum, payer) => sum + payer.rent, 0) || 1;
+            const upTo = (count: number) =>
+              Math.round(
+                (total.amount *
+                  payers
+                    .slice(0, count)
+                    .reduce((sum, payer) => sum + payer.rent, 0)) /
+                  rentTotal,
+              );
+            const share = payers[index].rent / rentTotal;
+            return {
+              usage: total.usage * share,
+              amount: upTo(index + 1) - upTo(index),
+              rooms: total.rooms,
+              unitUsage: total.usage,
+              share,
+            };
+          };
+
+          // A block let is billed one line for the whole unit, so the payer
+          // is told which rooms it covers and what each used — otherwise it
+          // is an unexplainable lump sum. Where two contracts share a unit
+          // the rooms listed are still the whole unit's, so the line says up
+          // front what portion of them this payer carries.
+          const describeWholeUnitElectricity = (
+            unitCode: string,
+            detail: { rooms: RoomUsage[]; usage: number; unitUsage: number; share: number },
+          ) => {
+            const rooms =
+              detail.rooms
+                .map(
+                  (room) =>
+                    `${roomLabelById.get(room.roomId) || `Room ${room.roomId}`} ${room.usage.toFixed(2)} kWh`,
+                )
+                .join(", ") || "no room readings";
+            const portion =
+              detail.share < 1
+                ? `, ${Math.round(detail.share * 100)}% share of the unit's ${detail.unitUsage.toFixed(2)} kWh`
+                : "";
+            return `Electricity — whole unit ${unitCode} (${detail.usage.toFixed(2)} kWh${portion}): ${rooms}`;
+          };
+
           // Monthly rentals bill every cycle; annual ones only bill the cycle
           // whose month matches the anniversary of their start date.
           const parkingRows = await db.execute<{
@@ -3076,12 +3367,25 @@ async function computeCycleInvoices(
             amount: number;
             ticket_ids: number[];
           }>(sql`
-            SELECT student_id, COALESCE(SUM(student_charge),0) amount,
-                   ARRAY_AGG(id) ticket_ids
-            FROM maintenance_tickets
-            WHERE student_id IN (${idList(studentIds)}) AND student_charge>0
-              AND status IN ('completed','closed')
-              AND billed_cycle_id IS NULL
+            SELECT student_id, COALESCE(SUM(amount),0) amount, ARRAY_AGG(id) ticket_ids
+            FROM (
+              SELECT id,
+                     COALESCE(charged_student_id, student_id) AS student_id,
+                     -- A student-borne ticket carries its amount in
+                     -- actual_cost now that the separate penalty field is
+                     -- gone; student_charge is still read first so tickets
+                     -- raised under the old two-figure form bill unchanged.
+                     CASE
+                       WHEN cost_responsibility = 'student'
+                         THEN COALESCE(NULLIF(student_charge, 0), actual_cost, 0)
+                       ELSE COALESCE(student_charge, 0)
+                     END AS amount
+              FROM maintenance_tickets
+              WHERE COALESCE(charged_student_id, student_id) IN (${idList(studentIds)})
+                AND status IN ('completed','closed')
+                AND billed_cycle_id IS NULL
+            ) chargeable
+            WHERE amount > 0
             GROUP BY student_id
           `);
           const maintenanceByStudent = new Map(
@@ -3170,11 +3474,19 @@ async function computeCycleInvoices(
                   return 0;
                 })();
 
-            const electricity = electricityShareFromCache(
-              assignmentId,
-              roomId,
-              electricityRate,
-            );
+            // In a block let the whole unit's usage lands on the payer and
+            // the covered students get nothing; everywhere else it stays the
+            // per-room split between the people who actually share the room.
+            const unitId = Number(assignment.unit_id);
+            const wholeUnit = wholeUnitIds.has(unitId)
+              ? wholeUnitElectricityFor(unitId, assignmentId)
+              : null;
+            // TNB bills this unit directly, so the cycle raises no
+            // electricity line at all — the charge is passed on outside it.
+            const electricity = tnbDirectUnitIds.has(unitId)
+              ? { usage: 0, amount: 0 }
+              : (wholeUnit ??
+                electricityShareFromCache(assignmentId, roomId, electricityRate));
             const parkingAmount = Number(
               parkingByStudent.get(studentId) || 0,
             );
@@ -3217,7 +3529,12 @@ async function computeCycleInvoices(
                 ["room-rental", "Room rental", 1, rent, rent],
                 [
                   "electricity",
-                  `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
+                  wholeUnit
+                    ? describeWholeUnitElectricity(
+                        String(assignment.unit_code),
+                        wholeUnit,
+                      )
+                    : `Electricity usage (${electricity.usage.toFixed(2)} kWh)`,
                   electricity.usage,
                   electricityRate,
                   electricity.amount,
@@ -3258,7 +3575,12 @@ async function computeCycleInvoices(
             // invoices and gives Finance 139 rows to chase for nothing — the
             // tenancy needs a rent set, which is a data problem, not a bill.
             .filter((invoice) => invoice.items.length > 0);
-        return { invoicesToInsert, maintenanceTicketsByStudent, depositIdsByAssignment };
+        return {
+          invoicesToInsert,
+          maintenanceTicketsByStudent,
+          depositIdsByAssignment,
+          unreadMeterRooms,
+        };
       }
       return empty;
     }
@@ -3404,7 +3726,11 @@ async function previewBillingCycle(
   },
 ) {
   const cycleId = await ensureBillingCycle(db, input);
-  const { invoicesToInsert } = await computeCycleInvoices(db, cycleId, input);
+  const { invoicesToInsert, unreadMeterRooms } = await computeCycleInvoices(
+    db,
+    cycleId,
+    input,
+  );
   return {
     cycleId,
     periodLabel: input.periodLabel,
@@ -3426,6 +3752,27 @@ async function previewBillingCycle(
     })),
     invoiceCount: invoicesToInsert.length,
     totalBilled: invoicesToInsert.reduce((sum, row) => sum + row.total, 0),
+    electricityBilled: invoicesToInsert.reduce(
+      (sum, row) =>
+        sum +
+        row.items
+          .filter(([itemType]) => itemType === "electricity")
+          .reduce((lineSum, item) => lineSum + Number(item[4] || 0), 0),
+      0,
+    ),
+    // Occupied rooms billing no electricity this month — almost always a
+    // meter round that hasn't been keyed in yet. Capped because the list is
+    // a prompt to go and read the meters, not a report.
+    unreadMeterRooms: unreadMeterRooms.slice(0, 40),
+    unreadMeterRoomCount: unreadMeterRooms.length,
+    // A room that has never been read is not the same problem as one that
+    // simply wasn't read this round. Electricity is the movement between two
+    // readings, so the first one taken in a never-read room is only a
+    // baseline and still bills nothing — it takes two rounds before that
+    // room ever charges, and until then its usage is not being deferred,
+    // it is being lost.
+    neverReadRoomCount: unreadMeterRooms.filter((room) => !room.lastReadingDate)
+      .length,
   };
 }
 
@@ -3467,7 +3814,7 @@ export async function POST(request: Request) {
       const status = asText(body.status);
       if (
         !body.bedId ||
-        !["occupied", "vacant", "special-use"].includes(status)
+        !["occupied", "vacant", "reserved", "special-use"].includes(status)
       )
         throw new Error("A valid room code and status are required");
       await db
@@ -4284,12 +4631,102 @@ export async function POST(request: Request) {
     } else if (action === "reservation-delete") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
+      // Converting a reservation creates a student, a tenancy, a held room
+      // and a move-in invoice. Deleting only the sales-side rows left all of
+      // that behind — the room stayed 'reserved' forever with nothing left
+      // pointing at it, because source_reservation_id is a plain column with
+      // no cascade. Everything the conversion made is undone here too.
+      const tenancy = (
+        await db.execute<{
+          id: number;
+          student_id: number;
+          bed_space_id: number;
+          checked_in_at: string | null;
+        }>(sql`
+          SELECT id, student_id, bed_space_id, checked_in_at
+          FROM accommodation_assignments
+          WHERE source_reservation_id = ${reservationId}
+        `)
+      )[0];
+
+      if (tenancy) {
+        // Past this point the record stops being a booking and becomes a
+        // resident's history, which a delete must not quietly erase.
+        if (tenancy.checked_in_at)
+          throw new Error(
+            "This student has already checked in — move them out instead of deleting the booking",
+          );
+        const settled = (
+          await db.execute<{ paid: number; payments: number }>(sql`
+            SELECT COALESCE(SUM(i.amount_paid), 0) paid,
+                   (SELECT COUNT(*)::int FROM billing_payment_records p
+                     WHERE p.invoice_id IN (SELECT id FROM billing_invoices WHERE student_id = ${tenancy.student_id})) payments
+            FROM billing_invoices i WHERE i.student_id = ${tenancy.student_id}
+          `)
+        )[0];
+        if (Number(settled?.paid || 0) > 0 || Number(settled?.payments || 0) > 0)
+          throw new Error(
+            "Money has already been collected against this tenancy — cancel it or move the student out instead of deleting",
+          );
+        const billed = (
+          await db.execute<{ count: number }>(sql`
+            SELECT COUNT(*)::int count FROM billing_invoices
+            WHERE student_id = ${tenancy.student_id} AND cycle_id IS NOT NULL
+          `)
+        )[0];
+        if (Number(billed?.count || 0) > 0)
+          throw new Error(
+            "This tenancy already appears on a monthly bill — delete that invoice first, or move the student out instead",
+          );
+      }
+
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`DELETE FROM reservation_payments WHERE reservation_id = ${reservationId}`,
-        );
+        if (tenancy) {
+          const invoiceIds = (
+            await tx.execute<{ id: number }>(
+              sql`SELECT id FROM billing_invoices WHERE student_id = ${tenancy.student_id}`,
+            )
+          ).map((row) => Number(row.id));
+          if (invoiceIds.length) {
+            await tx.execute(
+              sql`DELETE FROM billing_items WHERE invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
+            );
+            await tx.execute(
+              sql`DELETE FROM billing_invoices WHERE id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
+            );
+          }
+          await tx.execute(
+            sql`DELETE FROM deposit_adjustments WHERE assignment_id = ${tenancy.id}`,
+          );
+          await tx.execute(
+            sql`DELETE FROM student_rate_changes WHERE assignment_id = ${tenancy.id}`,
+          );
+          await tx.execute(
+            sql`DELETE FROM accommodation_assignments WHERE source_reservation_id = ${reservationId}`,
+          );
+          // The room goes back on sale. 'vacant' rather than whatever it was
+          // before: a booking is the only thing that had been holding it.
+          await tx.execute(
+            sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${nowIso()} WHERE id = ${tenancy.bed_space_id}`,
+          );
+          // Only a profile this conversion created goes with it — one that
+          // existed beforehand, or that has any other tenancy, stays.
+          await tx.execute(sql`
+            DELETE FROM student_profiles
+            WHERE id = ${tenancy.student_id}
+              AND source_key = ${`reservation:${reservationId}`}
+              AND NOT EXISTS (SELECT 1 FROM accommodation_assignments a WHERE a.student_id = ${tenancy.student_id})
+          `);
+        }
+        // Charges first: reservation_charges.payment_id points AT a payment,
+        // so removing the payments first violates that key and the whole
+        // delete rolls back. Any reservation with a recorded payment was
+        // therefore impossible to delete.
         await tx.execute(
           sql`DELETE FROM reservation_charges WHERE reservation_id = ${reservationId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM reservation_payments WHERE reservation_id = ${reservationId}`,
         );
         await tx.execute(
           sql`DELETE FROM reservations WHERE id = ${reservationId}`,
@@ -4298,14 +4735,52 @@ export async function POST(request: Request) {
     } else if (action === "reservation-cancel") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
-      await db
-        .update(reservations)
-        .set({
-          status: "cancelled",
-          cancelledAt: nowIso(),
-          inventoryCommitted: false,
-        })
-        .where(eq(reservations.id, reservationId));
+      // Cancelling a booking that had already converted has to give the room
+      // back — the confirmation says so, but only the reservation's own
+      // status was ever changed, leaving the room held and a tenancy running
+      // for a booking that no longer exists. Unlike delete, the reservation
+      // and its payment history stay: that is the whole point of cancelling
+      // rather than deleting.
+      const converted = (
+        await db.execute<{
+          id: number;
+          student_id: number;
+          bed_space_id: number;
+          checked_in_at: string | null;
+        }>(sql`
+          SELECT id, student_id, bed_space_id, checked_in_at
+          FROM accommodation_assignments
+          WHERE source_reservation_id = ${reservationId} AND status = 'active'
+        `)
+      )[0];
+      if (converted?.checked_in_at)
+        throw new Error(
+          "This student has already checked in — move them out instead of cancelling the booking",
+        );
+      await db.transaction(async (tx) => {
+        if (converted) {
+          await tx.execute(sql`
+            UPDATE accommodation_assignments
+            SET status = 'ended', check_out_date = COALESCE(check_out_date, ${todayInKL()})
+            WHERE id = ${converted.id}
+          `);
+          await tx.execute(
+            sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${nowIso()} WHERE id = ${converted.bed_space_id}`,
+          );
+          // Otherwise the profile sits in Active students with no room —
+          // the contradictory state the tenant list has to flag separately.
+          await tx.execute(sql`
+            UPDATE student_profiles SET status = 'moved-out'
+            WHERE id = ${converted.student_id}
+              AND source_key = ${`reservation:${reservationId}`}
+          `);
+        }
+        await tx.execute(sql`
+          UPDATE reservations
+          SET status = 'cancelled', cancelled_at = ${nowIso()}, inventory_committed = false
+          WHERE id = ${reservationId}
+        `);
+      });
     } else if (action === "reservation-convert") {
       const reservationId = asNumber(body.reservationId);
       const reservation = (
@@ -4400,8 +4875,12 @@ export async function POST(request: Request) {
         `);
         const now = nowIso();
         await db.transaction(async (tx) => {
+          // 'reserved', not 'occupied': the booking now holds this bed so
+          // nobody else can be sold it, but the student hasn't physically
+          // moved in — that's the separate check-in step, which is what
+          // flips it to 'occupied'.
           await tx.execute(
-            sql`UPDATE bed_spaces SET status = 'occupied', updated_at = ${now} WHERE id = ${bedId}`,
+            sql`UPDATE bed_spaces SET status = 'reserved', updated_at = ${now} WHERE id = ${bedId}`,
           );
           await tx.execute(
             sql`UPDATE reservations SET assigned_bed_space_id = ${bedId}, status = 'converted', converted_at = ${now} WHERE id = ${reservationId}`,
@@ -4441,8 +4920,12 @@ export async function POST(request: Request) {
       if (reservation.status !== "converted")
         throw new Error("Only converted reservations can change rooms");
       const assignment = (
-        await db.execute<{ id: number; bed_space_id: number }>(
-          sql`SELECT id, bed_space_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active'`,
+        await db.execute<{
+          id: number;
+          bed_space_id: number;
+          checked_in_at: string | null;
+        }>(
+          sql`SELECT id, bed_space_id, checked_in_at FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active'`,
         )
       )[0];
       if (!assignment)
@@ -4483,12 +4966,18 @@ export async function POST(request: Request) {
             charge.chargeType,
             (paidByType.get(charge.chargeType) || 0) + Number(charge.amount || 0),
           );
+      // Changing room does not move the student in. If they had not arrived
+      // yet the new room is still only being held for them, so it takes the
+      // same 'reserved' status the old one had — marking it 'occupied' both
+      // overstated occupancy and made the Check in action disappear, since
+      // that is what a held-but-empty room is recognised by.
+      const newBedStatus = assignment.checked_in_at ? "occupied" : "reserved";
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${now} WHERE id = ${oldBedId}`,
         );
         await tx.execute(
-          sql`UPDATE bed_spaces SET status = 'occupied', updated_at = ${now} WHERE id = ${newBedId}`,
+          sql`UPDATE bed_spaces SET status = ${newBedStatus}, updated_at = ${now} WHERE id = ${newBedId}`,
         );
         await tx.execute(
           sql`UPDATE accommodation_assignments SET bed_space_id = ${newBedId}, monthly_rental = ${monthlyRental}, security_deposit = ${securityDeposit}, access_card_deposit = ${accessCardDeposit}, expected_return_date = ${asNullableText(body.expectedReturnDate)} WHERE id = ${assignment.id}`,
@@ -4641,6 +5130,70 @@ export async function POST(request: Request) {
         .update(accommodationAssignments)
         .set({ expectedReturnDate: null })
         .where(eq(accommodationAssignments.id, assignmentId));
+    } else if (action === "assignment-check-in") {
+      // The student has physically arrived and taken the keys. Until now
+      // their bed sat at 'reserved' — paid for and unsellable, but empty,
+      // so Maintenance could still clean and inspect it. This flips it to
+      // 'occupied' and records what actually happened on arrival day.
+      const assignmentId = asNumber(body.assignmentId);
+      if (!assignmentId) throw new Error("Assignment is required");
+      const assignment = (
+        await db
+          .select()
+          .from(accommodationAssignments)
+          .where(eq(accommodationAssignments.id, assignmentId))
+      )[0];
+      if (!assignment) throw new Error("Assignment not found");
+      if (assignment.checkedInAt)
+        throw new Error("This student has already been checked in");
+      if (assignment.status !== "active")
+        throw new Error("Only an active tenancy can be checked in");
+      // Enforced here, not just in the form: without an opening reading,
+      // billing has no baseline and charges this tenant from the room's
+      // previous reading — i.e. for the last occupant's usage, before they
+      // ever arrived. A check-in that skipped it was the one way to create
+      // that charge silently.
+      const openingMeter = asNullableNumber(body.checkInMeter);
+      if (openingMeter === null)
+        throw new Error(
+          "An opening meter reading is required — it is the baseline utility billing charges from",
+        );
+      if (openingMeter < 0)
+        throw new Error("The opening meter reading cannot be negative");
+      const arrivedOn = asText(
+        body.checkInDate,
+        new Date().toISOString().slice(0, 10),
+      );
+      const now = nowIso();
+      await db.transaction(async (tx) => {
+        // check_in_date until now held the *planned* move-in date carried
+        // over from the booking; overwrite it with the real arrival date,
+        // which is what billing and the tenancy record should reflect.
+        await tx.execute(sql`
+          UPDATE accommodation_assignments
+          SET checked_in_at = ${now},
+              check_in_date = ${arrivedOn},
+              check_in_meter = ${openingMeter},
+              remarks = CASE WHEN ${asText(body.remarks)} = '' THEN remarks
+                             ELSE TRIM(BOTH E'\n' FROM remarks || E'\n' || ${asText(body.remarks)}) END
+          WHERE id = ${assignmentId}
+        `);
+        await tx.execute(
+          sql`UPDATE bed_spaces SET status = 'occupied', updated_at = ${now} WHERE id = ${assignment.bedSpaceId}`,
+        );
+      });
+      // The opening reading doubles as this room's own recorded reading, so
+      // the meter history and utility billing both see the same number.
+      const bedRoom = (
+        await db.execute<{ room_id: number }>(
+          sql`SELECT room_id FROM bed_spaces WHERE id = ${assignment.bedSpaceId}`,
+        )
+      )[0];
+      if (bedRoom)
+        await db.execute(sql`
+          INSERT INTO meter_readings (bed_space_id, room_id, reading_date, reading_value, reading_type, submitted_by, notes)
+          VALUES (${assignment.bedSpaceId}, ${bedRoom.room_id}, ${arrivedOn}, ${openingMeter}, 'check-in', ${currentUser.displayName}, 'Opening reading taken at check-in')
+        `);
     } else if (action === "student-create") {
       if (!asText(body.fullName)) throw new Error("Full name is required");
       const result = (
@@ -4831,6 +5384,13 @@ export async function POST(request: Request) {
       if (!old) throw new Error("Current assignment not found");
       const key = `move:${studentId}:${Date.now()}`;
       const changeNow = nowIso();
+      // A move does not itself constitute arriving. Someone who has already
+      // checked in stays checked in — the timestamp follows them onto the
+      // replacement assignment, so they keep counting as a resident and stay
+      // out of the awaiting-arrival list. Someone who had not arrived yet
+      // still has not: the new room is held ('reserved'), not occupied, and
+      // the Check in action stays available on it.
+      const alreadyArrived = Boolean(old.checkedInAt);
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`UPDATE accommodation_assignments SET status='moved', check_out_date=${asText(body.effectiveDate)}, check_out_meter=${asNullableNumber(body.checkOutMeter)} WHERE id=${oldAssignmentId}`,
@@ -4839,11 +5399,11 @@ export async function POST(request: Request) {
           sql`UPDATE bed_spaces SET status='vacant', updated_at=${changeNow} WHERE id=${old.bedSpaceId}`,
         );
         await tx.execute(sql`
-          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status, source_reservation_id)
-          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active', ${old.sourceReservationId})
+          INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status, source_reservation_id, checked_in_at)
+          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active', ${old.sourceReservationId}, ${old.checkedInAt})
         `);
         await tx.execute(
-          sql`UPDATE bed_spaces SET status='occupied', updated_at=${changeNow} WHERE id=${bedId}`,
+          sql`UPDATE bed_spaces SET status=${alreadyArrived ? "occupied" : "reserved"}, updated_at=${changeNow} WHERE id=${bedId}`,
         );
       });
       // The new room's deposit replaces the old one, but the money already
@@ -5052,6 +5612,9 @@ export async function POST(request: Request) {
           assignedTo: asText(body.assignedTo),
           costResponsibility: asText(body.costResponsibility, "management"),
           estimatedCost: asNullableNumber(body.estimatedCost),
+          // Fixed-price requests (the door-unlocking fee) arrive already
+          // priced; everything else is costed later from the ticket drawer.
+          actualCost: asNullableNumber(body.actualCost),
           studentCharge: asNullableNumber(body.studentCharge),
         })
         .returning({ id: maintenanceTickets.id });
@@ -5064,6 +5627,7 @@ export async function POST(request: Request) {
         statusAfter: "submitted",
       });
     } else if (action === "ticket-message") {
+      let chargedStudentUpdate: number | null = null;
       const ticketId = asNumber(body.ticketId);
       if (!ticketId) throw new Error("Ticket is required");
       if (currentUser.roleKey === "tenant") {
@@ -5080,6 +5644,45 @@ export async function POST(request: Request) {
       }
       const status =
         currentUser.roleKey === "tenant" ? "" : asText(body.statusAfter);
+      if (currentUser.roleKey !== "tenant") {
+        const responsibility = asText(body.costResponsibility, "management");
+        const cost = asNullableNumber(body.actualCost);
+        // A management-borne repair is company money going out, so the
+        // receipt is the proof it was really spent. Enforced only at the
+        // point the ticket is finished — blocking every interim update
+        // would stop staff recording progress before the invoice arrives.
+        if (
+          ["completed", "closed"].includes(status) &&
+          responsibility === "management" &&
+          cost !== null &&
+          cost > 0
+        ) {
+          const receipts = await db.execute<{ count: number }>(sql`
+            SELECT COUNT(*)::int count FROM stored_attachments
+            WHERE context_type = 'ticket-receipt' AND record_id = ${ticketId}
+          `);
+          if (!Number(receipts[0]?.count || 0))
+            throw new Error(
+              "Attach the receipt before completing a management-paid repair",
+            );
+        }
+        // Only meaningful when the student is the one paying — clearing it
+        // otherwise stops a stale nomination quietly billing someone after
+        // responsibility moves to the owner or management.
+        if (responsibility === "student") {
+          const nominated = asNullableNumber(body.chargedStudentId);
+          if (nominated !== null) {
+            const exists = await db
+              .select({ id: studentProfiles.id })
+              .from(studentProfiles)
+              .where(eq(studentProfiles.id, nominated));
+            if (!exists.length) throw new Error("Student not found");
+          }
+          chargedStudentUpdate = nominated;
+        } else {
+          chargedStudentUpdate = null;
+        }
+      }
       const message =
         asText(body.message) ||
         (status
@@ -5104,7 +5707,13 @@ export async function POST(request: Request) {
           "management",
         );
         changes.actualCost = asNullableNumber(body.actualCost);
-        changes.studentCharge = asNullableNumber(body.studentCharge);
+        // The update form no longer carries a separate penalty figure — a
+        // student-borne ticket is charged its actual cost. Only written when
+        // the caller actually sends the field, so tickets created under the
+        // old two-figure form keep the amount they were given.
+        if (body.studentCharge !== undefined)
+          changes.studentCharge = asNullableNumber(body.studentCharge);
+        changes.chargedStudentId = chargedStudentUpdate;
       }
       if (status) changes.status = status;
       if (["attended", "waiting-parts", "in-progress"].includes(status))
@@ -5115,6 +5724,36 @@ export async function POST(request: Request) {
         .update(maintenanceTickets)
         .set(changes)
         .where(eq(maintenanceTickets.id, ticketId));
+    } else if (action === "ticket-delete") {
+      const ticketId = asNumber(body.ticketId);
+      if (!ticketId) throw new Error("Ticket is required");
+      const doomed = (
+        await db
+          .select()
+          .from(maintenanceTickets)
+          .where(eq(maintenanceTickets.id, ticketId))
+      )[0];
+      if (!doomed) throw new Error("Ticket not found");
+      // A billed ticket is the justification for a charge already sitting on
+      // a student's invoice. Deleting it would leave that money on the bill
+      // with nothing behind it, so the invoice has to be dealt with first.
+      if (doomed.billedCycleId)
+        throw new Error(
+          "This ticket has already been billed to a student — delete or adjust that invoice first",
+        );
+      await db.transaction(async (tx) => {
+        // Costs recorded against the ticket are their own financial records
+        // and outlive it; only the link is dropped.
+        await tx.execute(
+          sql`UPDATE general_costs SET ticket_id = NULL WHERE ticket_id = ${ticketId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM ticket_messages WHERE ticket_id = ${ticketId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM maintenance_tickets WHERE id = ${ticketId}`,
+        );
+      });
     } else if (action === "ticket-category-save") {
       if (!asText(body.category) || !asText(body.subcategory))
         throw new Error("Category and subcategory are required");
@@ -5181,6 +5820,10 @@ export async function POST(request: Request) {
         readingDate: asText(body.readingDate),
         readingValue: asNumber(body.readingValue),
         readingType: asText(body.readingType, "monthly"),
+        // Only carried when the form's "meter was replaced" switch is on —
+        // see the column's comment in db/schema.ts for what it does to the
+        // month's usage.
+        replacedMeterFinal: asNullableNumber(body.replacedMeterFinal),
         submittedBy: asText(body.submittedBy, "Maintenance Team"),
         notes: asText(body.notes),
       });
@@ -5340,6 +5983,9 @@ export async function POST(request: Request) {
           readingDate: asText(body.readingDate),
           readingValue: asNumber(body.readingValue),
           readingType: asText(body.readingType, "monthly"),
+          // Cleared when the "meter was replaced" switch is turned back off,
+          // so an edit can undo a replacement recorded by mistake.
+          replacedMeterFinal: asNullableNumber(body.replacedMeterFinal),
           notes: asText(body.notes),
           submittedBy: currentUser.displayName,
         })
@@ -5720,3 +6366,8 @@ export async function POST(request: Request) {
     return Response.json({ error: message }, { status: 400 });
   }
 }
+
+
+
+
+

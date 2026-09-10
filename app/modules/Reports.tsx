@@ -10,6 +10,7 @@ import {
   titleCase,
 } from "./shared";
 import type { Data, Row } from "./shared";
+import { wholeUnitElectricity } from "./wholeUnitElectricity";
 
 export function ReportsModule({ data }: { data: Data }) {
   const [selectedReport, setSelectedReport] = useState<number | null>(null);
@@ -26,6 +27,13 @@ export function ReportsModule({ data }: { data: Data }) {
     (sum, i) => sum + Number(i.totalAmount) - Number(i.amountPaid),
     0,
   );
+
+  // Units let as a whole to one payer (CENTEX / Weststar Aviation): the
+  // whole unit's electricity is theirs, and they need it broken down by
+  // room. See app/modules/wholeUnitElectricity.ts.
+  const blockLets = wholeUnitElectricity(data, reportTo);
+  const blockLetTotal = blockLets.reduce((sum, unit) => sum + unit.amount, 0);
+
   const reports = [
     {
       key: "tickets",
@@ -87,6 +95,12 @@ export function ReportsModule({ data }: { data: Data }) {
       value: `${data.studentRateChanges.length} changes`,
       note: "Effective-dated rental and deposit changes per student",
     },
+    {
+      key: "whole-unit-electricity",
+      name: "Whole-unit electricity",
+      value: money(blockLetTotal, true),
+      note: `${blockLets.length} units let as a whole · room-by-room usage for the paying party`,
+    },
   ];
   const reportRows = (index: number | null): Row[] => {
     if (index === null) return [];
@@ -117,10 +131,12 @@ export function ReportsModule({ data }: { data: Data }) {
     if (index === 4) return data.parkingRentals;
     if (index === 5) return data.students;
     if (index === 6)
-      return data.invoices.map((invoice) => ({
-        ...invoice,
-        outstanding: Number(invoice.totalAmount) - Number(invoice.amountPaid),
-      }));
+      return data.invoices
+        .filter((invoice) => invoice.status !== "paid")
+        .map((invoice) => ({
+          ...invoice,
+          outstanding: Number(invoice.totalAmount) - Number(invoice.amountPaid),
+        }));
     if (index === 7)
       return [
         ...data.generalCosts,
@@ -140,12 +156,31 @@ export function ReportsModule({ data }: { data: Data }) {
           })),
       ] as Row[];
     if (index === 8) return data.studentRateChanges;
+    if (index === 9)
+      return blockLets.flatMap((unit) =>
+        unit.rooms.map((room) => ({
+          id: `whole-unit-${unit.unitId}-${room.roomId}`,
+          unitCode: unit.unitCode,
+          roomCode: room.roomCode,
+          billedTo: unit.billedTo,
+          previousReading: room.previousReading ?? "—",
+          currentReading: room.currentReading ?? "—",
+          usageKwh: room.usage,
+          rate: unit.rate,
+          amount: room.amount,
+          readingDate: room.currentDate,
+          previousDate: room.previousDate,
+          meterSerial: room.meterSerial,
+          hostelName: unit.hostelName,
+          hostelId: unit.hostelId,
+        })),
+      ) as Row[];
     return [];
   };
   const detailRows = reportRows(selectedReport).filter((row) => {
     const search = reportQuery.trim().toLowerCase();
     const text =
-      `${row.studentName || row.fullName || row.tenantName || ""} ${row.hostelName || ""} ${row.roomCode || row.unitCode || ""} ${row.description || row.subject || ""}`.toLowerCase();
+      `${row.studentName || row.fullName || row.tenantName || row.billedTo || ""} ${row.hostelName || ""} ${row.roomCode || row.unitCode || ""} ${row.description || row.subject || ""}`.toLowerCase();
     const hostelMatch =
       reportHostel === "all" ||
       String(row.hostelId || "") === reportHostel ||
@@ -173,6 +208,13 @@ export function ReportsModule({ data }: { data: Data }) {
       statusMatch
     );
   });
+  // The per-unit table follows the same filters as the room table below it,
+  // but keeps each unit's true total — a search that hides some of a unit's
+  // rooms must not make the unit look cheaper than it is billed.
+  const visibleUnitCodes = new Set(detailRows.map((row) => row.unitCode));
+  const visibleBlockLets = blockLets.filter((unit) =>
+    visibleUnitCodes.has(unit.unitCode),
+  );
   const download = (name: string, rows: Row[]) => {
     if (!rows.length) return;
     const keys = Object.keys(rows[0]).filter(
@@ -248,6 +290,32 @@ export function ReportsModule({ data }: { data: Data }) {
               <Stat
                 value={data.reservations.filter(commitsInventory).length}
                 label="Paid reservations"
+              />
+              <Stat
+                value={
+                  data.bedSpaces.filter((bed) => bed.status === "reserved")
+                    .length
+                }
+                label="Awaiting check-in"
+              />
+            </section>
+          )}
+
+          {selectedReport === 9 && (
+            <section className="module-metrics report-modal-metrics">
+              <Stat value={visibleBlockLets.length} label="Units let as a whole" />
+              <Stat
+                value={`${visibleBlockLets
+                  .reduce((sum, unit) => sum + unit.usage, 0)
+                  .toLocaleString()} kWh`}
+                label="Usage this round"
+              />
+              <Stat
+                value={money(
+                  visibleBlockLets.reduce((sum, unit) => sum + unit.amount, 0),
+                  true,
+                )}
+                label="Charged to the payer"
               />
             </section>
           )}
@@ -328,6 +396,87 @@ export function ReportsModule({ data }: { data: Data }) {
               Export visible CSV
             </button>
           </div>
+
+          {selectedReport === 9 && (
+            <div className="whole-unit-summary">
+              <div className="section-heading whole-unit-heading">
+                <div>
+                  <small>PER UNIT</small>
+                  <h3>What each unit costs</h3>
+                  <p>
+                    The figure the paying party is invoiced. Every room of the
+                    unit counts towards it, including the empty ones. Usage is
+                    the movement between a room&apos;s last two readings — set
+                    a <b>To</b> date to run the report for an earlier round.
+                  </p>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Unit</th>
+                      <th>Hostel</th>
+                      <th>Billed to</th>
+                      <th>Students covered</th>
+                      <th>Rooms read</th>
+                      <th>Usage</th>
+                      <th>Rate</th>
+                      <th>Unit total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleBlockLets.map((unit) => (
+                      <tr key={unit.unitId}>
+                        <td>
+                          <strong>{unit.unitCode}</strong>
+                        </td>
+                        <td>{unit.hostelName}</td>
+                        <td>{unit.billedTo}</td>
+                        <td>{unit.covered}</td>
+                        <td>
+                          {unit.tnbDirect
+                            ? "No room meters"
+                            : `${unit.roomsRead} / ${unit.rooms.length}`}
+                        </td>
+                        <td>
+                          {unit.tnbDirect
+                            ? "—"
+                            : `${unit.usage.toLocaleString()} kWh`}
+                        </td>
+                        <td>{unit.tnbDirect ? "—" : unit.rate.toFixed(3)}</td>
+                        <td>
+                          {unit.tnbDirect ? (
+                            <span className="tnb-direct-note">
+                              Billed straight from the TNB bill
+                            </span>
+                          ) : (
+                            <strong>{money(unit.amount, true)}</strong>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!visibleBlockLets.length && (
+                  <Empty
+                    title="No whole-unit lettings match"
+                    text="Change the report filters to view records."
+                  />
+                )}
+              </div>
+              <div className="section-heading whole-unit-heading">
+                <div>
+                  <small>PER ROOM</small>
+                  <h3>Room-by-room breakdown</h3>
+                  <p>
+                    Each room&apos;s share of its unit&apos;s bill. The rooms of
+                    a unit add up to exactly that unit&apos;s total above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="table-wrap report-detail-table">
             <table>

@@ -177,6 +177,15 @@ export function FinanceModule({
     dueDate: string;
     invoiceCount: number;
     totalBilled: number;
+    electricityBilled: number;
+    // Occupied rooms billing no electricity because their meter hasn't been
+    // read since the last cycle. The list is capped server-side, so the
+    // count is what to trust for "how many".
+    unreadMeterRoomCount: number;
+    // Of those, the ones with no reading at all — they need two rounds
+    // before they can ever charge, so they are the urgent half.
+    neverReadRoomCount: number;
+    unreadMeterRooms: { roomCode: string; lastReadingDate: string | null }[];
     rows: {
       studentId: number;
       studentName: string;
@@ -197,6 +206,33 @@ export function FinanceModule({
     string
   > | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // The house rule, in one place: a month is cut off on the same day of that
+  // month, and its rent falls due on a fixed day of the NEXT month. Typing
+  // all three dates by hand is how cycle 2026-10 ended up cut off on
+  // 2026-09-28 — four days after September's — so the month now drives the
+  // other two and staff only correct them when a month genuinely differs.
+  const cycleDatesFor = (period: string) => {
+    if (!/^\d{4}-\d{2}$/.test(period)) return { cutoffDate: "", dueDate: "" };
+    const [year, month] = period.split("-").map(Number);
+    const day = (value: number) =>
+      String(Math.min(28, Math.max(1, Number(value) || 1))).padStart(2, "0");
+    const next = new Date(Date.UTC(year, month, 1));
+    return {
+      cutoffDate: `${period}-${day(data.settings.autoBillingCutoffDay)}`,
+      dueDate: `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${day(data.settings.autoBillingDueDay)}`,
+    };
+  };
+  const [cycleMonth, setCycleMonth] = useState("");
+  const [cycleCutoff, setCycleCutoff] = useState("");
+  const [cycleDue, setCycleDue] = useState("");
+  const openCycleModal = () => {
+    const period = new Date().toISOString().slice(0, 7);
+    const dates = cycleDatesFor(period);
+    setCycleMonth(period);
+    setCycleCutoff(dates.cutoffDate);
+    setCycleDue(dates.dueDate);
+    setModal("cycle");
+  };
   const [financeTab, setFinanceTab] = useState<
     "invoices" | "deposits" | "adjustments" | "maintenance" | "parking"
   >("invoices");
@@ -412,10 +448,7 @@ export function FinanceModule({
             >
               Automatic billing
             </button>
-            <button
-              className="v2-btn-primary"
-              onClick={() => setModal("cycle")}
-            >
+            <button className="v2-btn-primary" onClick={openCycleModal}>
               + Prepare billing month
             </button>
           </div>
@@ -1407,7 +1440,7 @@ export function FinanceModule({
               for (const [settingKey, settingValue] of [
                 ["auto-billing-enabled", values.enabled === "on" ? "on" : "off"],
                 ["auto-billing-cutoff-day", String(values.cutoffDay || 24)],
-                ["auto-billing-due-days", String(values.dueDays || 14)],
+                ["auto-billing-due-day", String(values.dueDay || 5)],
               ])
                 await save(
                   { action: "system-setting-update", settingKey, settingValue },
@@ -1441,14 +1474,19 @@ export function FinanceModule({
               </small>
             </label>
             <label>
-              Payment due, days after cut-off
+              Payment due, day of the following month
               <input
-                name="dueDays"
+                name="dueDay"
                 type="number"
-                min="0"
-                max="60"
-                defaultValue={data.settings.autoBillingDueDays}
+                min="1"
+                max="28"
+                defaultValue={data.settings.autoBillingDueDay}
               />
+              <small className="field-note">
+                A fixed calendar day, so every month falls due on the same
+                date. Keep it in step with the &ldquo;Payment due today&rdquo;
+                reminder under Announcements.
+              </small>
             </label>
             <p className="wide field-note">
               Each bill is the tenant&apos;s rent plus their share of the
@@ -1475,7 +1513,7 @@ export function FinanceModule({
           description={
             cyclePreview
               ? "Nothing has been charged yet. Check the figures below, then generate — or go back and adjust the dates."
-              : "The 24th is the normal cut-off. The next step shows exactly what this would bill before anything is created."
+              : `Both dates follow the billing month: cut off on day ${data.settings.autoBillingCutoffDay}, due on day ${data.settings.autoBillingDueDay} of the month after. Change them only for a month that genuinely differs — the next step shows exactly what this would bill before anything is created.`
           }
           onClose={() => {
             setModal("");
@@ -1488,7 +1526,11 @@ export function FinanceModule({
               className="form-grid"
               onSubmit={async (e) => {
                 e.preventDefault();
-                const values = formValues(e) as Record<string, string>;
+                // Fixed rather than asked for — see the note in the form.
+                const values = {
+                  ...(formValues(e) as Record<string, string>),
+                  invoiceFrequency: "monthly",
+                };
                 setPreviewBusy(true);
                 const result = await save(
                   { action: "billing-cycle-preview", ...values },
@@ -1503,24 +1545,62 @@ export function FinanceModule({
             >
               <label>
                 Billing month
-                <input name="periodLabel" type="month" required />
+                <input
+                  name="periodLabel"
+                  type="month"
+                  required
+                  value={cycleMonth}
+                  onChange={(event) => {
+                    const period = event.target.value;
+                    const dates = cycleDatesFor(period);
+                    setCycleMonth(period);
+                    setCycleCutoff(dates.cutoffDate);
+                    setCycleDue(dates.dueDate);
+                  }}
+                />
               </label>
               <label>
                 Cut-off date
-                <input name="cutoffDate" type="date" required />
+                <input
+                  name="cutoffDate"
+                  type="date"
+                  required
+                  value={cycleCutoff}
+                  onChange={(event) => setCycleCutoff(event.target.value)}
+                />
               </label>
               <label>
                 Payment due date
-                <input name="dueDate" type="date" required />
+                <input
+                  name="dueDate"
+                  type="date"
+                  required
+                  value={cycleDue}
+                  onChange={(event) => setCycleDue(event.target.value)}
+                />
               </label>
-              <label>
-                Invoice frequency
-                <select name="invoiceFrequency">
-                  <option value="on-request">Invoice on request</option>
-                  <option value="monthly">Generate invoice monthly</option>
-                  <option value="one-time">One-time invoice</option>
-                </select>
-              </label>
+              {/* The mistake that silently costs a month of electricity: a
+                  cut-off outside the month being billed ends the period
+                  early, so that month's meter round never lands in it. */}
+              {cycleMonth && cycleCutoff.slice(0, 7) !== cycleMonth && (
+                <p className="wide field-note field-note-warn">
+                  The cut-off {dateLabel(cycleCutoff)} is outside {cycleMonth},
+                  so this month would be billed short — anything read after it
+                  waits for the next cycle. The house rule is day{" "}
+                  {data.settings.autoBillingCutoffDay} of the billing month
+                  itself, and day {data.settings.autoBillingDueDay} of the month
+                  after for payment.
+                </p>
+              )}
+              {/* Frequency used to be a dropdown here, but this screen only
+                  ever prepares the recurring rent run — anything else is
+                  raised on an invoice directly. Picking it per month was a
+                  way to get it wrong, so it is fixed and just stated. */}
+              <p className="wide field-note">
+                Every invoice this creates is marked <strong>Monthly</strong> on
+                the tenant&apos;s account, so it shows as part of the recurring
+                rent run rather than a one-off charge.
+              </p>
               <div className="form-actions wide">
                 <button className="primary" disabled={busy || previewBusy}>
                   {previewBusy ? "Calculating…" : "Preview this month"}
@@ -1536,10 +1616,76 @@ export function FinanceModule({
                   label="Would total"
                 />
                 <Stat
+                  value={money(cyclePreview.electricityBilled || 0, true)}
+                  label="Of which electricity"
+                />
+                <Stat
                   value={`${dateLabel(cyclePreview.cutoffDate)} → ${dateLabel(cyclePreview.dueDate)}`}
                   label="Cut-off / due"
                 />
               </section>
+              {/* Electricity is only charged for movement between two
+                  readings, so a room nobody read this period bills rent
+                  only. That used to happen silently — this is the last
+                  chance to go and key the readings in before invoices are
+                  issued. */}
+              {cyclePreview.unreadMeterRoomCount > 0 && (
+                <div className="billing-meter-warning">
+                  <strong>
+                    {cyclePreview.unreadMeterRoomCount} occupied room
+                    {cyclePreview.unreadMeterRoomCount === 1 ? "" : "s"} will
+                    bill no electricity
+                  </strong>
+                  <span>
+                    No meter reading has been taken for{" "}
+                    {cyclePreview.unreadMeterRoomCount === 1 ? "it" : "them"}{" "}
+                    since the last billing month. Key the readings in under
+                    Maintenance → Meter readings, then preview again — or carry
+                    on, and next month&apos;s bill will charge the whole
+                    movement at once.
+                  </span>
+                  {/* Deferring only works where there is an earlier reading to
+                      measure from. A room that has never been read has
+                      nothing to defer: this month's usage is simply gone, and
+                      goes on being lost every month until a first reading
+                      sets the baseline and a second one starts charging. */}
+                  {cyclePreview.neverReadRoomCount > 0 && (
+                    <span className="billing-meter-never">
+                      {cyclePreview.neverReadRoomCount} of{" "}
+                      {cyclePreview.unreadMeterRoomCount === 1
+                        ? "them"
+                        : `those ${cyclePreview.unreadMeterRoomCount}`}{" "}
+                      {cyclePreview.neverReadRoomCount === 1
+                        ? "has never been read at all"
+                        : "have never been read at all"}
+                      . Nothing carries over for{" "}
+                      {cyclePreview.neverReadRoomCount === 1 ? "it" : "them"} —
+                      a first reading only sets the baseline, so{" "}
+                      {cyclePreview.neverReadRoomCount === 1 ? "it" : "they"}{" "}
+                      cannot charge anything until a second round, and every
+                      month until then is lost rather than deferred.
+                    </span>
+                  )}
+                  <small>
+                    {cyclePreview.unreadMeterRooms
+                      .map(
+                        (room) =>
+                          `${room.roomCode}${
+                            room.lastReadingDate
+                              ? ` (last read ${dateLabel(room.lastReadingDate)})`
+                              : " (never read)"
+                          }`,
+                      )
+                      .join(" · ")}
+                    {cyclePreview.unreadMeterRoomCount >
+                      cyclePreview.unreadMeterRooms.length &&
+                      ` … and ${
+                        cyclePreview.unreadMeterRoomCount -
+                        cyclePreview.unreadMeterRooms.length
+                      } more`}
+                  </small>
+                </div>
+              )}
               {cyclePreview.rows.length === 0 ? (
                 <p className="empty-copy">
                   Nobody would be billed for this month — either everyone
@@ -1847,13 +1993,15 @@ export function FinanceModule({
                     const file = (
                       form.elements.namedItem("proof") as HTMLInputElement
                     ).files?.[0];
-                    if (file && result.id)
+                    if (file && result.id) {
                       await uploadAttachment(
                         file,
                         "payment-proof",
                         result.id,
                         data.currentUser?.displayName,
                       );
+                      await load();
+                    }
                     setModal("");
                   }
                 }}

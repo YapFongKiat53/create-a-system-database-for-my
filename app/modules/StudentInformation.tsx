@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   COURSE_LEVELS,
   COURSE_LEVEL_LABELS,
+  CheckInModal,
   CourseOptions,
   DemographicFields,
   Modal,
@@ -28,7 +29,13 @@ import {
 import type { Data, Row } from "./shared";
 import { BASE_PATH } from "../basePath";
 
-type DirectoryTab = "all" | "active" | "moved-out" | "agency";
+type DirectoryTab =
+  | "all"
+  | "active"
+  | "awaiting-check-in"
+  | "checked-in"
+  | "moved-out"
+  | "agency";
 type CompletionFilter = "all" | "complete" | "incomplete";
 type SelectedStudentRef = {
   studentId: string | number;
@@ -1028,10 +1035,27 @@ function normaliseStatus(value: unknown, fallback = "") {
   return status || fallback;
 }
 
+// Someone whose booking has converted but who hasn't arrived yet: the
+// tenancy is already active and holds the room, but nobody is living in it.
+function isAwaitingCheckIn(student: Row) {
+  return student.bedStatus === "reserved" && !student.checkedInAt;
+}
+
+// Arrivals that have actually been processed through the check-in step, so
+// staff can see what came in without hunting through the whole directory.
+// The tenancies imported from the pre-system spreadsheets have no
+// checked_in_at and never appear here — they were already living in.
+function isCheckedIn(student: Row) {
+  return Boolean(student.checkedInAt) && !isMovedOutOrInactive(student);
+}
+
 function isCurrentOccupant(student: Row) {
   return (
     normaliseStatus(student.profileStatus, "active") === "active" &&
-    normaliseStatus(student.assignmentStatus) === "active"
+    normaliseStatus(student.assignmentStatus) === "active" &&
+    // Counted under "awaiting check-in" instead, so this figure agrees with
+    // the occupied-bed count on the dashboard.
+    !isAwaitingCheckIn(student)
   );
 }
 
@@ -1380,6 +1404,11 @@ export function StudentsModule({
   const [schoolFilter, setSchoolFilter] = useState("all");
   const [completionFilter, setCompletionFilter] =
     useState<CompletionFilter>("all");
+  // Check-in is reachable from the directory row as well as from inside the
+  // profile drawer, so it carries its own target rather than piggy-backing
+  // on the drawer's selection — pressing it in the list shouldn't drag the
+  // whole profile open behind the dialog.
+  const [checkInTarget, setCheckInTarget] = useState<Row | null>(null);
   const [selectedStudentRef, setSelectedStudentRef] =
     useState<SelectedStudentRef | null>(null);
   const [modal, setModal] = useState("");
@@ -1492,6 +1521,19 @@ export function StudentsModule({
     );
   }, [data.hostels, data.students, selectedHostel, selectedHostelKey]);
 
+  // Arrivals still to be processed in the hostel currently in view — the
+  // tab doubles as a to-do count, so it is worth showing on the label.
+  const awaitingCheckInCount = useMemo(
+    () =>
+      selectedHostelStudents.filter(isAwaitingCheckIn).length,
+    [selectedHostelStudents],
+  );
+
+  const checkedInCount = useMemo(
+    () => selectedHostelStudents.filter(isCheckedIn).length,
+    [selectedHostelStudents],
+  );
+
   const scopeStudents = selectedHostelKey
     ? selectedHostelStudents
     : data.students;
@@ -1528,9 +1570,13 @@ export function StudentsModule({
             ? true
             : directoryTab === "agency"
               ? isAgencyLinked(item)
-              : directoryTab === "active"
-                ? isActiveProfile(item)
-                : isMovedOutOrInactive(item);
+              : directoryTab === "awaiting-check-in"
+                ? isAwaitingCheckIn(item)
+                : directoryTab === "checked-in"
+                  ? isCheckedIn(item)
+                  : directoryTab === "active"
+                    ? isActiveProfile(item)
+                    : isMovedOutOrInactive(item);
 
         const unitMatch =
           unitFilter === "all" || String(item.unitCode || "") === unitFilter;
@@ -1682,6 +1728,10 @@ export function StudentsModule({
             label="Current occupants"
           />
           <Stat
+            value={scopeStudents.filter(isAwaitingCheckIn).length}
+            label="Awaiting check-in"
+          />
+          <Stat
             value={scopeStudents.filter(isMovedOutOrInactive).length}
             label="Moved out / inactive"
           />
@@ -1760,6 +1810,30 @@ export function StudentsModule({
                   }}
                 >
                   Active students
+                </button>
+                <button
+                  type="button"
+                  className={
+                    directoryTab === "awaiting-check-in" ? "active" : ""
+                  }
+                  onClick={() => {
+                    setDirectoryTab("awaiting-check-in");
+                    setPage(1);
+                  }}
+                >
+                  Awaiting check-in
+                  {awaitingCheckInCount > 0 && ` (${awaitingCheckInCount})`}
+                </button>
+                <button
+                  type="button"
+                  className={directoryTab === "checked-in" ? "active" : ""}
+                  onClick={() => {
+                    setDirectoryTab("checked-in");
+                    setPage(1);
+                  }}
+                >
+                  Checked in
+                  {checkedInCount > 0 && ` (${checkedInCount})`}
                 </button>
                 <button
                   type="button"
@@ -1953,25 +2027,54 @@ export function StudentsModule({
                             <small>{item.agency || "Direct"}</small>
                           </td>
                           <td>
-                            <StatusPill
-                              status={
-                                item.assignmentStatus || item.profileStatus
-                              }
-                            />
+                            {/* The tenancy is already 'active' the moment
+                                the booking converts, so "Active" alone
+                                wouldn't say whether the student is actually
+                                living there yet. */}
+                            {isAwaitingCheckIn(item) ? (
+                              <StatusPill status="awaiting-check-in" />
+                            ) : (
+                              <>
+                                <StatusPill
+                                  status={
+                                    item.assignmentStatus || item.profileStatus
+                                  }
+                                />
+                                {isCheckedIn(item) && (
+                                  <small>
+                                    Checked in {dateLabel(item.checkInDate)}
+                                  </small>
+                                )}
+                              </>
+                            )}
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="secondary compact"
-                              onClick={() =>
-                                setSelectedStudentRef({
-                                  studentId: item.id,
-                                  assignmentId: item.assignmentId,
-                                })
-                              }
-                            >
-                              Open profile
-                            </button>
+                            <div className="row-actions">
+                              {/* Processing an arrival is a two-click job
+                                  from the list — no need to open the
+                                  profile to reach it. */}
+                              {isAwaitingCheckIn(item) && (
+                                <button
+                                  type="button"
+                                  className="primary compact"
+                                  onClick={() => setCheckInTarget(item)}
+                                >
+                                  Check in
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                onClick={() =>
+                                  setSelectedStudentRef({
+                                    studentId: item.id,
+                                    assignmentId: item.assignmentId,
+                                  })
+                                }
+                              >
+                                Open profile
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -2206,13 +2309,27 @@ export function StudentsModule({
                 <div className="subsection-head">
                   <h4>Room details</h4>
                   {student.assignmentId ? (
-                    <button
-                      type="button"
-                      className="secondary compact"
-                      onClick={() => setModal("moveout")}
-                    >
-                      Move out / deactivate
-                    </button>
+                    <div className="subsection-actions">
+                      {/* The room is held for them but they haven't arrived
+                          — checking in is the only sensible next step, so
+                          it leads. */}
+                      {isAwaitingCheckIn(student) && (
+                        <button
+                          type="button"
+                          className="primary compact"
+                          onClick={() => setCheckInTarget(student)}
+                        >
+                          Check in
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        onClick={() => setModal("moveout")}
+                      >
+                        Move out / deactivate
+                      </button>
+                    </div>
                   ) : (
                     // 新增：如果还没有 assignmentId，则显示分配房间的按钮
                     <button
@@ -2360,10 +2477,60 @@ export function StudentsModule({
                     </div>
                   </>
                 ) : (
-                  // 更新提示文案
-                  <p className="empty-copy">
-                    No active room assignment. Click &ldquo;Assign a room&rdquo; above to place this student in a vacant bed space.
-                  </p>
+                  <>
+                    {/* 更新提示文案 */}
+                    <p className="empty-copy">
+                      No active room assignment. Click &ldquo;Assign a room&rdquo; above to place this student in a vacant bed space.
+                    </p>
+                    {/* Moving out normally ends the tenancy and the profile
+                        together, from the button above — this is only for
+                        the mismatch it leaves behind when a tenancy was
+                        ended without the profile following, so the record
+                        still counts as an active student with no room. It
+                        appears solely in that contradictory state. */}
+                    {normaliseStatus(student.profileStatus, "active") ===
+                      "active" && (
+                      <div className="record-fix">
+                        <div>
+                          <strong>Still counted as an active student</strong>
+                          <small>
+                            This profile has no room, so it is neither
+                            occupying one nor showing under Moved-out. If they
+                            have already left, correct the record here.
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                `Mark ${student.fullName} as moved out?\n\nThis only changes the profile status — there is no tenancy left to end.`,
+                              )
+                            )
+                              return;
+                            const ok = await save(
+                              {
+                                action: "student-move-out",
+                                studentId: student.id,
+                                profileStatus: "moved-out",
+                              },
+                              "Marked as moved out",
+                            );
+                            // The Status select below is uncontrolled, so it
+                            // would still read "Active" after this and quietly
+                            // undo the correction on the next Save. Closing
+                            // the drawer is what the normal move-out does for
+                            // the same reason.
+                            if (ok) setSelectedStudentRef(null);
+                          }}
+                        >
+                          Mark as moved out
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -2753,6 +2920,16 @@ export function StudentsModule({
             </div>
           </form>
         </Modal>
+      )}
+
+      {checkInTarget && (
+        <CheckInModal
+          tenancy={checkInTarget}
+          data={data}
+          save={save}
+          busy={busy}
+          onClose={() => setCheckInTarget(null)}
+        />
       )}
 
       {modal === "moveout" && student && (

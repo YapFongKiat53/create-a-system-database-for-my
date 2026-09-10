@@ -35,6 +35,12 @@ export function DashboardModule({
     const vacant = data.bedSpaces.filter(
       (bed) => bed.status === "vacant",
     ).length;
+    // Converted and paid for, but the student hasn't arrived. The room is
+    // physically empty — Maintenance can still clean and inspect it — but
+    // it is no longer sellable, so it is counted apart from "vacant now".
+    const awaitingCheckIn = data.bedSpaces.filter(
+      (bed) => bed.status === "reserved",
+    ).length;
     const sellable = data.bedSpaces.filter(
       (bed) => bed.status !== "special-use",
     ).length;
@@ -42,6 +48,7 @@ export function DashboardModule({
       beds,
       occupied,
       vacant,
+      awaitingCheckIn,
       occupancy: Math.round((occupied / Math.max(1, sellable)) * 100),
     };
   }, [data]);
@@ -189,6 +196,16 @@ export function DashboardModule({
           </div>
           <strong>{stats.vacant}</strong>
           <span>Ready to sell</span>
+        </article>
+        <article className="dash-stat">
+          <div className="dash-stat-head">
+            <small>AWAITING CHECK-IN</small>
+            <button onClick={() => onOpenModule("students")} aria-label="Open students">
+              ↗
+            </button>
+          </div>
+          <strong>{stats.awaitingCheckIn}</strong>
+          <span>Paid, room held, not arrived</span>
         </article>
         <article className="dash-stat">
           <div className="dash-stat-head">

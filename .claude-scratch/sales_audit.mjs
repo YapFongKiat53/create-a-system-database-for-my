@@ -1,0 +1,10 @@
+import postgres from "postgres";
+const sql = postgres(process.env.DATABASE_URL, { prepare: false });
+await sql`SET search_path TO public`;
+console.log("=== accommodation_assignments.salesperson ===");
+console.table((await sql`SELECT salesperson, count(*)::int n FROM accommodation_assignments WHERE COALESCE(salesperson,'')<>'' GROUP BY 1 ORDER BY n DESC`).map(x=>({...x})));
+console.log("=== student_profiles.salesperson ===");
+console.table((await sql`SELECT salesperson, count(*)::int n FROM student_profiles WHERE COALESCE(salesperson,'')<>'' GROUP BY 1 ORDER BY n DESC`).map(x=>({...x})));
+console.log("=== reservations.sales_person ===");
+console.table((await sql`SELECT sales_person, count(*)::int n FROM reservations WHERE COALESCE(sales_person,'')<>'' GROUP BY 1 ORDER BY n DESC`).map(x=>({...x})));
+await sql.end();

@@ -44,7 +44,9 @@ export type Data = {
     roomTransferFee: number;
     autoBillingEnabled: boolean;
     autoBillingCutoffDay: number;
-    autoBillingDueDays: number;
+    // Day of the *following* month that rent falls due, not an offset from
+    // the cut-off — see runScheduledBilling.
+    autoBillingDueDay: number;
   };
 };
 export type HostelTab = "availability" | "reservations" | "pricing" | "occupancy";
@@ -280,6 +282,10 @@ export const money = (value: number | null | undefined, cents = false) =>
 export const titleCase = (value: string) =>
   String(value || "")
     .replace(/-/g, " ")
+    // Splits camelCase object keys (e.g. Reports' raw column names,
+    // "invoiceNo") into separate words before capitalizing — a no-op for
+    // the hyphenated/lowercase enum values this is normally called with.
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 export function paginationItems(currentPage: number, totalPages: number) {
   const pages: Array<number | "ellipsis"> = [];
@@ -857,6 +863,119 @@ export function CourseOptions({
         <option value={current}>{current}</option>
       )}
     </>
+  );
+}
+
+// A converted booking holds its room without anyone living in it until
+// staff confirm the student turned up. That confirmation is reachable from
+// three places — the reservation card, the tenant list row, and the tenant
+// profile — so the dialog itself lives here and they all open the same one.
+// `tenancy` is a student row carrying assignmentId / roomCode / checkInDate.
+export function CheckInModal({
+  tenancy,
+  data,
+  save,
+  busy,
+  onClose,
+}: {
+  tenancy: Row;
+  data: Data;
+  save: any;
+  busy: boolean;
+  onClose: () => void;
+}) {
+  const [meterValue, setMeterValue] = useState("");
+  // The room's last recorded reading. Shown so staff have something to check
+  // the number they just read off the meter against — and so a typo that
+  // would hand the new tenant the previous occupant's usage is visible
+  // before it becomes a charge.
+  const lastReading = data.meterReadings
+    .filter((reading) => String(reading.roomId) === String(tenancy.roomId))
+    .sort((left, right) =>
+      String(left.readingDate) === String(right.readingDate)
+        ? Number(right.id) - Number(left.id)
+        : String(right.readingDate).localeCompare(String(left.readingDate)),
+    )[0];
+  const belowLastReading =
+    lastReading &&
+    meterValue !== "" &&
+    Number(meterValue) < Number(lastReading.readingValue);
+  return (
+    <Modal
+      title="Check in"
+      kicker={tenancy.fullName}
+      description="Confirms the student has arrived and taken the keys. The room moves from held to occupied, and the date below replaces the planned move-in date on the tenancy."
+      onClose={onClose}
+    >
+      <form
+        className="form-grid"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const ok = await save(
+            {
+              action: "assignment-check-in",
+              assignmentId: tenancy.assignmentId,
+              ...formValues(event),
+            },
+            "Student checked in",
+          );
+          if (ok) onClose();
+        }}
+      >
+        <label className="wide">
+          Room
+          <input value={tenancy.roomCode || ""} readOnly />
+        </label>
+        <label>
+          Actual arrival date
+          <input name="checkInDate" type="date" required defaultValue={today} />
+          <small className="field-note">
+            Planned move-in was {dateLabel(tenancy.checkInDate) || "not set"}.
+          </small>
+        </label>
+        <label>
+          Opening meter reading (required)
+          <input
+            name="checkInMeter"
+            type="number"
+            step="0.01"
+            min="0"
+            required
+            placeholder="e.g. 1000"
+            value={meterValue}
+            onChange={(event) => setMeterValue(event.target.value)}
+          />
+          {/* Without a baseline, billing charges this tenant from the room's
+              previous reading — i.e. for electricity the last occupant used
+              before they ever arrived. That is why it is not optional. */}
+          <small className="field-note">
+            {lastReading
+              ? `Last reading on this room: ${lastReading.readingValue} (${dateLabel(lastReading.readingDate)}).`
+              : "No previous reading on this room — this becomes its first."}{" "}
+            Billing charges electricity from this number onwards, so the
+            student is never billed for the previous occupant&apos;s usage.
+          </small>
+          {belowLastReading && (
+            <small className="field-note field-note-warn">
+              This is lower than the last recorded reading — check the number
+              before saving.
+            </small>
+          )}
+        </label>
+        <label className="wide">
+          Arrival notes
+          <input
+            name="remarks"
+            placeholder="e.g. access card 00123 issued, room inspected"
+          />
+        </label>
+        <div className="form-actions wide">
+          <button className="primary" disabled={busy}>
+            Confirm check-in
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
