@@ -27,8 +27,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         user: null,
-        error:
-          error instanceof Error ? error.message : "Unable to read the session",
+        error: describeFailure(error, "Unable to read the session"),
       },
       { status: 500 },
     );
@@ -56,14 +55,29 @@ export async function POST(request: Request) {
   try {
     return await handleAuth(request);
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Unable to sign in",
-      },
-      { status: 500 },
-    );
+    return Response.json({ error: describeFailure(error, "Unable to sign in") }, {
+      status: 500,
+    });
   }
+}
+
+/**
+ * postgres-js wraps a failure as "Failed query: <the whole SQL>" and puts the
+ * reason — the pooler refusing a connection, a timeout, a constraint — in
+ * `cause`. On its own the wrapper tells the person at the sign-in screen
+ * nothing they can act on, so the cause is what gets shown, with the query
+ * left out entirely: it is noise to them and it puts the schema on screen.
+ */
+function describeFailure(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) return fallback;
+  const cause = error.cause;
+  const causeMessage =
+    cause instanceof Error ? cause.message : cause ? String(cause) : "";
+  if (causeMessage) return causeMessage;
+  // Nothing more specific available — at least drop the SQL from the wrapper.
+  return error.message.startsWith("Failed query:")
+    ? `The database rejected the request. ${fallback}.`
+    : error.message;
 }
 
 async function handleAuth(request: Request) {

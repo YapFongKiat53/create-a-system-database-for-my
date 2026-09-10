@@ -30,7 +30,26 @@ function getClient() {
   // heaviest handler (the dashboard's GET /api/system, which fires ~30
   // reads via `Promise.all([...])` against a single client) — see Task 15
   // verification for why an undersized pool stalls those queries.
-  return postgres(databaseUrl, { max: 20, prepare: false });
+  // idle_timeout / max_lifetime are what stop the "fresh client per call"
+  // rule above from becoming a connection leak. Nothing in the codebase ever
+  // calls .end() — a handler takes a client, uses it, and drops it — so
+  // without a timeout every request leaves up to 20 sockets open against
+  // Supavisor forever. On a long-running server that climbs until the pooler
+  // refuses new clients with EMAXCONN (limit: 200), at which point the
+  // process already holding connections keeps working while everything else
+  // is locked out, which is exactly how it presented. These two make an
+  // abandoned pool close itself shortly after the request that opened it.
+  return postgres(databaseUrl, {
+    max: 20,
+    prepare: false,
+    // Seconds a connection may sit unused before it is closed. Longer than a
+    // request takes, short enough that an abandoned pool does not outlive it
+    // by much.
+    idle_timeout: 20,
+    // A hard ceiling regardless of activity, so nothing accumulates even
+    // under steady traffic.
+    max_lifetime: 60 * 10,
+  });
 }
 
 export function getDb() {
