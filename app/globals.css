@@ -78,6 +78,15 @@
     --bad-line: #fecdd3;
     --bad-text: #be123c;
 
+    /* Work in hand rather than a problem: a room that is empty but still
+       being inspected and cleaned. Sits between the vacant green and the
+       reserved amber deliberately — it is neither ready nor sold. Text on
+       fill measures 4.8:1, clearing AA for the 11px chip labels. */
+    --prep-wash: #f0fdfa;
+    --prep-fill: #ccfbf1;
+    --prep-line: #99f6e4;
+    --prep-text: #0f766e;
+
     --info-wash: #eff6ff;
     --info-fill: #dbeafe;
     --info-line: #bfdbfe;
@@ -1376,19 +1385,274 @@
     filter: brightness(0.96);
   }
 
+  /* Traffic-light reading: green can be booked, amber needs a decision
+     soon, red is taken. Reserved and Not lettable sit outside that scale on
+     purpose — one is a hold, not a stage of occupancy; the other is a
+     category (out of service), not a status at all — so each gets its own
+     colour family instead of borrowing from the green-amber-red run. */
   .room-chip.available {
-    background: var(--info-fill);
-    color: var(--green);
+    background: var(--ok-fill);
+    color: var(--ok-text);
   }
 
-  .room-chip.unavailable {
+  /* Empty, but the move-out inspection or the cleaning is still open. Can be
+     booked for a later date, which is why it sits beside vacant rather than
+     with the unavailable states. */
+  .room-chip.preparing {
+    background: var(--prep-fill);
+    color: var(--prep-text);
+  }
+
+  /* Paid for, nobody has arrived. Held, not occupied — blue keeps it out of
+     the green-amber-red occupancy scale entirely. */
+  .room-chip.awaiting-check-in {
+    background: var(--info-fill);
+    color: var(--info-text);
+  }
+
+  /* Ends within a fortnight with no renewal applied — chase it or line up
+     the clean. Amber: needs a decision soon, but nobody has to act today. */
+  .room-chip.ending-soon {
+    background: var(--warn-fill);
+    color: var(--warn-text);
+  }
+
+  /* Someone lives here — the traffic-light "stop", can't be booked. */
+  .room-chip.occupied {
     background: var(--bad-fill);
     color: var(--bad-text);
   }
 
-  .room-chip.ending-soon {
-    background: var(--warn-fill);
-    color: var(--bad-text);
+  /* Storerooms and anything else out of service — not a step in the
+     occupancy cycle at all, so it gets its own near-black family rather
+     than a shade of the states around it. White text on --ink clears AA
+     contrast by a wide margin regardless of which stripe it lands on. */
+  .room-chip.blocked {
+    color: var(--tint);
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--ink),
+      var(--ink) 4px,
+      #1e293b 4px,
+      #1e293b 8px
+    );
+    cursor: not-allowed;
+  }
+
+  /* Which of the two move-out jobs is still open on a room, in the
+     maintenance list. Same teal family as the room chip that sent the reader
+     here, so the two views read as one thing. */
+  .turnover-stages {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+  }
+
+  .turnover-stage-chip {
+    background: var(--prep-fill);
+    color: var(--prep-text);
+    border: 1px solid var(--prep-line);
+    border-radius: var(--r-pill);
+    padding: 2px var(--sp-2);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .turnover-unassigned {
+    color: var(--warn-text);
+    font-size: 12px;
+  }
+
+  .turnover-assignees {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .turnover-assignee-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .turnover-assignee-row > small {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Colour is only half a legend; the count is the other half, so "how many
+     are ending soon" reads off the board without filtering it. */
+  .room-state-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4) 0;
+  }
+
+  .room-state-legend .room-chip {
+    gap: var(--sp-2);
+    cursor: default;
+  }
+
+  .room-state-legend .room-chip:hover {
+    transform: none;
+    filter: none;
+  }
+
+  .room-state-legend em {
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  /* What Availability search now exists to answer, one room letter at a
+     time: is there a Room A left for a girl, a Room B for a boy, and so on
+     — not just a hostel-wide total. Same blue/rose pairing as
+     .gender-pill/the old headline tiles this replaced. */
+  .gender-by-room-wrap {
+    margin: var(--sp-2) var(--sp-4) var(--sp-5);
+  }
+
+  .gender-by-room-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .gender-by-room-table th {
+    text-align: left;
+    padding: var(--sp-2) var(--sp-3);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .gender-by-room-table th:nth-child(3) {
+    color: var(--info-text);
+  }
+
+  .gender-by-room-table th:nth-child(4) {
+    color: #9d3f72;
+  }
+
+  .gender-by-room-table td {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .gender-by-room-table td.muted {
+    font-size: 12px;
+  }
+
+  .gender-by-room-table td:nth-child(3) {
+    color: var(--info-text);
+  }
+
+  .gender-by-room-table td:nth-child(4) {
+    color: #9d3f72;
+  }
+
+  .gender-by-room-total td {
+    border-top: 2px solid var(--line);
+    border-bottom: none;
+    font-weight: 700;
+  }
+
+  /* Who's in a room, on click, next to the chip rather than a full modal —
+     this is a quick lookup, not a task. Fixed-width and left-anchored under
+     the chip; a chip near the right edge of the table can push it wide of
+     the row, which the table's own horizontal scroll already tolerates. */
+  .occupant-popover {
+    position: absolute;
+    top: calc(100% + var(--sp-2));
+    left: 0;
+    z-index: 20;
+    width: 240px;
+    padding: var(--sp-4);
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    cursor: default;
+    white-space: normal;
+  }
+
+  .occupant-popover-close {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-2);
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: var(--subtle);
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .occupant-popover-close:hover {
+    background: var(--line);
+    color: var(--text);
+  }
+
+  .occupant-popover-room {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding-right: var(--sp-5);
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .occupant-popover-room .room-chip {
+    cursor: default;
+  }
+
+  .occupant-popover-fields {
+    display: grid;
+    gap: var(--sp-2);
+    margin: var(--sp-3) 0 0;
+  }
+
+  .occupant-popover-fields div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+
+  .occupant-popover-fields dt {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .occupant-popover-fields dd {
+    margin: 0;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .occupant-popover-empty {
+    margin: var(--sp-3) 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .occupant-popover-edit {
+    margin-top: var(--sp-3);
+    width: 100%;
   }
 
   /* Tenant details */
@@ -2133,7 +2397,6 @@
   .form-grid select,
   .service-form input,
   .service-form select,
-  .room-list select,
   .pricing-controls input,
   .pricing-controls select {
     width: 100%;
@@ -2206,6 +2469,93 @@
     padding-top: var(--sp-2);
   }
 
+  /* Course enrolled: type-to-filter with an inline "add new" row, replacing
+     the old grouped <select>. */
+  .search-create-select {
+    position: relative;
+  }
+
+  .search-create-select-dropdown {
+    position: absolute;
+    top: calc(100% + var(--sp-1));
+    left: 0;
+    right: 0;
+    z-index: 20;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: var(--sp-1);
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .search-create-select-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+  }
+
+  .search-create-select-option:hover {
+    background: var(--tint);
+  }
+
+  .search-create-select-option small {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .search-create-select-add {
+    display: block;
+    width: 100%;
+    margin-top: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+  }
+
+  .search-create-select-add:hover {
+    background: var(--nav-active-bg);
+  }
+
+  .search-create-select-add:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .search-create-select-empty {
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
   /* Billing preview: a cycle can list every active tenant, so the table gets
      its own scroll region rather than pushing Back/Generate off screen. */
   .billing-preview-table {
@@ -2219,6 +2569,12 @@
     text-transform: none;
     letter-spacing: 0;
     font-weight: 400;
+  }
+
+  .prior-room-note {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 12px;
   }
 
   .room-details-group {
@@ -2271,7 +2627,66 @@
     background: var(--surface);
     font: inherit;
   }
-  
+
+  /* Wraps every native date picker. The input keeps its own box — every
+     existing width/height/border rule still reaches it, they're all
+     descendant selectors — and only its text is hidden, with the month-name
+     version painted over the top. */
+  .date-field {
+    position: relative;
+    display: block;
+    width: 100%;
+  }
+
+  /* The numbers the browser draws from OS locale. Transparent, not hidden:
+     the field still has to lay out, take focus, validate and open its
+     calendar exactly as before. Two classes deep because the form-level
+     rules that colour every input (.form-grid input, .filters input,
+     .reservation-input-control input …) would otherwise win on specificity
+     or source order. */
+  .date-field .date-field-input {
+    color: transparent;
+  }
+
+  /* WebKit/Blink draw the segment the caret is on with a selection
+     highlight, which a transparent text colour leaves behind as a stray
+     blue block under the month name. Taking the whole editable region to
+     zero opacity removes the digits and that highlight together; the
+     calendar icon is a separate pseudo-element and stays. (Firefox has no
+     such pseudo-elements — `color: transparent` above is what covers it
+     there, and it draws no segment highlight to begin with.) */
+  .date-field .date-field-input::-webkit-datetime-edit {
+    opacity: 0;
+  }
+
+  /* Keeps the calendar icon drawn, since only the text went transparent. */
+  .date-field .date-field-input::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+  }
+
+  /* Sits over the input's own text. padding/font come from the input at
+     runtime — see DateField — so this lands correctly whatever size the
+     surrounding form gives the field. pointer-events stay off so every
+     click still reaches the input underneath. */
+  .date-field-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 var(--sp-3);
+    color: var(--ink);
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .date-field-label.is-empty {
+    color: var(--muted-soft);
+    font-weight: 500;
+  }
+
   .checkbox-field {
     display: flex !important;
     flex-direction: row !important;
@@ -3652,84 +4067,285 @@
        always assumed.
        ========================================= */
 
-  /* Unit drawer → Rooms. Every room is one card: without a boundary the
-     four of them run together and a room code reads as if it belonged to
-     whichever room happened to sit above it. */
-  .room-list {
+  /* Unit drawer → Rooms. One card per room: a letter badge and the room's
+     occupancy up top with its actions, the two settings as labelled
+     selects, and its codes on a tinted shelf inside the same card — so a
+     code can never read as belonging to the room above it. The drawer is
+     680px at most, so every row here is allowed to wrap. */
+  .unit-rooms-head {
     display: flex;
-    flex-direction: column;
-    gap: var(--sp-5, 20px);
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--sp-4);
   }
 
-  /* A hairline on white was not enough to read as a boundary — the four
-     rooms still looked like one long list. Stronger rule, real padding and
-     a lift off the page so each room is unmistakably its own box. */
-  .room-list>.room-card {
-    padding: var(--sp-4);
-    border: 1px solid var(--line-strong);
+  .unit-rooms-head-icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
     border-radius: var(--r-md);
+    color: var(--brand);
+    background: var(--brand-soft);
+  }
+
+  .unit-rooms-head-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .unit-rooms-head > div {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+
+  .unit-rooms-head h3 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 20px;
+  }
+
+  .unit-rooms-head p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .unit-rooms {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  .unit-room {
+    padding: var(--sp-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
     background: var(--surface);
     box-shadow: var(--shadow-sm);
   }
 
-  /* Label, type and bathroom across the top; the actions get their own row
-     below. Six across fits the page but not the drawer this lives in — the
-     selects truncate to "Non-attache" and the last button clips off. */
-  .editable-room {
-    display: grid;
-    grid-template-columns: minmax(90px, 0.8fr) 1fr 1fr;
-    gap: var(--sp-2);
+  .unit-room-head {
+    display: flex;
     align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
   }
 
-  .room-actions {
+  .unit-room-avatar {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  /* Picked so white 18px bold stays above AA 4.5:1 on every one. */
+  .unit-room-avatar.tone-0 { background: #4f46e5; }
+  .unit-room-avatar.tone-1 { background: #15803d; }
+  .unit-room-avatar.tone-2 { background: #7c3aed; }
+  .unit-room-avatar.tone-3 { background: #b45309; }
+  .unit-room-avatar.tone-4 { background: #0e7490; }
+
+  .unit-room-title {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+
+  .unit-room-title h4 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 16px;
+  }
+
+  .unit-room-title small {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .unit-room-actions {
     display: flex;
     flex-wrap: wrap;
     gap: var(--sp-2);
-    grid-column: 1 / -1;
-    justify-content: flex-end;
   }
 
-  /* Buttons sized to their text — stretched across a third of the card each
-     they read as the loudest thing in the section, which they are not. */
-  .room-actions button {
-    flex: 0 0 auto;
+  /* Rides on the shared .primary / .secondary / .danger colours; only the
+     icon slot and a size between .compact and full are added. */
+  .unit-room-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 var(--sp-3);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
-  /* The codes belong to the room above, so they sit inside its card on a
-     tinted, ruled-off shelf rather than floating between two rooms. */
-  .bed-config {
+  .unit-room-btn svg {
+    flex: none;
+    width: 15px;
+    height: 15px;
+  }
+
+  .unit-room-fields {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    gap: var(--sp-2);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--sp-3);
+    margin-top: var(--sp-4);
+  }
+
+  .unit-room-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .unit-room-field > span:first-child {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .unit-room-select {
+    position: relative;
+    display: block;
+  }
+
+  .unit-room-select svg {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    width: 18px;
+    height: 18px;
+    color: var(--muted);
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .unit-room-select select {
+    width: 100%;
+    height: 44px;
+    padding: 0 var(--sp-3) 0 40px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    color: var(--ink);
+    background: var(--surface);
+    font-size: 13px;
+  }
+
+  .unit-room-select select:focus {
+    outline: none;
+    border-color: var(--green-mid);
+    box-shadow: var(--ring);
+  }
+
+  .unit-room-codes {
     margin-top: var(--sp-4);
     padding: var(--sp-3);
-    /* --tint is a whisper against white; this shelf needs to be seen as a
-       separate area, so it gets the next step of grey and its own rule. */
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    background: var(--subtle);
+    border: 1px solid #e0e7ff;
+    border-radius: var(--r-md);
+    background: var(--brand-soft);
   }
 
-  .bed-config-caption {
-    grid-column: 1 / -1;
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  /* Each code sits on its own white row so it separates from the shelf it
-     is on, and from the code above it. */
-  .bed-config form {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: var(--sp-2);
+  .unit-room-codes-head {
+    display: flex;
     align-items: center;
-    padding: var(--sp-2);
-    border-radius: var(--r-sm);
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-3);
+    color: var(--brand);
+  }
+
+  .unit-room-codes-head svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .unit-room-codes-head strong {
+    color: var(--ink);
+    font-size: 14px;
+  }
+
+  .unit-room-codes-count {
+    margin-left: auto;
+    padding: 2px 10px;
+    border-radius: var(--r-pill);
+    color: var(--brand-dark);
+    background: #e0e7ff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .unit-room-code-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .unit-room-code {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
     background: var(--surface);
+  }
+
+  .unit-room-code-icon {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--r-sm);
+    color: var(--brand);
+    background: var(--brand-soft);
+  }
+
+  .unit-room-code-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  /* Still an editable field — "Save code" saves what is typed here — but
+     drawn as the code itself until it is hovered or focused. */
+  .unit-room-code input {
+    flex: 1 1 120px;
+    min-width: 0;
+    height: 34px;
+    padding: 0 var(--sp-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    background: transparent;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .unit-room-code input:hover {
+    border-color: var(--line);
+  }
+
+  .unit-room-code input:focus {
+    outline: none;
+    border-color: var(--green-mid);
+    background: var(--surface);
+    box-shadow: var(--ring);
+  }
+
+  .unit-room-code-empty {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
   }
 
   /* The rail is a permanent column on a wide screen, so the Menu button is
@@ -4359,6 +4975,73 @@
     margin-top: var(--sp-4);
   }
 
+  /* Compact CRUD lists — "Manage schools/courses/races/religions/roles" and
+     similar admin-list modals: one row per item, name (+ optional <small>
+     meta) on the left, actions pinned right. Was unstyled (no rule existed
+     for this class at all), so every row fell back to block layout — the
+     name, then a gap, then the buttons on their own line, reading as if the
+     buttons belonged to the next item. margin-left: auto on .button-row
+     pins actions right whether or not a row carries <small> meta. */
+  .compact-list {
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--sp-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 360px;
+  }
+
+  .compact-list > span {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    column-gap: var(--sp-3);
+    row-gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line);
+    transition: background 0.15s ease;
+  }
+
+  .compact-list > span:last-child {
+    border-bottom: none;
+  }
+
+  .compact-list > span:hover {
+    background: var(--tint);
+  }
+
+  .compact-list > span > b {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .compact-list > span > small {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .compact-list > span > .button-row {
+    margin-top: 0;
+    margin-left: auto;
+  }
+
+  .compact-list > span > .button-row button:last-of-type:hover {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  .compact-list .empty-copy {
+    padding: var(--sp-5) var(--sp-4);
+    text-align: center;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+
   /* =========================================================
      PAYMENT SUBMISSIONS (invoice modal)
      ========================================================= */
@@ -4368,40 +5051,70 @@
   }
 
   .payment-review h4 {
-    margin: 0 0 var(--sp-2);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-3);
     color: var(--ink);
     font-size: 13px;
     font-weight: 800;
   }
 
+  .payment-review-count {
+    padding: 1px 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--tint);
+    border-radius: 999px;
+  }
+
+  /* One card per payment. The head answers "how much, what state, when";
+     the meta line answers "for what, with which reference" — split apart
+     so two payments with the same remark still read as different rows
+     instead of running into one paragraph. */
   .payment-review-item {
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-    padding: var(--sp-3);
-    margin-bottom: var(--sp-2);
-    background: var(--tint);
+    padding: var(--sp-3) var(--sp-4);
+    margin-bottom: var(--sp-3);
+    background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-md);
   }
 
-  .payment-review-item-main {
+  .payment-review-item-head {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: var(--sp-2);
-    font-size: 12px;
   }
 
-  .payment-review-item-main strong {
+  .payment-review-item-head strong {
     color: var(--ink);
-    font-size: 14px;
+    font-size: 16px;
     font-variant-numeric: tabular-nums;
   }
 
-  .payment-review-item-covers {
-    min-width: 0;
+  .payment-review-item-date {
+    margin-left: auto;
     color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .payment-review-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-3);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .payment-review-item-ref {
+    padding-left: var(--sp-3);
+    border-left: 1px solid var(--line);
   }
 
   .payment-review-item-status {
@@ -4421,26 +5134,53 @@
     background: var(--reservation-green-soft);
   }
 
-  .payment-review-item-actions {
+  /* Every slip on its own row — the filename gets room to truncate instead
+     of colliding with the next slip's name and its own Rename button. */
+  .payment-review-item-slips {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-2);
+    flex-direction: column;
+    gap: var(--sp-1);
     padding-top: var(--sp-2);
     border-top: 1px dashed var(--line);
   }
 
   .payment-review-item-slip {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+    border-radius: var(--r-sm);
+  }
+
+  .payment-review-item-slip:hover {
+    background: var(--tint);
+  }
+
+  .payment-review-item-slip-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--muted-soft);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .payment-review-item-slip a {
+    flex: 1 1 auto;
+    overflow: hidden;
     color: var(--reservation-green-dark);
     font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .payment-review-item-actions {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .rate-card-grid form {
@@ -4610,13 +5350,6 @@
       grid-template-columns: 1fr 1fr;
     }
   
-    .room-row {
-      grid-template-columns: 70px 1fr;
-    }
-  
-    .room-row select {
-      grid-column: 1 / -1;
-    }
   
     .settings-grid {
       grid-template-columns: 1fr;
@@ -4824,13 +5557,6 @@
       grid-template-columns: 1fr;
     }
   
-    .room-list article {
-      grid-template-columns: 60px 1fr;
-    }
-  
-    .room-list select {
-      grid-column: 1 / -1;
-    }
   
     .pricing-controls {
       grid-template-columns: 1fr 1fr !important;
@@ -4848,9 +5574,6 @@
       grid-template-columns: 1fr 1fr;
     }
   
-    .editable-room {
-      grid-template-columns: 1fr 1fr !important;
-    }
   
     .asset-actions {
       flex-wrap: wrap;
@@ -4998,11 +5721,6 @@
       grid-template-columns: 1fr !important;
     }
   
-    .editable-room,
-    .bed-config form,
-    .bed-config label {
-      grid-template-columns: 1fr !important;
-    }
   
     .drawer-tabs {
       top: 81px;
@@ -5025,8 +5743,7 @@
       bottom: 12px;
     }
   
-    .service-form.expanded,
-  .bed-config {
+    .service-form.expanded {
       grid-template-columns: 1fr;
     }
   
@@ -5496,6 +6213,26 @@
     pointer-events: none;
     transform: translateY(-50%);
   }
+
+  /* Two date inputs sharing one field — the "from" and "to" ends of the
+     check-in range, either of which can be left blank. */
+  .reservation-date-range {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .reservation-date-range .reservation-input-control {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .reservation-date-range-sep {
+    flex: none;
+    color: var(--muted-soft);
+    font-size: 12px;
+    font-weight: 600;
+  }
   
   /* =========================================================
      CARD GRID
@@ -5821,7 +6558,148 @@
   .invoice-totals strong.settled {
     color: var(--reservation-green);
   }
-  
+
+  /* One confirmation per invoice, under its total: "these charges, this
+     amount, are right". Dashed while it still needs doing, solid green once
+     done — so an unchecked bill reads as unfinished at a glance. */
+  .invoice-verify {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin-top: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+
+  .invoice-verify.is-verified {
+    border-style: solid;
+    border-color: var(--ok-line);
+    background: var(--ok-wash);
+  }
+
+  .invoice-verify p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .invoice-verify p b {
+    color: var(--ink);
+  }
+
+  /* =========================================================
+     BILLING CYCLE REVIEW (generate -> check -> post gate)
+     ========================================================= */
+
+  .billing-review {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .billing-review-banner {
+    margin: 0;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-md);
+    background: var(--warn-wash);
+    color: var(--warn-text);
+    font-size: 13px;
+  }
+
+  .billing-review-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: 13px;
+    color: var(--muted);
+    width: fit-content;
+  }
+
+  .billing-review-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .billing-review-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .billing-review-table td {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    font-size: 13px;
+  }
+
+  .billing-review-row td strong {
+    display: block;
+    color: var(--ink);
+  }
+
+  .billing-review-row td small {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* Underpaid: charged rent below the room's contracted rate. */
+  .billing-review-row.is-under {
+    background: var(--bad-wash);
+  }
+
+  .billing-review-row.is-under td strong {
+    color: var(--bad-text);
+  }
+
+  /* Overpaid: charged rent above the room's contracted rate. */
+  .billing-review-row.is-over {
+    background: var(--prep-wash);
+  }
+
+  .billing-review-row.is-over td strong {
+    color: var(--prep-text);
+  }
+
+  .billing-review-no-item {
+    color: var(--warn-text) !important;
+  }
+
+  .billing-review-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    min-width: 180px;
+  }
+
+  .billing-review-edit input {
+    padding: 6px var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    font-size: 13px;
+  }
+
+  .billing-review-edit-actions {
+    display: flex;
+    gap: var(--sp-2);
+  }
+
+  .billing-review-table td button {
+    margin-top: var(--sp-1);
+    margin-right: var(--sp-1);
+  }
+
   /* =========================================================
      PAYMENT HISTORY
      ========================================================= */
@@ -6582,7 +7460,47 @@
   .pricing-editor {
     padding: var(--sp-6);
   }
-  
+
+  /* "Room transfer fee" quick-edit — was hand-styled with raw hex colours
+     and pixel gaps instead of the shared tokens every other pricing-card
+     row uses, and had no padding of its own (its sibling gets padding from
+     .pricing-editor, which this row never carried). */
+  .pricing-fee-row {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-4);
+  }
+
+  .pricing-fee-row-copy {
+    flex: 1;
+    min-width: 220px;
+  }
+
+  .pricing-fee-row-copy small {
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 11px;
+  }
+
+  .pricing-fee-row-copy p {
+    margin: var(--sp-1) 0 0;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .pricing-fee-row form {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--sp-2);
+  }
+
+  .pricing-fee-row input {
+    width: 140px;
+  }
+
   .pricing-filter-grid {
     display: grid;
     grid-template-columns: repeat(5, minmax(150px, 1fr));
@@ -8874,6 +9792,55 @@
     box-shadow: var(--ring);
   }
 
+  /* Same pill as .v2-search / .v2-pill-select either side of it, holding two
+     DateField instances — sized down from their usual full-width so a pair
+     fits one pill, with a dash between them instead of the "to" label the
+     wider reservation filter uses. */
+  .table-v2 .v2-date-range {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--sp-2);
+    height: 46px;
+    padding: 0 var(--sp-4);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .table-v2 .v2-date-range:focus-within {
+    border-color: var(--green-mid);
+    box-shadow: var(--ring);
+  }
+
+  .table-v2 .v2-date-range-label {
+    flex: none;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: 700;
+  }
+
+  .table-v2 .v2-date-range .date-field {
+    width: 122px;
+  }
+
+  /* Right padding is load-bearing: DateField copies it onto the overlay
+     label, and without it the label's text runs under the native calendar
+     icon that still draws in that corner. */
+  .table-v2 .v2-date-range .v2-date-input {
+    height: 100%;
+    padding: 0 20px 0 0;
+    border: 0;
+    background: transparent;
+    font-size: var(--text-sm);
+    font-weight: 700;
+  }
+
+  .table-v2 .v2-date-range-sep {
+    flex: none;
+    color: var(--muted-soft);
+  }
+
   .table-v2 .v2-reset {
     height: 46px;
     padding: 0 var(--sp-5);
@@ -9419,6 +10386,106 @@
   background: var(--ok-fill);
 }
 
+/* =========================================================
+   METER OVERDUE REMINDER
+   ========================================================= */
+
+.meter-overdue-panel {
+  border-color: var(--warn-line);
+  background: var(--warn-wash);
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Collapsed by default — the whole panel is one row until clicked, so a
+   list that starts near-full every month (see the feature's own design
+   note) doesn't push the actual entry grid off screen. */
+.meter-overdue-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  background: transparent;
+  color: var(--warn-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.meter-overdue-toggle:hover {
+  background: var(--warn-fill);
+}
+
+.meter-overdue-toggle-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-overdue-chevron {
+  flex: none;
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.meter-overdue-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.meter-overdue-body {
+  padding: 0 var(--sp-4) var(--sp-4);
+  border-top: 1px solid var(--warn-line);
+}
+
+.meter-overdue-body p {
+  margin: var(--sp-3) 0 0;
+  color: var(--warn-text);
+  font-size: 12px;
+}
+
+.meter-overdue-note {
+  font-weight: 600;
+}
+
+.meter-overdue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--sp-3);
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.meter-overdue-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px var(--sp-2);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+
+.meter-overdue-chip:hover {
+  background: var(--warn-fill);
+}
+
+.meter-overdue-chip strong {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.meter-overdue-chip small {
+  font-size: 10px;
+  color: var(--warn-text);
+}
+
 /* A file input dressed as a button. Without this the native control renders
    inside the label — "Upload updated CSVChoose File No file chosen" — and
    stretches what should be a button into a full-width box beside its two
@@ -9438,6 +10505,90 @@
   height: 100%;
   opacity: 0;
   cursor: pointer;
+}
+
+/* FileField (shared.tsx) — every upload field's replacement for the native
+   "Choose File / No file chosen" control. The real input lives inside the
+   label, visually hidden but still focusable and still the thing a form
+   actually submits; the label is the click target and the drop zone. */
+.file-field {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.file-field-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--tint);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.file-field-control:hover {
+  border-color: var(--brand-mid);
+  background: var(--brand-soft);
+}
+
+.file-field-control:focus-within,
+.file-field-control.is-dragover {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: var(--ring);
+}
+
+.file-field-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--brand);
+}
+
+.file-field-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-field-text.is-empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.file-field-button {
+  flex: 0 0 auto;
+  padding: 6px var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Kept in the accessibility tree (focusable, announced, still what the
+   surrounding form submits) — just visually invisible, unlike the opacity
+   trick .file-button uses, since this one already has a real click target
+   in the label around it. */
+.file-field-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .meter-toolbar {
@@ -9702,52 +10853,50 @@
    every receipt against it. Read-only by design — the
    numbers belong to Finance, this only surfaces them.
    ========================================= */
-.billing-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: var(--sp-1);
-  margin-bottom: 16px;
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  overflow: hidden;
-}
-
-.billing-summary > div {
+/* One line: what this section is on the left, the only figure that needs
+   reading on the right. The three-tile summary it replaced spent most of a
+   screen restating totals that the invoice rows below already carry. */
+.billing-head {
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-4);
-  background: var(--surface);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
 }
 
-.billing-summary small {
+.billing-head small {
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
 
-.billing-summary b {
-  font-size: 22px;
+.billing-head h3 {
+  margin: 2px 0 0;
+  font-size: 15px;
+}
+
+.billing-outstanding {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.billing-outstanding b {
+  font-size: 20px;
   font-weight: 700;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 
-.billing-summary b.figure-in { color: var(--green); }
-.billing-summary b.figure-out { color: var(--coral); }
-
-.billing-summary span {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
+.billing-outstanding b.figure-in { color: var(--green); }
+.billing-outstanding b.figure-out { color: var(--coral); }
 
 .billing-invoice-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
 
 .billing-invoice {
@@ -9762,9 +10911,9 @@
 .billing-invoice-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
   width: 100%;
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   border: 0;
   background: transparent;
   text-align: left;
@@ -10518,4 +11667,19 @@
   text-transform: none;
   letter-spacing: 0;
   overflow-wrap: anywhere;
+}
+
+/* A booking that has been paid for but never had a room chosen. Nothing can
+   promote it into a tenancy, so the card says which step is missing rather
+   than sitting there with no action on it. Amber, not red: nothing is wrong,
+   something is simply unfinished. */
+.reservation-needs-room {
+  margin: 4px 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn-line, #fde68a);
+  border-radius: var(--r-sm);
+  background: var(--warn-wash);
+  color: var(--warn-text);
+  font-size: 11px;
+  line-height: 1.5;
 }

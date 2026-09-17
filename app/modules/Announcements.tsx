@@ -2,7 +2,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useState } from "react";
-import { Empty, Modal, dateLabel, formValues, titleCase } from "./shared";
+import {
+  DateField,
+  DateTimeField,
+  Empty,
+  Modal,
+  dateLabel,
+  formValues,
+  titleCase,
+} from "./shared";
 import type { Data, Row } from "./shared";
 
 export function AnnouncementsModule({
@@ -231,11 +239,11 @@ export function AnnouncementsModule({
             </label>
             <label>
               Publish date
-              <input name="publishAt" type="datetime-local" />
+              <DateTimeField name="publishAt" />
             </label>
             <label>
               Expiry date
-              <input name="expiresAt" type="date" />
+              <DateField name="expiresAt" type="date" />
             </label>
             <label className="wide">
               Title

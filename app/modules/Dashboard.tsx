@@ -42,7 +42,10 @@ export function DashboardModule({
       (bed) => bed.status === "reserved",
     ).length;
     const sellable = data.bedSpaces.filter(
-      (bed) => bed.status !== "special-use",
+      // "blocked" is the value the database actually uses for a bed out
+      // of service; "special-use" matched nothing, so the five storerooms
+      // were counted as lettable stock.
+      (bed) => bed.status !== "blocked",
     ).length;
     return {
       beds,

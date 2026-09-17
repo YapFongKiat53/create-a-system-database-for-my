@@ -6,9 +6,11 @@ import {
   COURSE_LEVELS,
   COURSE_LEVEL_LABELS,
   CheckInModal,
-  CourseOptions,
+  DateField,
+  CourseSelect,
   DemographicFields,
   Modal,
+  SchoolSelect,
   SearchIcon,
   Stat,
   StatusPill,
@@ -159,7 +161,7 @@ function RoomChangeForm({
 
       <label>
         Effective date
-        <input
+        <DateField
           name="effectiveDate"
           type="date"
           required
@@ -230,7 +232,7 @@ function RoomChangeForm({
       </label>
       <label>
         New lease end
-        <input name="leaseEndDate" type="date" />
+        <DateField name="leaseEndDate" type="date" />
       </label>
       <label className="wide">
         Reason / remarks
@@ -361,7 +363,7 @@ function RateChangeForm({
       </p>
       <label>
         Effective date
-        <input
+        <DateField
           name="effectiveDate"
           type="date"
           required
@@ -640,46 +642,58 @@ function StudentBilling({
           sum + Number(payment.verifiedAmount ?? payment.amount ?? 0),
         0,
       );
-  const pendingOn = (invoice: Row) =>
-    (invoice.payments || [])
-      .filter((payment: Row) => payment.status !== "verified")
-      .reduce(
-        (sum: number, payment: Row) => sum + Number(payment.amount || 0),
-        0,
-      );
-
-  const totalBilled = invoices.reduce(
-    (sum, invoice) => sum + Number(invoice.totalAmount || 0),
-    0,
-  );
-  const totalReceived = invoices.reduce(
-    (sum, invoice) => sum + receivedOn(invoice),
-    0,
-  );
-  const totalPending = invoices.reduce(
-    (sum, invoice) => sum + pendingOn(invoice),
-    0,
-  );
-  const balance = totalBilled - totalReceived;
 
   // Money arrives against one invoice but settles the account as a whole: an
   // overpayment on an early bill covers a later one. Billing no longer emits a
   // credit line for that (doing so let the same ringgit reduce the balance
-  // twice), so the surplus is applied here instead — oldest invoice first,
-  // which is both how the money would be applied in practice and what stops a
-  // covered invoice from looking unpaid.
+  // twice), so the surplus is applied here instead.
+  //
+  // Each invoice takes its own payments first, and only what is genuinely
+  // left over spreads to the others, oldest first. A plain oldest-first pass
+  // over the pooled total gives the same account balance but puts the money
+  // on the wrong rows: a payment recorded against this month's rent would be
+  // swallowed by an older unpaid bill, and since the move-in bill is no
+  // longer listed here, that reads as a recorded payment doing nothing at
+  // all — invoice still "Unpaid", full amount owing.
   const settledOf = new Map<string, number>();
-  let creditPool = totalReceived;
-  for (const invoice of [...invoices].sort(
-    (a, b) => Number(a.id) - Number(b.id),
-  )) {
+  const byAge = [...invoices].sort((a, b) => Number(a.id) - Number(b.id));
+  let creditPool = 0;
+  for (const invoice of byAge) {
     const due = Math.max(0, Number(invoice.totalAmount || 0));
-    const applied = Math.min(creditPool, due);
-    creditPool -= applied;
+    const own = receivedOn(invoice);
+    const applied = Math.min(own, due);
+    creditPool += own - applied;
     settledOf.set(String(invoice.id), applied);
+  }
+  for (const invoice of byAge) {
+    if (creditPool <= 0) break;
+    const due = Math.max(0, Number(invoice.totalAmount || 0));
+    const already = settledOf.get(String(invoice.id)) || 0;
+    const applied = Math.min(creditPool, due - already);
+    if (applied <= 0) continue;
+    creditPool -= applied;
+    settledOf.set(String(invoice.id), already + applied);
   }
   // Anything left over has not been claimed by any invoice yet.
   const unappliedCredit = creditPool;
+
+  const owedOn = (invoice: Row) =>
+    Number(invoice.totalAmount || 0) - (settledOf.get(String(invoice.id)) || 0);
+
+  // The move-in bill — deposit, admin fee, first month in advance — is
+  // collected by Sales before the student ever arrives and is chased on the
+  // Reservations screen, which shows the same figures. Repeating it here
+  // buried the ongoing tenancy charges this tab exists for, so it is left
+  // out of the list and out of the balance; anything still owing on it gets
+  // a single line below rather than disappearing quietly.
+  const ongoingInvoices = invoices.filter((invoice) => invoice.cycleId);
+  const moveInOwing = invoices
+    .filter((invoice) => !invoice.cycleId)
+    .reduce((sum, invoice) => sum + Math.max(0, owedOn(invoice)), 0);
+  const outstanding = ongoingInvoices.reduce(
+    (sum, invoice) => sum + owedOn(invoice),
+    0,
+  );
 
   // Why the rent on an invoice changed. A room change closes one tenancy and
   // opens another, so the rent and deposit only make sense read against the
@@ -724,58 +738,42 @@ function StudentBilling({
 
   return (
     <section className="drawer-section">
-      <div className="section-title">
+      <div className="billing-head">
         <div>
           <small>BILLING INFORMATION</small>
-          <h3>Everything charged and everything paid</h3>
+          <h3>Ongoing charges · view only</h3>
         </div>
-      </div>
-
-      <div className="billing-summary">
-        <div>
-          <small>TOTAL BILLED</small>
-          <b>{money(totalBilled, true)}</b>
-          <span>
-            {invoices.length} invoice{invoices.length === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div>
-          <small>RECEIVED</small>
-          <b className="figure-in">{money(totalReceived, true)}</b>
-          <span>
-            {totalPending
-              ? `${money(totalPending, true)} awaiting verification`
-              : "All payments verified"}
-          </span>
-        </div>
-        <div>
-          <small>{balance < 0 ? "CREDIT" : "OUTSTANDING"}</small>
-          <b className={balance > 0 ? "figure-out" : "figure-in"}>
-            {money(Math.abs(balance), true)}
+        <div className="billing-outstanding">
+          <small>{outstanding < -0.005 ? "CREDIT" : "OUTSTANDING"}</small>
+          <b className={outstanding > 0.005 ? "figure-out" : "figure-in"}>
+            {money(Math.abs(outstanding), true)}
           </b>
-          <span>
-            {balance > 0
-              ? "Still owed by the student"
-              : balance < 0
-                ? "Carries to the next invoice"
-                : "Fully settled"}
-          </span>
         </div>
       </div>
 
-      {unappliedCredit > 0.005 && (
+      {(moveInOwing > 0.005 || unappliedCredit > 0.005) && (
         <p className="billing-credit-note">
-          <b>{money(unappliedCredit, true)}</b> of this student&apos;s payments
-          is not claimed by any invoice yet — it settles the next one
-          automatically, so nothing needs to be recorded again.
+          {moveInOwing > 0.005 && (
+            <>
+              Move-in costs: <b>{money(moveInOwing, true)}</b> still owing —
+              collected and chased on the Reservations screen, so it is not
+              counted above.
+            </>
+          )}
+          {moveInOwing > 0.005 && unappliedCredit > 0.005 && " "}
+          {unappliedCredit > 0.005 && (
+            <>
+              <b>{money(unappliedCredit, true)}</b> paid is not claimed by any
+              invoice yet — it settles the next one automatically.
+            </>
+          )}
         </p>
       )}
 
-      {invoices.length ? (
+      {ongoingInvoices.length ? (
         <div className="billing-invoice-list">
-          {invoices.map((invoice) => {
+          {ongoingInvoices.map((invoice) => {
             const received = receivedOn(invoice);
-            const pending = pendingOn(invoice);
             // Settled by the account, not just by payments booked against
             // this one invoice — otherwise a bill covered by an earlier
             // overpayment reads as outstanding.
@@ -799,21 +797,20 @@ function StudentBilling({
                   <span className="billing-invoice-id">
                     <code>{invoice.invoiceNo}</code>
                     <small>
-                      {invoice.cycleId ? "Monthly billing" : "Move-in costs"}
-                      {invoice.roomCode ? ` · ${invoice.roomCode}` : ""}
+                      {invoice.roomCode ? `${invoice.roomCode} · ` : ""}
                       {invoice.dueDate
-                        ? ` · Due ${dateLabel(invoice.dueDate)}`
-                        : ""}
+                        ? `Due ${dateLabel(invoice.dueDate)}`
+                        : "No due date"}
                     </small>
                   </span>
                   <span className="billing-invoice-figures">
                     <b>{money(invoice.totalAmount, true)}</b>
                     <small>
-                      {money(settled, true)} settled
-                      {coveredElsewhere > 0.005
-                        ? ` (${money(coveredElsewhere, true)} from earlier payments)`
-                        : ""}
-                      {owed > 0.005 ? ` · ${money(owed, true)} owing` : ""}
+                      {owed > 0.005
+                        ? `${money(owed, true)} owing`
+                        : coveredElsewhere > 0.005
+                          ? "Settled from earlier payments"
+                          : "Settled"}
                     </small>
                   </span>
                   {/* Reads the account position, not the stored status: an
@@ -861,37 +858,25 @@ function StudentBilling({
                       </p>
                     )}
 
-                    <h4>
-                      Payments received
-                      {pending
-                        ? ` · ${money(pending, true)} awaiting verification`
-                        : ""}
-                    </h4>
+                    {/* Verification state is deliberately absent — whether
+                        Accounts has checked a slip off is their workflow, on
+                        their screen. What matters here is what was paid and
+                        when, so the amount shown is the verified figure where
+                        there is one and the submitted figure otherwise. */}
+                    <h4>Payments received</h4>
                     {payments.length ? (
                       <div className="billing-payment-list">
                         {payments.map((payment: Row) => {
                           const slips = slipsFor(payment.id);
-                          const verified = payment.status === "verified";
                           return (
                             <div key={payment.id} className="billing-payment">
                               <span className="billing-payment-amount">
                                 <b>
                                   {money(
-                                    verified
-                                      ? (payment.verifiedAmount ??
-                                        payment.amount)
-                                      : payment.amount,
+                                    payment.verifiedAmount ?? payment.amount,
                                     true,
                                   )}
                                 </b>
-                                {verified &&
-                                  payment.verifiedAmount !== null &&
-                                  Number(payment.verifiedAmount) !==
-                                    Number(payment.amount) && (
-                                    <small>
-                                      submitted {money(payment.amount, true)}
-                                    </small>
-                                  )}
                               </span>
                               <span className="billing-payment-meta">
                                 <b>
@@ -904,12 +889,8 @@ function StudentBilling({
                                   {payment.actualReference || payment.reference
                                     ? ` · ${payment.actualReference || payment.reference}`
                                     : ""}
-                                  {payment.verifiedBy
-                                    ? ` · verified by ${payment.verifiedBy}`
-                                    : ""}
                                 </small>
                               </span>
-                              <StatusPill status={payment.status} />
                               {slips.length ? (
                                 <a
                                   className="secondary compact"
@@ -939,9 +920,9 @@ function StudentBilling({
         </div>
       ) : (
         <p className="empty-copy">
-          No invoices for this student yet. Move-in costs appear here once the
-          reservation is converted; monthly charges appear once a billing cycle
-          is run.
+          Nothing billed yet — monthly charges appear here once a billing cycle
+          has been run. Move-in costs are not listed here; they sit with the
+          booking on the Reservations screen.
         </p>
       )}
 
@@ -1019,8 +1000,7 @@ function StudentBilling({
       )}
 
       <p className="field-note">
-        These figures come straight from Finance. To record or verify a payment,
-        open the invoice in Finance — this tab is a read-only view.
+        Read-only. Recording and verifying payments happens in Finance.
       </p>
     </section>
   );
@@ -1352,7 +1332,7 @@ function AssignRoomForm({
       <RoomPickerFields data={data} gender={studentGender} />
       <label>
         Check-in date
-        <input name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
+        <DateField name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
       </label>
       <label>
         Monthly rental
@@ -1372,11 +1352,11 @@ function AssignRoomForm({
       </label>
       <label>
         Lease start
-        <input name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01" />
+        <DateField name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01" />
       </label>
       <label>
         Lease end
-        <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
+        <DateField name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
       </label>
       <div className="form-actions wide">
         <button className="primary" disabled={busy}>
@@ -1423,6 +1403,8 @@ export function StudentsModule({
   const [addAssignRoom, setAddAssignRoom] = useState(false);
   const [editSchool, setEditSchool] = useState<Row | null>(null);
   const [editCourse, setEditCourse] = useState<Row | null>(null);
+  const [editRace, setEditRace] = useState<Row | null>(null);
+  const [editReligion, setEditReligion] = useState<Row | null>(null);
   const [drawerRecordsTab, setDrawerRecordsTab] = useState("profile");
   // Which invoice's charge lines and receipts are expanded in the billing tab.
   const [openInvoiceId, setOpenInvoiceId] = useState<string | number | null>(
@@ -1441,9 +1423,17 @@ export function StudentsModule({
   const tenantRole = data.roles.find((role) => role.roleKey === "tenant");
   const loginFor = (studentId: number | string) =>
     data.users.find((user) => String(user.studentId) === String(studentId));
-  const schoolNames = data.schools.map((school) => school.name as string);
-  const withCurrent = (list: string[], current?: string) =>
-    current && !list.includes(current) ? [current, ...list] : list;
+  // Agencies aren't a managed list — there is no table of them and most
+  // students come in direct. Offering the names already entered keeps the
+  // spelling consistent (one "Sunway Education", not four) while leaving the
+  // field free text, so a new agency needs no setup first.
+  const agencyNames = [
+    ...new Set(
+      data.students
+        .map((item) => String(item.agency || "").trim())
+        .filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
   const student = useMemo(() => {
     if (!selectedStudentRef) return null;
@@ -1463,6 +1453,20 @@ export function StudentsModule({
       null
     );
   }, [data.students, selectedStudentRef]);
+
+  // Rooms this student held before their current one (or, if they've moved
+  // out, before that) — a room change retires one tenancy row and opens
+  // another, and a move-out just ends one, so every prior room is already
+  // sitting in pastTenancies. Newest first.
+  const studentPastRooms = useMemo(() => {
+    if (!student) return [];
+    return data.pastTenancies
+      .filter((row) => String(row.studentId) === String(student.id))
+      .filter((row) => row.roomCode)
+      .sort((a, b) =>
+        String(b.checkOutDate || "").localeCompare(String(a.checkOutDate || "")),
+      );
+  }, [data.pastTenancies, student]);
 
   const hostelDirectory = useMemo(() => {
     const rows: Array<{
@@ -1623,6 +1627,27 @@ export function StudentsModule({
     unitFilter,
   ]);
 
+  // Each student's single most recent past room, for the directory table's
+  // Room column — a room change retires one tenancy row and opens another,
+  // so the prior room is already sitting in pastTenancies. Built once as a
+  // lookup rather than filtering per row.
+  const lastPastRoomByStudentId = useMemo(() => {
+    const map = new Map<string, Row>();
+    for (const row of data.pastTenancies) {
+      if (!row.roomCode) continue;
+      const key = String(row.studentId);
+      const current = map.get(key);
+      if (
+        !current ||
+        String(row.checkOutDate || "").localeCompare(
+          String(current.checkOutDate || ""),
+        ) > 0
+      )
+        map.set(key, row);
+    }
+    return map;
+  }, [data.pastTenancies]);
+
   const totalPages = Math.max(
     1,
     Math.ceil(filteredStudents.length / PAGE_SIZE),
@@ -1690,6 +1715,13 @@ export function StudentsModule({
 
   return (
     <div className="table-v2">
+      {/* Shared by the Agency field on both the add and the edit form —
+          suggestions only, the field stays free text. */}
+      <datalist id="agency-names">
+        {agencyNames.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       <div className="student-hostel-page">
         <section className="intro compact-intro student-directory-intro">
           <div>
@@ -1714,6 +1746,20 @@ export function StudentsModule({
               onClick={() => setModal("schools")}
             >
               Manage schools
+            </button>
+            <button
+              type="button"
+              className="v2-btn-ghost"
+              onClick={() => setModal("races")}
+            >
+              Manage races
+            </button>
+            <button
+              type="button"
+              className="v2-btn-ghost"
+              onClick={() => setModal("religions")}
+            >
+              Manage religions
             </button>
             <button
               type="button"
@@ -1980,6 +2026,15 @@ export function StudentsModule({
                             ) : (
                               <span className="muted">Not assigned</span>
                             )}
+                            {lastPastRoomByStudentId.get(String(item.id)) && (
+                              <small className="prior-room-note">
+                                Previously:{" "}
+                                {
+                                  lastPastRoomByStudentId.get(String(item.id))
+                                    ?.roomCode
+                                }
+                              </small>
+                            )}
                           </td>
                           <td>
                             {item.contactNumber || "-"}
@@ -2243,6 +2298,21 @@ export function StudentsModule({
 
               <div className="drawer-subsection">
                 <h4>Student information</h4>
+                {studentPastRooms.length > 0 && (
+                  <p className="prior-room-note">
+                    Previously lived in:{" "}
+                    {studentPastRooms
+                      .map(
+                        (row) =>
+                          `${row.roomCode}${
+                            row.checkOutDate
+                              ? ` (until ${dateLabel(row.checkOutDate)})`
+                              : ""
+                          }`,
+                      )
+                      .join(", ")}
+                  </p>
+                )}
                 <div className="form-grid">
                   <label>
                     Full name
@@ -2265,7 +2335,7 @@ export function StudentsModule({
                   </label>
                   <label>
                     Date of birth
-                    <input
+                    <DateField
                       name="dateOfBirth"
                       type="date"
                       defaultValue={student.dateOfBirth || ""}
@@ -2279,9 +2349,10 @@ export function StudentsModule({
                     state={student.state || ""}
                     hometown={student.hometown || ""}
                     race={student.race || ""}
-                    raceOther={student.raceOther || ""}
                     religion={student.religion || ""}
-                    religionOther={student.religionOther || ""}
+                    races={data.races}
+                    religions={data.religions}
+                    save={save}
                   />
                 </div>
               </div>
@@ -2413,7 +2484,7 @@ export function StudentsModule({
                     <div className="form-grid">
                       <label>
                         Check-in
-                        <input
+                        <DateField
                           name="checkInDate"
                           type="date"
                           defaultValue={student.checkInDate || ""}
@@ -2421,7 +2492,7 @@ export function StudentsModule({
                       </label>
                       <label>
                         Check-out
-                        <input
+                        <DateField
                           name="checkOutDate"
                           type="date"
                           defaultValue={student.checkOutDate || ""}
@@ -2429,7 +2500,7 @@ export function StudentsModule({
                       </label>
                       <label>
                         Lease start
-                        <input
+                        <DateField
                           name="leaseStartDate"
                           type="date"
                           defaultValue={student.leaseStartDate || ""}
@@ -2437,45 +2508,11 @@ export function StudentsModule({
                       </label>
                       <label>
                         Lease end
-                        <input
+                        <DateField
                           name="leaseEndDate"
                           type="date"
                           defaultValue={student.leaseEndDate || ""}
                         />
-                      </label>
-                    </div>
-                    <p className="section-kicker room-details-group">RENEWAL</p>
-                    <div className="form-grid">
-                      <label className="wide">
-                        Renewal status
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {student.renewalAppliedAt ? (
-                            <span>
-                              Applied on {dateLabel(student.renewalAppliedAt)}
-                            </span>
-                          ) : (
-                            <>
-                              <span style={{ color: '#6b7280' }}>
-                                Not yet applied
-                              </span>
-                              <button
-                                type="button"
-                                className="secondary compact"
-                                onClick={() =>
-                                  save(
-                                    {
-                                      action: "assignment-renewal-apply",
-                                      assignmentId: student.assignmentId,
-                                    },
-                                    "Renewal marked as applied",
-                                  )
-                                }
-                              >
-                                Mark renewal applied
-                              </button>
-                            </>
-                          )}
-                        </div>
                       </label>
                     </div>
                   </>
@@ -2542,19 +2579,21 @@ export function StudentsModule({
                 <div className="form-grid">
                   <label>
                     School
-                    <select name="school" defaultValue={student.school || ""}>
-                      <option value="">Not set</option>
-                      {withCurrent(schoolNames, student.school).map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                      <option value="Other">Other</option>
-                    </select>
+                    <SchoolSelect
+                      name="school"
+                      schools={data.schools}
+                      defaultValue={student.school || ""}
+                      save={save}
+                    />
                   </label>
                   <label>
                     Course enrolled
-                    <select name="course" defaultValue={student.course || ""}>
-                      <CourseOptions courses={data.courses} current={student.course} />
-                    </select>
+                    <CourseSelect
+                      name="course"
+                      courses={data.courses}
+                      defaultValue={student.course || ""}
+                      save={save}
+                    />
                   </label>
                   <label>
                     Application form no.
@@ -2578,7 +2617,15 @@ export function StudentsModule({
                       ))}
                     </select>
                   </label>
-                  <input type="hidden" name="agency" value={student.agency || ""} />
+                  <label>
+                    Agency
+                    <input
+                      name="agency"
+                      list="agency-names"
+                      placeholder="Leave blank if they came direct"
+                      defaultValue={student.agency || ""}
+                    />
+                  </label>
                   <label>
                     Receipt serial no.
                     <input name="receiptNo" placeholder="e.g. 1234567890" defaultValue={student.receiptNo} />
@@ -2778,9 +2825,13 @@ export function StudentsModule({
                 </label>
                 <label>
                   Date of birth
-                  <input name="dateOfBirth" type="date" />
+                  <DateField name="dateOfBirth" type="date" />
                 </label>
-                <DemographicFields />
+                <DemographicFields
+                  races={data.races}
+                  religions={data.religions}
+                  save={save}
+                />
               </div>
             </div>
             <div className="drawer-subsection wide">
@@ -2810,19 +2861,11 @@ export function StudentsModule({
               <div className="form-grid">
                 <label>
                   School
-                  <select name="school" defaultValue="">
-                    <option value="">Not set</option>
-                    {schoolNames.map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                    <option value="Other">Other</option>
-                  </select>
+                  <SchoolSelect name="school" schools={data.schools} save={save} />
                 </label>
                 <label>
                   Course enrolled
-                  <select name="course" defaultValue="">
-                    <CourseOptions courses={data.courses} />
-                  </select>
+                  <CourseSelect name="course" courses={data.courses} save={save} />
                 </label>
                 <label>
                   Application form no.
@@ -2841,6 +2884,14 @@ export function StudentsModule({
                       <option key={name}>{name}</option>
                     ))}
                   </select>
+                </label>
+                <label>
+                  Agency
+                  <input
+                    name="agency"
+                    list="agency-names"
+                    placeholder="Leave blank if they came direct"
+                  />
                 </label>
                 <label>
                   Receipt serial no.
@@ -2903,15 +2954,15 @@ export function StudentsModule({
                   </label>
                   <label>
                     Check-in
-                    <input name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
+                    <DateField name="checkInDate" type="date" placeholder="e.g. 2026-01-01" />
                   </label>
                   <label>
                     Lease start
-                    <input name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01"  />
+                    <DateField name="leaseStartDate" type="date" placeholder="e.g. 2026-01-01"  />
                   </label>
                   <label>
                     Lease end
-                    <input name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
+                    <DateField name="leaseEndDate" type="date" placeholder="e.g. 2026-01-01" />
                   </label>
                 </div>
               )}
@@ -2964,12 +3015,15 @@ export function StudentsModule({
           >
             <label>
               Check-out date
-              <input name="checkOutDate" type="date" required placeholder="e.g. 2026-01-01" />
+              <DateField name="checkOutDate" type="date" required placeholder="e.g. 2026-01-01" />
             </label>
-            <label>
-              Check-out meter
-              <input name="checkOutMeter" type="number" step="0.01" placeholder="e.g. 1000" />
-            </label>
+            {/* No meter field: reading it is Maintenance's job, done when
+                they go in to inspect the room. The move-out puts the room on
+                their Room turnover tab to key it in. */}
+            <p className="wide field-note">
+              The check-out meter reading is taken by Maintenance — this room
+              goes onto their Room turnover list to record it.
+            </p>
             <label>
               Set profile status
               <select name="profileStatus" defaultValue="moved-out">
@@ -3066,6 +3120,176 @@ export function StudentsModule({
             ))}
             {data.schools.length === 0 && (
               <p className="empty-copy">No schools yet. Add one above.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {modal === "races" && (
+        <Modal
+          title="Manage races"
+          kicker="DEMOGRAPHIC LIST"
+          onClose={() => {
+            setModal("");
+            setEditRace(null);
+          }}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                editRace
+                  ? {
+                    action: "race-update",
+                    raceId: editRace.id,
+                    ...formValues(e),
+                  }
+                  : { action: "race-create", ...formValues(e) },
+                editRace ? "Race updated" : "Race added",
+              );
+              if (ok) {
+                setEditRace(null);
+                (e.target as HTMLFormElement).reset();
+              }
+            }}
+          >
+            <label className="wide">
+              {editRace ? "Rename race" : "New race name"}
+              <input
+                name="name"
+                required
+                key={editRace?.id || "new"}
+                defaultValue={editRace?.name || ""}
+              />
+            </label>
+            <div className="form-actions wide">
+              {editRace && (
+                <button
+                  type="button"
+                  className="secondary compact"
+                  onClick={() => setEditRace(null)}
+                >
+                  Cancel edit
+                </button>
+              )}
+              <button className="primary compact" disabled={busy}>
+                {editRace ? "Save race" : "Add race"}
+              </button>
+            </div>
+          </form>
+          <div className="compact-list">
+            {data.races.map((race) => (
+              <span key={race.id}>
+                <b>{race.name}</b>
+                <div className="button-row">
+                  <button
+                    className="secondary compact"
+                    onClick={() => setEditRace(race)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="secondary compact"
+                    onClick={() =>
+                      save(
+                        { action: "race-delete", raceId: race.id },
+                        "Race removed",
+                      )
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              </span>
+            ))}
+            {data.races.length === 0 && (
+              <p className="empty-copy">No races yet. Add one above.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {modal === "religions" && (
+        <Modal
+          title="Manage religions"
+          kicker="DEMOGRAPHIC LIST"
+          onClose={() => {
+            setModal("");
+            setEditReligion(null);
+          }}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                editReligion
+                  ? {
+                    action: "religion-update",
+                    religionId: editReligion.id,
+                    ...formValues(e),
+                  }
+                  : { action: "religion-create", ...formValues(e) },
+                editReligion ? "Religion updated" : "Religion added",
+              );
+              if (ok) {
+                setEditReligion(null);
+                (e.target as HTMLFormElement).reset();
+              }
+            }}
+          >
+            <label className="wide">
+              {editReligion ? "Rename religion" : "New religion name"}
+              <input
+                name="name"
+                required
+                key={editReligion?.id || "new"}
+                defaultValue={editReligion?.name || ""}
+              />
+            </label>
+            <div className="form-actions wide">
+              {editReligion && (
+                <button
+                  type="button"
+                  className="secondary compact"
+                  onClick={() => setEditReligion(null)}
+                >
+                  Cancel edit
+                </button>
+              )}
+              <button className="primary compact" disabled={busy}>
+                {editReligion ? "Save religion" : "Add religion"}
+              </button>
+            </div>
+          </form>
+          <div className="compact-list">
+            {data.religions.map((religion) => (
+              <span key={religion.id}>
+                <b>{religion.name}</b>
+                <div className="button-row">
+                  <button
+                    className="secondary compact"
+                    onClick={() => setEditReligion(religion)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="secondary compact"
+                    onClick={() =>
+                      save(
+                        { action: "religion-delete", religionId: religion.id },
+                        "Religion removed",
+                      )
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              </span>
+            ))}
+            {data.religions.length === 0 && (
+              <p className="empty-copy">No religions yet. Add one above.</p>
             )}
           </div>
         </Modal>

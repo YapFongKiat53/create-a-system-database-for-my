@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  DateField,
   Empty,
   SearchIcon,
   Stat,
@@ -294,7 +295,7 @@ export function ReportsModule({
           {selectedReport === 5 && (
             <section className="module-metrics report-modal-metrics">
               <Stat
-                value={`${Math.round((data.bedSpaces.filter((bed) => bed.status === "occupied").length / Math.max(1, data.bedSpaces.filter((bed) => bed.status !== "special-use").length)) * 100)}%`}
+                value={`${Math.round((data.bedSpaces.filter((bed) => bed.status === "occupied").length / Math.max(1, data.bedSpaces.filter((bed) => bed.status !== "blocked").length)) * 100)}%`}
                 label="Occupancy"
               />
               <Stat
@@ -353,7 +354,7 @@ export function ReportsModule({
             </select>
             <label className="v2-date-field">
               From
-              <input
+              <DateField
                 type="date"
                 value={reportFrom}
                 onChange={(event) => setReportFrom(event.target.value)}
@@ -361,7 +362,7 @@ export function ReportsModule({
             </label>
             <label className="v2-date-field">
               To
-              <input
+              <DateField
                 type="date"
                 value={reportTo}
                 onChange={(event) => setReportTo(event.target.value)}

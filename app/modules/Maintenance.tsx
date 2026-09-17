@@ -4,8 +4,10 @@
 import { useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  DateField,
   DocumentTile,
   Empty,
+  FileField,
   Modal,
   ReportCard,
   SearchIcon,
@@ -25,6 +27,13 @@ import {
 } from "./shared";
 import type { Data, Row } from "./shared";
 import { BASE_PATH } from "../basePath";
+
+// Computed once at module load, like `today` in shared.tsx — the Cleaning
+// tab's "cleaned recently" count reads off this instead of calling
+// Date.now()/new Date() during render, which React's purity rule flags.
+const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
 
 // Pictures and videos render inline (no click-through needed) and split
 // into their own sections since they're viewed differently. Anything else —
@@ -176,6 +185,57 @@ export function MaintenanceModule({
   const [ticketStatusFilter, setTicketStatusFilter] = useState("open");
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketHostel, setTicketHostel] = useState("all");
+  // Its own filter rather than sharing the ticket list's: 151 empty rooms is
+  // a long list, and whoever is looking at it is usually going to one
+  // building today.
+  const [turnoverHostel, setTurnoverHostel] = useState("all");
+  const [cleaningQuery, setCleaningQuery] = useState("");
+  const [cleaningHostel, setCleaningHostel] = useState("all");
+  const [markingCleanRoomId, setMarkingCleanRoomId] = useState<
+    string | number | null
+  >(null);
+  const [completingCleanTicketId, setCompletingCleanTicketId] = useState<
+    string | number | null
+  >(null);
+  const [assigningCleanRoom, setAssigningCleanRoom] = useState<Row | null>(
+    null,
+  );
+  // The move-out cleaning ticket already exists (raised automatically) —
+  // assigning it is naming who does it, not creating a new ticket the way
+  // the routine-cleaning "Assign" button does.
+  const [assigningTurnoverTicket, setAssigningTurnoverTicket] =
+    useState<Row | null>(null);
+  // Check-out meter readings. The move-out form records only the date —
+  // reading the meter is Maintenance's job, done when they go in to inspect
+  // the room — so every departure without a reading waits here. It matters
+  // for money: until it is keyed in, the student who left is treated as
+  // still sharing the room's electricity to the end of the month, which
+  // lowers what the roommates who stayed are charged. The window keeps a
+  // tenancy that ended months ago, whose reading nobody can now take, from
+  // sitting on the list for good.
+  // Counted back from `today` (fixed when the page loads) rather than
+  // Date.now(), which React forbids during render — a re-render could
+  // otherwise shift the window and change what the list shows.
+  const checkoutMeterWindowStart = new Date(
+    Date.parse(`${today}T00:00:00Z`) - 60 * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  const pendingCheckoutMeters = (data.pastTenancies || [])
+    .filter(
+      (row) =>
+        row.checkOutDate &&
+        row.checkOutMeter == null &&
+        String(row.checkOutDate) >= checkoutMeterWindowStart &&
+        (turnoverHostel === "all" || String(row.hostelId) === turnoverHostel),
+    )
+    .sort((a, b) =>
+      String(b.checkOutDate).localeCompare(String(a.checkOutDate)),
+    );
+  const [checkoutMeterDrafts, setCheckoutMeterDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [confirmCheckoutMeter, setConfirmCheckoutMeter] = useState(false);
   const [ticketCategory, setTicketCategory] = useState("");
   const [ticketHostelId, setTicketHostelId] = useState("");
   const [ticketBlock, setTicketBlock] = useState("");
@@ -211,6 +271,10 @@ export function MaintenanceModule({
   const [entryQuery, setEntryQuery] = useState("");
   const [entryHideDone, setEntryHideDone] = useState(false);
   const [entryDraft, setEntryDraft] = useState<Record<string, string>>({});
+  // Collapsed by default — the overdue-reading panel starts near-full every
+  // month (most rooms simply haven't been read yet this round), so leaving
+  // it open by default would push the actual entry grid off screen.
+  const [overdueMeterOpen, setOverdueMeterOpen] = useState(false);
   const monthLabel = (ym: string) =>
     ym === "all"
       ? "All months"
@@ -335,6 +399,148 @@ export function MaintenanceModule({
   const meterRooms = [
     ...new Map(data.bedSpaces.map((bed) => [bed.roomId, bed])).values(),
   ];
+
+  // ---- Room turnover ----------------------------------------------------
+  // Every empty bed, with the two jobs that stand between it and a student
+  // walking in. A move-out raises them automatically; the ones sitting here
+  // with nothing open are rooms that emptied before this existed, or rooms
+  // already prepared. Sales still sees all of them as sellable — this list
+  // is about who has to go there, not about whether it can be booked.
+  const turnoverStageLabels: Record<string, string> = {
+    inspection: "Inspection",
+    cleaning: "Cleaning",
+  };
+  const openTurnoverTickets = data.tickets.filter(
+    (ticket) =>
+      ticket.turnoverStage &&
+      !closedStatuses.includes(ticket.status),
+  );
+  const turnoverByRoom = new Map<string, Row[]>();
+  for (const ticket of openTurnoverTickets) {
+    const key = String(ticket.roomId);
+    turnoverByRoom.set(key, [...(turnoverByRoom.get(key) || []), ticket]);
+  }
+  // Inspection before cleaning — that is the order the work happens in, and
+  // the ticket list arrives newest-first, which is neither.
+  for (const tickets of turnoverByRoom.values())
+    tickets.sort((a, b) =>
+      a.turnoverStage === b.turnoverStage
+        ? 0
+        : a.turnoverStage === "inspection"
+          ? -1
+          : 1,
+    );
+  const vacantBeds = data.bedSpaces.filter(
+    (bed) =>
+      bed.status === "vacant" &&
+      (turnoverHostel === "all" ||
+        String(bed.hostelId) === turnoverHostel),
+  );
+  const turnoverRooms = vacantBeds
+    .map((bed) => ({
+      bed,
+      tickets: turnoverByRoom.get(String(bed.roomId)) || [],
+    }))
+    .filter((entry) => entry.tickets.length > 0);
+  const turnoverReadyRooms = vacantBeds.length - turnoverRooms.length;
+
+  // ---- Cleaning -----------------------------------------------------------
+  // "When was this room last cleaned" reads off the same tickets as every
+  // other maintenance record rather than a separate log: a completed
+  // "Cleaning / Room cleaning" ticket (logged here, or raised the long way
+  // from the Tickets tab) and a completed move-out cleaning
+  // (turnoverStage === "cleaning") are both real cleanings of the room.
+  const cleaningTickets = data.tickets.filter(
+    (ticket) =>
+      (ticket.category === "Cleaning" || ticket.turnoverStage === "cleaning") &&
+      closedStatuses.includes(ticket.status),
+  );
+  const cleaningByRoom = new Map<string, Row[]>();
+  for (const ticket of cleaningTickets) {
+    const key = String(ticket.roomId);
+    const list = cleaningByRoom.get(key);
+    if (list) list.push(ticket);
+    else cleaningByRoom.set(key, [ticket]);
+  }
+  // A room can have an ad-hoc cleaning assigned and not yet done — separate
+  // from turnoverStage cleanings, which already have their own queue and
+  // workflow on the Room turnover tab.
+  const pendingCleaningByRoom = new Map<string, Row>();
+  for (const ticket of data.tickets) {
+    if (
+      ticket.category === "Cleaning" &&
+      !closedStatuses.includes(ticket.status)
+    )
+      pendingCleaningByRoom.set(String(ticket.roomId), ticket);
+  }
+  const pendingCleaningCount = pendingCleaningByRoom.size;
+  const cleaningRoomsAll = meterRooms.map((room) => {
+    const history = (cleaningByRoom.get(String(room.roomId)) || [])
+      .slice()
+      .sort((a, b) =>
+        String(b.completedAt || "").localeCompare(String(a.completedAt || "")),
+      );
+    return {
+      room,
+      lastCleanedAt: history[0]?.completedAt || null,
+      count: history.length,
+      pending: pendingCleaningByRoom.get(String(room.roomId)) || null,
+    };
+  });
+  const cleaningHostels = data.hostels.filter((hostel: Row) =>
+    meterRooms.some((room) => String(room.hostelId) === String(hostel.id)),
+  );
+  const cleaningRooms = cleaningRoomsAll
+    .filter(
+      (entry) =>
+        (cleaningHostel === "all" ||
+          String(entry.room.hostelId) === cleaningHostel) &&
+        (!cleaningQuery.trim() ||
+          `${entry.room.legacyCode} ${entry.room.hostelName}`
+            .toLowerCase()
+            .includes(cleaningQuery.trim().toLowerCase())),
+    )
+    .sort((a, b) =>
+      a.lastCleanedAt === b.lastCleanedAt
+        ? String(a.room.legacyCode).localeCompare(
+            String(b.room.legacyCode),
+            undefined,
+            { numeric: true },
+          )
+        : String(a.lastCleanedAt || "").localeCompare(
+            String(b.lastCleanedAt || ""),
+          ),
+    );
+  const neverCleanedCount = cleaningRoomsAll.filter(
+    (entry) => !entry.lastCleanedAt,
+  ).length;
+  const cleanedRecentlyCount = cleaningRoomsAll.filter(
+    (entry) =>
+      entry.lastCleanedAt &&
+      String(entry.lastCleanedAt).slice(0, 10) >= THIRTY_DAYS_AGO,
+  ).length;
+  // Shared by the Cleaning tab's "Mark done" and Room turnover's move-out
+  // cleaning: ticket-message resets assignedTo/costResponsibility/actualCost
+  // to whatever is in the payload, so completing has to resend the ticket's
+  // own current values or it silently blanks them.
+  const completeCleaningTicket = async (ticket: Row) => {
+    setCompletingCleanTicketId(ticket.id);
+    try {
+      await save(
+        {
+          action: "ticket-message",
+          ticketId: ticket.id,
+          statusAfter: "completed",
+          assignedTo: ticket.assignedTo,
+          costResponsibility: ticket.costResponsibility,
+          actualCost: ticket.actualCost,
+        },
+        "Room cleaning completed",
+      );
+    } finally {
+      setCompletingCleanTicketId(null);
+    }
+  };
 
   // ---- Month-entry grid -------------------------------------------------
   const meterHostels = data.hostels.filter((hostel: Row) =>
@@ -600,10 +806,41 @@ export function MaintenanceModule({
         </button>
         {data.currentUser?.roleKey !== "tenant" && (
           <button
+            className={tab === "turnover" ? "active" : ""}
+            onClick={() => setTab("turnover")}
+          >
+            Room turnover
+            {/* Everything waiting on Maintenance from a move-out: rooms to
+                inspect and clean, and meters still to read. */}
+            {turnoverRooms.length + pendingCheckoutMeters.length > 0 && (
+              <span className="tab-count pending">
+                {turnoverRooms.length + pendingCheckoutMeters.length}
+              </span>
+            )}
+          </button>
+        )}
+        {data.currentUser?.roleKey !== "tenant" && (
+          <button
+            className={tab === "cleaning" ? "active" : ""}
+            onClick={() => setTab("cleaning")}
+          >
+            Cleaning
+            {neverCleanedCount > 0 && (
+              <span className="tab-count pending">{neverCleanedCount}</span>
+            )}
+          </button>
+        )}
+        {data.currentUser?.roleKey !== "tenant" && (
+          <button
             className={tab === "meters" ? "active" : ""}
             onClick={() => setTab("meters")}
           >
             Meter readings
+            {data.overdueMeterRooms.length > 0 && (
+              <span className="tab-count pending">
+                {data.overdueMeterRooms.length}
+              </span>
+            )}
           </button>
         )}
         {data.currentUser?.roleKey !== "tenant" && (
@@ -792,6 +1029,71 @@ export function MaintenanceModule({
           </section>
         </>
       )}
+      {tab === "meters" &&
+        meterView === "entry" &&
+        data.overdueMeterRooms.length > 0 && (
+          <section className="panel meter-overdue-panel">
+            <button
+              type="button"
+              className="meter-overdue-toggle"
+              aria-expanded={overdueMeterOpen}
+              onClick={() => setOverdueMeterOpen((open) => !open)}
+            >
+              <span>
+                <span className="meter-overdue-toggle-count">
+                  {data.overdueMeterRooms.length}
+                </span>{" "}
+                room{data.overdueMeterRooms.length === 1 ? "" : "s"} still
+                need{data.overdueMeterRooms.length === 1 ? "s" : ""} a
+                reading before the next cut-off
+              </span>
+              <span
+                className={`meter-overdue-chevron${overdueMeterOpen ? " is-open" : ""}`}
+                aria-hidden
+              >
+                ▾
+              </span>
+            </button>
+            {overdueMeterOpen && (
+              <div className="meter-overdue-body">
+                <p>
+                  Once this cycle is generated, these rooms&apos; electricity
+                  for this round will not be billed to anyone — it is not
+                  deferred to next month, it is gone. Read the meter and key
+                  it in below before then.
+                </p>
+                <p className="meter-overdue-note">
+                  输入的日期请填今天，不要填实际去看表的那一天，不然这笔用量可能还是收不到。
+                </p>
+                <div className="meter-overdue-chips">
+                  {data.overdueMeterRooms.map((room) => (
+                    <button
+                      key={room.roomCode}
+                      type="button"
+                      className="meter-overdue-chip"
+                      onClick={() => {
+                        const match = meterRooms.find(
+                          (candidate) =>
+                            `${candidate.unitCode}-${candidate.roomLabel}` ===
+                            room.roomCode,
+                        );
+                        if (match) setEntryHostelId(String(match.hostelId));
+                        setEntryQuery(String(room.roomCode));
+                      }}
+                    >
+                      <strong>{room.roomCode}</strong>
+                      <small>
+                        {room.lastReadingDate
+                          ? `last read ${dateLabel(room.lastReadingDate)}`
+                          : "never read"}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       {tab === "meters" && meterView === "entry" && (
         <section className="panel">
           <div className="section-heading">
@@ -873,7 +1175,7 @@ export function MaintenanceModule({
             </label>
             <label className="inline-field">
               Reading date
-              <input
+              <DateField
                 type="date"
                 value={entryDate}
                 onChange={(event) => {
@@ -1148,6 +1450,463 @@ export function MaintenanceModule({
           </div>
         </section>
       )}
+      {tab === "turnover" && (
+        <>
+          <section className="module-metrics">
+            <Stat value={vacantBeds.length} label="Empty rooms" />
+            <Stat value={turnoverRooms.length} label="Still being prepared" />
+            <Stat value={turnoverReadyRooms} label="Ready to let" />
+          </section>
+          {/* First on the tab because it is the time-sensitive one: the
+              reading has to be taken before the next tenant starts using
+              the room, and keyed in before the month's billing cut-off. */}
+          {pendingCheckoutMeters.length > 0 && (
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <h3>Check-out meter readings to take</h3>
+                  <p>
+                    These students have moved out without a closing meter
+                    reading. Read the meter when you inspect the room and key
+                    it in here before the billing cut-off — until then the
+                    student is still counted as sharing the room&apos;s
+                    electricity, which undercharges the roommates who stayed.
+                  </p>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Room</th>
+                      <th>Student</th>
+                      <th>Moved out</th>
+                      <th>Check-out meter</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingCheckoutMeters.map((row) => {
+                      const key = String(row.id);
+                      const draft = checkoutMeterDrafts[key] || "";
+                      const studentName =
+                        data.students.find(
+                          (item) => String(item.id) === String(row.studentId),
+                        )?.fullName || "—";
+                      return (
+                        <tr key={key}>
+                          <td>
+                            <strong>{row.roomCode || "Room not set"}</strong>
+                            <small>{row.hostelName}</small>
+                          </td>
+                          <td>
+                            {studentName}
+                            {row.status === "moved" && (
+                              <small>Changed room</small>
+                            )}
+                          </td>
+                          <td>{dateLabel(row.checkOutDate)}</td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={draft}
+                              aria-label={`Check-out meter for ${row.roomCode || "this room"}`}
+                              placeholder={
+                                row.checkInMeter != null
+                                  ? `Moved in at ${row.checkInMeter}`
+                                  : "e.g. 1000"
+                              }
+                              onChange={(event) =>
+                                setCheckoutMeterDrafts((current) => ({
+                                  ...current,
+                                  [key]: event.target.value,
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              disabled={busy || draft === ""}
+                              onClick={async () => {
+                                const ok = await save(
+                                  {
+                                    action: "meter-checkout-reading",
+                                    assignmentId: row.id,
+                                    checkOutMeter: draft,
+                                    confirmSuspicious: confirmCheckoutMeter,
+                                  },
+                                  "Check-out meter recorded",
+                                );
+                                if (ok) {
+                                  setCheckoutMeterDrafts((current) => {
+                                    const next = { ...current };
+                                    delete next[key];
+                                    return next;
+                                  });
+                                  setConfirmCheckoutMeter(false);
+                                }
+                              }}
+                            >
+                              Save
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <SuspiciousConfirm
+                message={suspicious}
+                checked={confirmCheckoutMeter}
+                onChange={setConfirmCheckoutMeter}
+              />
+            </section>
+          )}
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <h3>Rooms to prepare</h3>
+                <p>
+                  A move-out raises the inspection and the cleaning here
+                  automatically. Assign and complete them from the Tickets tab
+                  — a room drops off this list once both are done.
+                </p>
+              </div>
+              <select
+                className="v2-pill-select"
+                value={turnoverHostel}
+                onChange={(event) => setTurnoverHostel(event.target.value)}
+              >
+                <option value="all">All hostels</option>
+                {data.hostels.map((hostel) => (
+                  <option key={hostel.id} value={hostel.id}>
+                    {hostel.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {turnoverRooms.length > 0 ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Room</th>
+                      <th>Hostel</th>
+                      <th>Outstanding</th>
+                      <th>Assigned to</th>
+                      <th>Raised</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {turnoverRooms.map(({ bed, tickets }) => (
+                      <tr key={bed.id}>
+                        <td>
+                          <strong>{bed.legacyCode}</strong>
+                        </td>
+                        <td>{bed.hostelName}</td>
+                        <td>
+                          <span className="turnover-stages">
+                            {tickets.map((ticket) => (
+                              <span
+                                key={ticket.id}
+                                className="turnover-stage-chip"
+                                title={ticket.ticketNo}
+                              >
+                                {turnoverStageLabels[
+                                  String(ticket.turnoverStage)
+                                ] || titleCase(String(ticket.turnoverStage))}
+                              </span>
+                            ))}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="turnover-assignees">
+                            {tickets.map((ticket) => (
+                              <div
+                                key={ticket.id}
+                                className="turnover-assignee-row"
+                              >
+                                <small>
+                                  {turnoverStageLabels[
+                                    String(ticket.turnoverStage)
+                                  ] || titleCase(String(ticket.turnoverStage))}
+                                </small>
+                                {ticket.turnoverStage === "cleaning" ? (
+                                  ticket.assignedTo ? (
+                                    <div className="button-row">
+                                      <strong>{ticket.assignedTo}</strong>
+                                      <button
+                                        type="button"
+                                        className="secondary compact"
+                                        disabled={
+                                          busy ||
+                                          completingCleanTicketId === ticket.id
+                                        }
+                                        onClick={() =>
+                                          completeCleaningTicket(ticket)
+                                        }
+                                      >
+                                        {completingCleanTicketId === ticket.id
+                                          ? "Saving…"
+                                          : "Mark done"}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="secondary compact"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        setAssigningTurnoverTicket({
+                                          ...ticket,
+                                          roomCode: bed.legacyCode,
+                                        })
+                                      }
+                                    >
+                                      Assign
+                                    </button>
+                                  )
+                                ) : (
+                                  <span>
+                                    {ticket.assignedTo || (
+                                      <span className="turnover-unassigned">
+                                        Nobody yet
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td>{dateLabel(tickets[0]?.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="empty-copy">
+                Nothing waiting — every empty room has been inspected and
+                cleaned.
+              </p>
+            )}
+          </section>
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <h3>Empty rooms with no turnover raised</h3>
+                <p>
+                  Rooms that were already vacant before turnover tickets
+                  existed. Raise the pair by hand if they still need doing.
+                </p>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Room</th>
+                    <th>Hostel</th>
+                    <th>Unit</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {vacantBeds
+                    .filter((bed) => !turnoverByRoom.has(String(bed.roomId)))
+                    .map((bed) => (
+                      <tr key={bed.id}>
+                        <td>
+                          <strong>{bed.legacyCode}</strong>
+                        </td>
+                        <td>{bed.hostelName}</td>
+                        <td>{bed.unitCode}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary compact"
+                            disabled={busy}
+                            onClick={() =>
+                              save(
+                                {
+                                  action: "turnover-schedule",
+                                  bedSpaceId: bed.id,
+                                },
+                                "Turnover raised",
+                              )
+                            }
+                          >
+                            Schedule turnover
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+      {tab === "cleaning" && (
+        <>
+          <section className="module-metrics">
+            <Stat value={cleaningRoomsAll.length} label="Rooms" />
+            <Stat value={neverCleanedCount} label="Never logged as cleaned" />
+            <Stat
+              value={cleanedRecentlyCount}
+              label="Cleaned in the last 30 days"
+            />
+            <Stat value={pendingCleaningCount} label="Assigned, not done yet" />
+          </section>
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <small>ROOM CLEANING</small>
+                <h3>When each room was last cleaned</h3>
+                <p>
+                  Counts a room cleaned when a &quot;Cleaning&quot; ticket
+                  against it is completed — logged here with Mark cleaned, or
+                  raised and completed the long way from the Tickets tab. A
+                  move-out&apos;s cleaning ticket counts too, once it&apos;s
+                  completed on Room turnover.
+                </p>
+              </div>
+            </div>
+            <div className="v2-toolbar meter-toolbar">
+              <label className="v2-search">
+                <SearchIcon />
+                <input
+                  value={cleaningQuery}
+                  onChange={(event) => setCleaningQuery(event.target.value)}
+                  placeholder="Type unit or room code"
+                />
+              </label>
+              <select
+                className="v2-pill-select"
+                value={cleaningHostel}
+                onChange={(event) => setCleaningHostel(event.target.value)}
+              >
+                <option value="all">All hostels</option>
+                {cleaningHostels.map((hostel: Row) => (
+                  <option key={hostel.id} value={hostel.id}>
+                    {hostel.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Room code</th>
+                    <th>Hostel</th>
+                    <th>Last cleaned</th>
+                    <th>Times cleaned</th>
+                    <th>Assigned to</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {cleaningRooms.map(({ room, lastCleanedAt, count, pending }) => (
+                    <tr key={room.roomId}>
+                      <td>
+                        <code>{room.legacyCode}</code>
+                      </td>
+                      <td>{room.hostelName}</td>
+                      <td>
+                        {lastCleanedAt
+                          ? dateLabel(String(lastCleanedAt).slice(0, 10))
+                          : "Never"}
+                      </td>
+                      <td>{count || "-"}</td>
+                      <td>
+                        {pending ? (
+                          <>
+                            <strong>{pending.assignedTo || "Not named"}</strong>
+                            <small>
+                              Assigned {dateLabel(String(pending.createdAt).slice(0, 10))}
+                            </small>
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td>
+                        {pending ? (
+                          <button
+                            type="button"
+                            className="secondary compact"
+                            disabled={
+                              busy || completingCleanTicketId === pending.id
+                            }
+                            onClick={() => completeCleaningTicket(pending)}
+                          >
+                            {completingCleanTicketId === pending.id
+                              ? "Saving…"
+                              : "Mark done"}
+                          </button>
+                        ) : (
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              disabled={busy}
+                              onClick={() => setAssigningCleanRoom(room)}
+                            >
+                              Assign
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              disabled={
+                                busy || markingCleanRoomId === room.roomId
+                              }
+                              onClick={async () => {
+                                setMarkingCleanRoomId(room.roomId);
+                                try {
+                                  await save(
+                                    {
+                                      action: "ticket-clean-create",
+                                      roomId: room.roomId,
+                                    },
+                                    "Room cleaning logged",
+                                  );
+                                } finally {
+                                  setMarkingCleanRoomId(null);
+                                }
+                              }}
+                            >
+                              {markingCleanRoomId === room.roomId
+                                ? "Logging…"
+                                : "Mark cleaned"}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {cleaningRooms.length === 0 && (
+                    <tr>
+                      <td colSpan={6}>
+                        <Empty
+                          title="No rooms match this filter"
+                          text="Try a different search or hostel."
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
       {tab === "rates" && (
         <section className="panel">
           <div className="section-heading">
@@ -1306,7 +2065,7 @@ export function MaintenanceModule({
             <div className="v2-toolbar">
               <label>
                 From
-                <input
+                <DateField
                   type="date"
                   value={costFrom}
                   onChange={(event) => setCostFrom(event.target.value)}
@@ -1314,7 +2073,7 @@ export function MaintenanceModule({
               </label>
               <label>
                 To
-                <input
+                <DateField
                   type="date"
                   value={costTo}
                   onChange={(event) => setCostTo(event.target.value)}
@@ -1644,9 +2403,8 @@ export function MaintenanceModule({
                       {replyResponsibility === "management" && (
                         <label className="wide">
                           Receipt {ticketReceipts.length ? "" : "(required to complete)"}
-                          <input
+                          <FileField
                             name="receiptAttachment"
-                            type="file"
                             accept={ATTACHMENT_ACCEPT}
                           />
                           <small
@@ -1662,11 +2420,7 @@ export function MaintenanceModule({
                   )}
                   <label className="wide">
                     Attach file (optional)
-                    <input
-                      name="updateAttachment"
-                      type="file"
-                      accept={ATTACHMENT_ACCEPT}
-                    />
+                    <FileField name="updateAttachment" accept={ATTACHMENT_ACCEPT} />
                     <small className="field-note">
                       Photo, video, PDF, Word, Excel or CSV — up to 25 MB.
                     </small>
@@ -1868,7 +2622,7 @@ export function MaintenanceModule({
           >
             <label>
               Date
-              <input
+              <DateField
                 name="costDate"
                 type="date"
                 required
@@ -2180,9 +2934,8 @@ export function MaintenanceModule({
             </label>
             <label className="wide">
               Picture / video / document
-              <input
+              <FileField
                 name="attachment"
-                type="file"
                 accept={ATTACHMENT_ACCEPT}
                 multiple
                 required={data.currentUser?.roleKey === "tenant"}
@@ -2395,7 +3148,7 @@ export function MaintenanceModule({
             </label>
             <label>
               Reading date
-              <input
+              <DateField
                 name="readingDate"
                 type="date"
                 required
@@ -2544,6 +3297,89 @@ export function MaintenanceModule({
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>
                 {editingMeter ? "Update reading" : "Save reading"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {assigningCleanRoom && (
+        <Modal
+          title="Assign room cleaning"
+          kicker={assigningCleanRoom.legacyCode}
+          description={`${assigningCleanRoom.hostelName} — opens as a pending cleaning until whoever it's assigned to marks it done.`}
+          onClose={() => setAssigningCleanRoom(null)}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                {
+                  action: "ticket-clean-create",
+                  roomId: assigningCleanRoom.roomId,
+                  assign: true,
+                  ...formValues(e),
+                },
+                "Cleaning assigned",
+              );
+              if (ok) setAssigningCleanRoom(null);
+            }}
+          >
+            <label className="wide">
+              Assign to
+              <input name="assignedTo" required placeholder="Staff name" />
+            </label>
+            <label className="wide">
+              Notes (optional)
+              <input name="notes" placeholder="Anything they should know" />
+            </label>
+            <div className="form-actions wide">
+              <button className="primary" disabled={busy}>
+                Assign cleaning
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {assigningTurnoverTicket && (
+        <Modal
+          title="Assign move-out cleaning"
+          kicker={assigningTurnoverTicket.roomCode}
+          description={`${assigningTurnoverTicket.hostelName} — this ticket was already raised by the move-out; this just names who's doing it.`}
+          onClose={() => setAssigningTurnoverTicket(null)}
+        >
+          <form
+            className="form-grid"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await save(
+                {
+                  action: "ticket-message",
+                  ticketId: assigningTurnoverTicket.id,
+                  // ticket-message resets cost fields to whatever is in the
+                  // payload — resend the ticket's own values since this form
+                  // only ever touches assignedTo/message.
+                  costResponsibility:
+                    assigningTurnoverTicket.costResponsibility,
+                  actualCost: assigningTurnoverTicket.actualCost,
+                  ...formValues(e),
+                },
+                "Cleaning assigned",
+              );
+              if (ok) setAssigningTurnoverTicket(null);
+            }}
+          >
+            <label className="wide">
+              Assign to
+              <input name="assignedTo" required placeholder="Staff name" />
+            </label>
+            <label className="wide">
+              Notes (optional)
+              <input name="message" placeholder="Anything they should know" />
+            </label>
+            <div className="form-actions wide">
+              <button className="primary" disabled={busy}>
+                Assign cleaning
               </button>
             </div>
           </form>

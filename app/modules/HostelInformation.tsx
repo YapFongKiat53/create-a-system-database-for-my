@@ -1,19 +1,23 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
   CheckInModal,
-  CourseOptions,
+  CourseSelect,
+  DateField,
   DEPOSIT_MONTHS,
   Empty,
+  FileField,
   MALAYSIAN_STATES,
   RESERVATION_BREAKDOWN_CHARGE_TYPES,
   Modal,
+  MonthField,
   NATIONALITIES,
-  RACES,
-  RELIGIONS,
+  RaceSelect,
+  ReligionSelect,
+  SchoolSelect,
   SearchSelect,
   bedTypeLabel,
   blankCharges,
@@ -111,18 +115,153 @@ const Metric = ({
 const isRoomAvailable = (bed: Row) =>
   bed.status === "vacant" || bed.availabilityState === "available-now";
 
-const roomStatus = (
-  bed: Row,
-): "available" | "awaiting-check-in" | "occupied" | "unavailable" => {
+export type RoomState =
+  | "available"
+  | "preparing"
+  | "awaiting-check-in"
+  | "ending-soon"
+  | "occupied"
+  | "blocked";
+
+/**
+ * What a room is doing right now, in the terms staff act on.
+ *
+ * Coloured as a traffic light: green can be booked today, amber needs a
+ * decision within the fortnight, red is taken. "Reserved" and "blocked" sit
+ * outside that scale on purpose — a hold isn't a stage of occupancy, and a
+ * storeroom isn't a status at all — so each reads as its own colour family
+ * (blue, near-black) rather than a shade of the states around it.
+ */
+export const turnoverPendingFor = (bed: Row): string[] =>
+  Array.isArray(bed.turnoverPending) ? bed.turnoverPending : [];
+
+const roomStatus = (bed: Row): RoomState => {
+  // Empty, but somebody walked out of it recently and the inspection or the
+  // cleaning is still open. Sellable — the move-in is days away — but nobody
+  // can be handed the keys this afternoon.
+  if (isRoomAvailable(bed) && turnoverPendingFor(bed).length)
+    return "preparing";
   if (isRoomAvailable(bed)) return "available";
-  // Sold and held for a converted booking, but the student hasn't arrived —
-  // its own state so staff can tell it apart from a room that is genuinely
-  // out of service.
+  // Sold and held for a booking whose student hasn't arrived — its own state
+  // so staff can tell it apart from a room that is genuinely out of service.
   if (bed.status === "reserved") return "awaiting-check-in";
+  // The one occupied state that needs a decision: the agreement runs out
+  // inside two weeks, so it is either a renewal to chase or a room to line
+  // up for cleaning. Extending the lease end date is what clears it.
+  if (bed.status === "occupied" && bed.renewalDueSoon) return "ending-soon";
   if (bed.status === "occupied") return "occupied";
-  return "unavailable";
+  // Storerooms and anything else taken out of service. The database calls
+  // this "blocked"; the code used to look for "special-use", which matched
+  // nothing, so these five rooms fell through to a generic "unavailable".
+  return "blocked";
 };
 
+export const ROOM_STATE_LABELS: Record<RoomState, string> = {
+  available: "Vacant",
+  preparing: "Being prepared",
+  "awaiting-check-in": "Reserved",
+  "ending-soon": "Ending soon",
+  occupied: "Occupied",
+  blocked: "Not lettable",
+};
+
+// Who's actually in an occupied/reserved room, shown next to the chip that
+// was clicked rather than anywhere that would print all 519 of them at
+// once. The occupant fields are already on `bed` — the same left join
+// selectRawBeds uses for the Tenants module — so this is read-only lookup,
+// nothing fetched specially for it.
+function OccupantPopover({
+  bed,
+  chipState,
+  popoverRef,
+  onClose,
+  onEdit,
+}: {
+  bed: Row;
+  chipState: RoomState;
+  popoverRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  // Only ever passed for the "reserved" state — a booking's details still
+  // live on its own reservations row, so editing it opens the same
+  // ReservationForm the Reservations tab's own "Edit reservation" button
+  // does, rather than duplicating a second edit surface here.
+  onEdit?: () => void;
+}) {
+  const isReserved = chipState === "awaiting-check-in";
+  return (
+    <div ref={popoverRef} className="occupant-popover" role="dialog">
+      <button
+        type="button"
+        className="occupant-popover-close"
+        aria-label="Close"
+        onClick={onClose}
+      >
+        ×
+      </button>
+      <strong className="occupant-popover-room">
+        {bed.legacyCode || `Room ${bed.roomLabel}`}
+        <span className={`room-chip ${chipState}`}>
+          {ROOM_STATE_LABELS[chipState]}
+        </span>
+      </strong>
+      {bed.occupantName ? (
+        <dl className="occupant-popover-fields">
+          <div>
+            <dt>Name</dt>
+            <dd>{bed.occupantName}</dd>
+          </div>
+          {bed.occupantCode && (
+            <div>
+              <dt>Student code</dt>
+              <dd>{bed.occupantCode}</dd>
+            </div>
+          )}
+          {bed.occupantCourse && (
+            <div>
+              <dt>Course</dt>
+              <dd>{bed.occupantCourse}</dd>
+            </div>
+          )}
+          {bed.occupantRace && (
+            <div>
+              <dt>Race</dt>
+              <dd>{titleCase(bed.occupantRace)}</dd>
+            </div>
+          )}
+          {bed.occupantNationality && (
+            <div>
+              <dt>Nationality</dt>
+              <dd>{bed.occupantNationality}</dd>
+            </div>
+          )}
+          <div>
+            <dt>{isReserved ? "Expected" : "Moved in"}</dt>
+            <dd>{dateLabel(bed.assignmentCheckInDate) || "—"}</dd>
+          </div>
+          {!isReserved && bed.agreementEndDate && (
+            <div>
+              <dt>Lease ends</dt>
+              <dd>{dateLabel(bed.agreementEndDate)}</dd>
+            </div>
+          )}
+        </dl>
+      ) : (
+        <p className="occupant-popover-empty">
+          No student profile is linked to this tenancy.
+        </p>
+      )}
+      {isReserved && onEdit && (
+        <button
+          type="button"
+          className="secondary compact occupant-popover-edit"
+          onClick={onEdit}
+        >
+          Edit reservation
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function HostelModule({
   data,
@@ -175,11 +314,17 @@ export function HostelModule({
   const [reservationKind, setReservationKind] = useState("individual");
   const [reservationQuery, setReservationQuery] = useState("");
   const [reservationHostelFilter, setReservationHostelFilter] = useState("all");
+  // Filters the same "Check-in" date printed on every card, so what staff
+  // narrow by is exactly what they can see. Either bound can be left blank —
+  // "from" only, "to" only, or both.
+  const [reservationCheckInFrom, setReservationCheckInFrom] = useState("");
+  const [reservationCheckInTo, setReservationCheckInTo] = useState("");
   const [reservationStatusTab, setReservationStatusTab] = useState<
-    "all" | "reserved" | "converted" | "checked-in" | "cancelled"
+    "all" | "reserved" | "checked-in" | "cancelled"
   >("reserved");
-  // Converted reservations still collect balance payments, so staff need to
-  // slice them by payment progress the same way Finance does for invoices.
+  // A booking keeps collecting its balance right up to arrival, so staff need
+  // to slice the reserved list by payment progress the same way Finance does
+  // for invoices.
   const [reservationPaymentFilter, setReservationPaymentFilter] = useState<
     "all" | "partial" | "unpaid" | "admin-fee" | "full"
   >("all");
@@ -257,7 +402,7 @@ export function HostelModule({
       // two counts above.
       awaitingCheckIn: data.bedSpaces.filter((bed) => bed.status === "reserved")
         .length,
-      special: data.bedSpaces.filter((bed) => bed.status === "special-use")
+      special: data.bedSpaces.filter((bed) => bed.status === "blocked")
         .length,
     }),
     [data],
@@ -389,21 +534,6 @@ export function HostelModule({
     (sum, value) => sum + Number(value || 0),
     0,
   );
-  // Converted/cancelled reservations no longer need action — keeping them
-  // out of the default "Reserved" view is what the status tabs are for.
-  const reservationCounts = {
-    all: data.reservations.length,
-    reserved: data.reservations.filter((r) => r.status === "reserved")
-      .length,
-    converted: data.reservations.filter((r) => r.status === "converted")
-      .length,
-    cancelled: data.reservations.filter((r) => r.status === "cancelled")
-      .length,
-    checkedIn: 0, // filled in below, once the tenancy lookup exists
-  };
-  const convertedReservations = data.reservations.filter(
-    (r) => r.status === "converted",
-  );
   // The tenancy each converted booking became, keyed by reservation, so the
   // card can tell whether the student has actually turned up and offer the
   // check-in action without sending staff over to the Tenants module.
@@ -422,33 +552,55 @@ export function HostelModule({
   };
   const isCheckedIn = (reservation: Row) =>
     Boolean(tenancyFor(reservation)?.checkedInAt);
-  const awaitingCheckIn = convertedReservations.filter(isAwaitingCheckIn);
-  const checkedInReservations = convertedReservations.filter(isCheckedIn);
-  reservationCounts.checkedIn = checkedInReservations.length;
-  const convertedPaymentCounts = {
-    all: convertedReservations.length,
-    partial: convertedReservations.filter(
+  // "Reserved" means one thing to staff: a booking that is still waiting for
+  // its student to walk in. Whether the system has already turned it into a
+  // tenancy underneath (status `converted`, which a payment now does on its
+  // own) is bookkeeping, not a stage anybody works through — so both live in
+  // this one tab, and the check-in action sits on them here.
+  const isAwaitingArrival = (reservation: Row) =>
+    reservation.status === "reserved" ||
+    (reservation.status === "converted" && !isCheckedIn(reservation));
+  const reservedReservations = data.reservations.filter(isAwaitingArrival);
+  const checkedInReservations = data.reservations.filter(
+    (r) => r.status === "converted" && isCheckedIn(r),
+  );
+  const reservationCounts = {
+    all: data.reservations.length,
+    reserved: reservedReservations.length,
+    cancelled: data.reservations.filter((r) => r.status === "cancelled")
+      .length,
+    checkedIn: checkedInReservations.length,
+  };
+  const awaitingCheckIn = reservedReservations.filter(isAwaitingCheckIn);
+  const reservedPaymentCounts = {
+    all: reservedReservations.length,
+    partial: reservedReservations.filter(
       (r) => (r.paymentStatus || "unpaid") === "partial",
     ).length,
-    unpaid: convertedReservations.filter(
+    unpaid: reservedReservations.filter(
       (r) => (r.paymentStatus || "unpaid") === "unpaid",
     ).length,
-    "admin-fee": convertedReservations.filter(
+    "admin-fee": reservedReservations.filter(
       (r) => r.paymentStatus === "admin-fee",
     ).length,
-    full: convertedReservations.filter((r) => r.paymentStatus === "full")
+    full: reservedReservations.filter((r) => r.paymentStatus === "full")
       .length,
   };
   // Temporary room changes (Change room's optional "expected return date")
   // land here once that date has arrived, so staff can confirm whether the
-  // student actually moved back or the room change became permanent.
-  const pendingRoomReturns = convertedReservations.filter(
-    (r) => r.expectedReturnDate && r.expectedReturnDate <= today,
+  // student actually moved back or the room change became permanent. These
+  // sit on students who are already in the building, so they surface on the
+  // "Checked in" tab rather than with the arrivals.
+  const pendingRoomReturns = data.reservations.filter(
+    (r) =>
+      r.status === "converted" &&
+      r.expectedReturnDate &&
+      r.expectedReturnDate <= today,
   );
   const filteredReservations = data.reservations.filter((reservation) => {
     const search = reservationQuery.trim().toLowerCase();
     const matchesPayment =
-      reservationStatusTab !== "converted" ||
+      reservationStatusTab !== "reserved" ||
       reservationPaymentFilter === "all" ||
       (reservation.paymentStatus || "unpaid") === reservationPaymentFilter;
     // "Checked in" is a slice of the converted bookings rather than a
@@ -459,10 +611,21 @@ export function HostelModule({
         ? true
         : reservationStatusTab === "checked-in"
           ? reservation.status === "converted" && isCheckedIn(reservation)
-          : reservation.status === reservationStatusTab;
+          : reservationStatusTab === "reserved"
+            ? isAwaitingArrival(reservation)
+            : reservation.status === reservationStatusTab;
+    // Plain string comparison is safe here — targetMoveInDate is always
+    // "YYYY-MM-DD", the same shape a native date input hands back, so it
+    // sorts the same as a real date would.
+    const matchesCheckInDate =
+      (!reservationCheckInFrom ||
+        (reservation.targetMoveInDate || "") >= reservationCheckInFrom) &&
+      (!reservationCheckInTo ||
+        (reservation.targetMoveInDate || "") <= reservationCheckInTo);
     return (
       matchesStatus &&
       matchesPayment &&
+      matchesCheckInDate &&
       (reservationHostelFilter === "all" ||
         String(reservation.preferredHostelId || "") ===
         reservationHostelFilter) &&
@@ -585,7 +748,6 @@ export function HostelModule({
   >("all");
   const [roomSearchQuery, setRoomSearchQuery] = useState("");
   const [roomStatusFilter, setRoomStatusFilter] = useState("all"); // 'all' | 'available' | 'occupied' | 'unavailable'
-  const [roomGenderFilter, setRoomGenderFilter] = useState("all");
   const [hostelModalOpen, setHostelModalOpen] = useState(false);
   const [editingHostel, setEditingHostel] = useState<Row | null>(null);
 
@@ -620,20 +782,12 @@ export function HostelModule({
           `${bed.unitCode} ${bed.roomLabel} ${bed.legacyCode} ${bed.occupantName || ""}`
             .toLowerCase()
             .includes(query);
-        const matchesGender =
-          roomGenderFilter === "all" || bed.gender === roomGenderFilter;
         const matchesStatus =
           roomStatusFilter === "all" || status === roomStatusFilter;
-        return matchesQuery && matchesGender && matchesStatus;
+        return matchesQuery && matchesStatus;
       }),
     }));
-  }, [
-    data.hostels,
-    data.bedSpaces,
-    roomSearchQuery,
-    roomGenderFilter,
-    roomStatusFilter,
-  ]);
+  }, [data.hostels, data.bedSpaces, roomSearchQuery, roomStatusFilter]);
 
   const isAllHostelsAvailability = activeAvailabilityHostel === "all";
   const activeAvailabilityGroup = bedsByHostel.find(
@@ -650,10 +804,56 @@ export function HostelModule({
     [isAllHostelsAvailability, bedsByHostel, activeAvailabilityGroup],
   );
 
-  // Rooms grouped by unit so the table shows one row per unit — each
-  // room becomes a colored chip instead of its own row.
+  // What Sales actually uses this screen for: how many rooms are free to
+  // offer a male student right now, and how many for a female student. A
+  // "mixed" unit (106 of the 129 units) isn't counted either way — it isn't
+  // a male room or a female room until a booking assigns it one, so folding
+  // it into these two totals would just misrepresent what's being counted.
+  const genderAvailability = useMemo(() => {
+    let male = 0;
+    let female = 0;
+    for (const bed of activeAvailabilityBeds) {
+      if (!isRoomAvailable(bed)) continue;
+      if (bed.gender === "male") male += 1;
+      else if (bed.gender === "female") female += 1;
+    }
+    return { male, female };
+  }, [activeAvailabilityBeds]);
+
+  // Same headline split as genderAvailability, but by room letter (the
+  // roomLabel — Room A, Room B, ...) instead of one hostel-wide total, since
+  // Sales books off "is there a Room A left for a girl", not just "is there
+  // anything left for a girl". Split further by roomType, since a room
+  // letter is not a reliable stand-in for single/sharing — the real data
+  // has both types under the same letter (e.g. Room A is single in one
+  // unit, sharing in another).
+  const genderAvailabilityByRoomLabel = useMemo(() => {
+    const counts = new Map<
+      string,
+      { label: string; roomType: string; male: number; female: number }
+    >();
+    for (const bed of activeAvailabilityBeds) {
+      if (!isRoomAvailable(bed)) continue;
+      if (bed.gender !== "male" && bed.gender !== "female") continue;
+      const label = bed.roomLabel || "—";
+      const roomType = bed.roomType || "unknown";
+      const key = `${label}::${roomType}`;
+      const entry = counts.get(key) || { label, roomType, male: 0, female: 0 };
+      entry[bed.gender as "male" | "female"] += 1;
+      counts.set(key, entry);
+    }
+    return [...counts.values()].sort(
+      (a, b) =>
+        a.label.localeCompare(b.label, undefined, { numeric: true }) ||
+        a.roomType.localeCompare(b.roomType),
+    );
+  }, [activeAvailabilityBeds]);
+
+  // Every room in view, grouped by unit — each bed becomes a colour-coded
+  // chip so a room's state is visible without opening it. Clicking a
+  // bookable one starts a reservation; clicking anything else (occupied,
+  // already reserved, blocked) explains why it can't be.
   const unitsInActiveGroup = useMemo(() => {
-    if (!activeAvailabilityBeds.length) return [];
     const map = new Map<
       number,
       { unit: Row; beds: Row[]; hostelName: string }
@@ -672,32 +872,26 @@ export function HostelModule({
     );
   }, [activeAvailabilityBeds, data.units]);
 
-  // Quick per-category vacancy count for the selected hostel — how many
-  // Room A/B/C/D are still available right now, split by gender so staff
-  // can see male vs female availability at a glance.
-  const categoryAvailability = useMemo(() => {
-    if (!activeAvailabilityBeds.length) return [];
-    const counts = new Map<
-      string,
-      { total: number; male: number; female: number; other: number }
-    >();
-    for (const bed of activeAvailabilityBeds) {
-      if (!isRoomAvailable(bed)) continue;
-      const label = bed.roomLabel || "Other";
-      const entry = counts.get(label) || {
-        total: 0,
-        male: 0,
-        female: 0,
-        other: 0,
-      };
-      entry.total += 1;
-      if (bed.gender === "male") entry.male += 1;
-      else if (bed.gender === "female") entry.female += 1;
-      else entry.other += 1;
-      counts.set(label, entry);
+  // Which live reservation a "Reserved" chip belongs to, so its popover can
+  // offer Edit straight into the same form the Reservations tab uses. Beds
+  // showing this chip are almost always "converted" bookings the tenant
+  // hasn't checked into yet, not ones still awaiting payment — confirmed
+  // live, every "Reserved" bed in the real data is a converted reservation
+  // — so both statuses have to be matched, or the button would never
+  // appear for the case that actually shows up. Editing a converted
+  // reservation still reaches the student: route.ts's reservation-update
+  // action pushes the correction onto the linked student_profiles row
+  // (see the "One-way sync" comment there), which is the whole point here.
+  const reservationByBedId = useMemo(() => {
+    const map = new Map<string, Row>();
+    for (const row of data.reservations) {
+      if (row.status !== "reserved" && row.status !== "converted") continue;
+      for (const bedId of [row.provisionalBedSpaceId, row.assignedBedSpaceId]) {
+        if (bedId) map.set(String(bedId), row);
+      }
     }
-    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [activeAvailabilityBeds]);
+    return map;
+  }, [data.reservations]);
 
   const [blockedNotice, setBlockedNotice] = useState("");
   const showBlockedNotice = (bed: Row) => {
@@ -706,6 +900,27 @@ export function HostelModule({
     );
     window.setTimeout(() => setBlockedNotice(""), 3000);
   };
+
+  // Who's actually in a room, on demand rather than crowding the board with
+  // it — 519 of these chips are occupied, so printing a name under every one
+  // would drown out the very thing this screen exists to scan for. Click
+  // reveals it next to that one chip; clicking elsewhere closes it.
+  const [occupantPopoverBedId, setOccupantPopoverBedId] = useState<
+    number | null
+  >(null);
+  const occupantPopoverRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (occupantPopoverBedId === null) return;
+    const handleClickAway = (event: MouseEvent) => {
+      if (
+        occupantPopoverRef.current &&
+        !occupantPopoverRef.current.contains(event.target as Node)
+      )
+        setOccupantPopoverBedId(null);
+    };
+    document.addEventListener("mousedown", handleClickAway);
+    return () => document.removeEventListener("mousedown", handleClickAway);
+  }, [occupantPopoverBedId]);
 
   return (
     <>
@@ -853,30 +1068,22 @@ export function HostelModule({
                   />
                 </div>
                 <select
-                  value={roomGenderFilter}
-                  onChange={(e) => setRoomGenderFilter(e.target.value)}
-                >
-                  <option value="all">All Gender</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="mixed">Mixed</option>
-                </select>
-                <select
                   value={roomStatusFilter}
                   onChange={(e) => setRoomStatusFilter(e.target.value)}
                 >
                   <option value="all">All Status</option>
-                  <option value="available">Available (reservable)</option>
-                  <option value="awaiting-check-in">Awaiting check-in</option>
+                  <option value="available">Vacant (ready to let)</option>
+                  <option value="preparing">Being prepared</option>
+                  <option value="awaiting-check-in">Reserved</option>
+                  <option value="ending-soon">Ending soon</option>
                   <option value="occupied">Occupied</option>
-                  <option value="unavailable">Unavailable</option>
+                  <option value="blocked">Not lettable</option>
                 </select>
                 <button
                   type="button"
                   className="secondary reset-button"
                   onClick={() => {
                     setRoomSearchQuery("");
-                    setRoomGenderFilter("all");
                     setRoomStatusFilter("all");
                   }}
                 >
@@ -906,72 +1113,77 @@ export function HostelModule({
                     {activeAvailabilityBeds.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                {categoryAvailability.length > 0 && (
-                  <div
-                    className="category-availability-row"
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '10px',
-                      marginBottom: '18px',
-                    }}
-                  >
-                    {categoryAvailability.map(([label, breakdown]) => (
-                      <div
-                        key={label}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '10px 18px',
-                          borderRadius: '10px',
-                          border: '1px solid #e5e7eb',
-                          background: '#f9fafb',
-                          minWidth: '96px',
-                        }}
-                      >
-                        <strong style={{ fontSize: '20px', color: '#111827', lineHeight: 1.2 }}>
-                          {breakdown.total}
-                        </strong>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            color: '#6b7280',
-                            fontWeight: 600,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.03em',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          Room {label} available
-                        </span>
-                        <span
-                          style={{
-                            display: 'flex',
-                            gap: '8px',
-                            marginTop: '4px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          <span style={{ color: '#2563eb' }}>
-                            ♂ {breakdown.male}
-                          </span>
-                          <span style={{ color: '#db2777' }}>
-                            ♀ {breakdown.female}
-                          </span>
-                          {breakdown.other > 0 && (
-                            <span style={{ color: '#6b7280' }}>
-                              Mixed {breakdown.other}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
+                {/* Colour on its own is something to memorise, and this board
+                    is read by people outside Sales — maintenance need to see
+                    which rooms are free to go and clean. The legend also
+                    carries the count, so "how many are ending soon" is
+                    answered without filtering. */}
+                <div className="room-state-legend">
+                  {(
+                    [
+                      "available",
+                      "preparing",
+                      "awaiting-check-in",
+                      "ending-soon",
+                      "occupied",
+                      "blocked",
+                    ] as RoomState[]
+                  ).map((state) => (
+                    <span key={state} className={`room-chip ${state}`}>
+                      {ROOM_STATE_LABELS[state]}
+                      <em>
+                        {
+                          activeAvailabilityBeds.filter(
+                            (bed) => roomStatus(bed) === state,
+                          ).length
+                        }
+                      </em>
+                    </span>
+                  ))}
+                </div>
+                {/* The headline numbers: how many rooms are free to offer a
+                    male student right now, and how many for a female
+                    student — broken down by room letter, since "is there a
+                    Room A left for a girl" is the actual question Sales is
+                    answering, not just a hostel-wide total. */}
+                {genderAvailabilityByRoomLabel.length > 0 && (
+                  <div className="table-wrap gender-by-room-wrap">
+                    <table className="gender-by-room-table">
+                      <thead>
+                        <tr>
+                          <th>Room</th>
+                          <th>Type</th>
+                          <th>♂ Male available</th>
+                          <th>♀ Female available</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {genderAvailabilityByRoomLabel.map((row) => (
+                          <tr key={`${row.label}::${row.roomType}`}>
+                            <td>
+                              <strong>Room {row.label}</strong>
+                            </td>
+                            <td className="muted">
+                              {titleCase(row.roomType)}
+                            </td>
+                            <td>{row.male}</td>
+                            <td>{row.female}</td>
+                          </tr>
+                        ))}
+                        <tr className="gender-by-room-total">
+                          <td colSpan={2}>
+                            <strong>Total</strong>
+                          </td>
+                          <td>{genderAvailability.male}</td>
+                          <td>{genderAvailability.female}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 )}
+                {/* Every room behind those numbers, colour-coded by state.
+                    A bookable chip opens a reservation on that room; anything
+                    else explains why it can't be booked. */}
                 <div className="table-wrap">
                   <table>
                     <thead>
@@ -998,31 +1210,88 @@ export function HostelModule({
                           <td>
                             <div className="room-chip-row">
                               {unitBeds.map((bed) => {
-                                const available = isRoomAvailable(bed);
-                                const dueSoon = !available && bed.renewalDueSoon;
-                                const chipState = available
-                                  ? "available"
-                                  : dueSoon
-                                    ? "ending-soon"
-                                    : "unavailable";
+                                const chipState = roomStatus(bed);
+                                const available =
+                                  chipState === "available" ||
+                                  chipState === "preparing";
+                                const dueSoon = chipState === "ending-soon";
+                                // The three states that actually have someone
+                                // attached — a live tenancy backs all three,
+                                // just at a different stage (reserved hasn't
+                                // arrived, ending-soon is occupied same as
+                                // occupied itself). Blocked rooms never do.
+                                const hasOccupant =
+                                  chipState === "occupied" ||
+                                  chipState === "ending-soon" ||
+                                  chipState === "awaiting-check-in";
+                                const pending = turnoverPendingFor(bed);
                                 return (
-                                  <button
+                                  <span
                                     key={bed.id}
-                                    type="button"
-                                    className={`room-chip ${chipState}`}
-                                    title={
-                                      dueSoon
-                                        ? "Tenancy ends within 2 weeks — no renewal applied. Room can be pre-reserved."
-                                        : undefined
-                                    }
-                                    onClick={() =>
-                                      available || dueSoon
-                                        ? openReservation(bed)
-                                        : showBlockedNotice(bed)
-                                    }
+                                    style={{
+                                      position: "relative",
+                                      display: "inline-block",
+                                    }}
                                   >
-                                    {bed.legacyCode || `Room ${bed.roomLabel}`}
-                                  </button>
+                                    <button
+                                      type="button"
+                                      className={`room-chip ${chipState}`}
+                                      title={
+                                        dueSoon
+                                          ? `${ROOM_STATE_LABELS[chipState]} — tenancy ends within 2 weeks. Can be pre-reserved.`
+                                          : chipState === "preparing"
+                                            ? `${ROOM_STATE_LABELS[chipState]} — empty, but ${pending
+                                                .map((stage) =>
+                                                  stage === "inspection"
+                                                    ? "inspection"
+                                                    : "cleaning",
+                                                )
+                                                .join(" and ")} still open. Can be booked for a later date.`
+                                            : chipState === "awaiting-check-in"
+                                              ? `${ROOM_STATE_LABELS[chipState]} — paid for, the student has not arrived yet. Click for details.`
+                                              : hasOccupant
+                                                ? `${ROOM_STATE_LABELS[chipState]} — click for who's staying here.`
+                                                : ROOM_STATE_LABELS[chipState]
+                                      }
+                                      onClick={() => {
+                                        if (available || dueSoon) {
+                                          openReservation(bed);
+                                        } else if (hasOccupant) {
+                                          setOccupantPopoverBedId((current) =>
+                                            current === bed.id ? null : bed.id,
+                                          );
+                                        } else {
+                                          showBlockedNotice(bed);
+                                        }
+                                      }}
+                                    >
+                                      {bed.legacyCode || `Room ${bed.roomLabel}`}
+                                    </button>
+                                    {occupantPopoverBedId === bed.id && (
+                                      <OccupantPopover
+                                        bed={bed}
+                                        chipState={chipState}
+                                        popoverRef={occupantPopoverRef}
+                                        onClose={() =>
+                                          setOccupantPopoverBedId(null)
+                                        }
+                                        onEdit={
+                                          chipState === "awaiting-check-in" &&
+                                          reservationByBedId.has(String(bed.id))
+                                            ? () => {
+                                                setOccupantPopoverBedId(null);
+                                                openReservation(
+                                                  bed,
+                                                  reservationByBedId.get(
+                                                    String(bed.id),
+                                                  )!,
+                                                );
+                                              }
+                                            : undefined
+                                        }
+                                      />
+                                    )}
+                                  </span>
                                 );
                               })}
                             </div>
@@ -1066,11 +1335,11 @@ export function HostelModule({
                   </span>
                 </div>
 
-                <h3>Reservations before manual assignment</h3>
+                <h3>Bookings from enquiry to arrival</h3>
 
                 <p>
-                  Edit reservation details, record multiple payments, cancel an enquiry
-                  or convert a confirmed booking into an actual room assignment.
+                  Edit reservation details, record multiple payments, check a
+                  student in on the day they arrive, or cancel an enquiry.
                 </p>
               </div>
 
@@ -1142,19 +1411,8 @@ export function HostelModule({
                 onClick={() => setReservationStatusTab("reserved")}
               >
                 Reserved ({reservationCounts.reserved})
-              </button>
-              <button
-                type="button"
-                className={
-                  reservationStatusTab === "converted" ? "active" : ""
-                }
-                onClick={() => setReservationStatusTab("converted")}
-              >
-                Converted ({reservationCounts.converted})
-                {pendingRoomReturns.length + awaitingCheckIn.length > 0 && (
-                  <span>
-                    {pendingRoomReturns.length + awaitingCheckIn.length}
-                  </span>
+                {awaitingCheckIn.length > 0 && (
+                  <span>{awaitingCheckIn.length}</span>
                 )}
               </button>
               <button
@@ -1165,6 +1423,9 @@ export function HostelModule({
                 onClick={() => setReservationStatusTab("checked-in")}
               >
                 Checked in ({reservationCounts.checkedIn})
+                {pendingRoomReturns.length > 0 && (
+                  <span>{pendingRoomReturns.length}</span>
+                )}
               </button>
               <button
                 type="button"
@@ -1177,7 +1438,7 @@ export function HostelModule({
               </button>
             </div>
 
-            {reservationStatusTab === "converted" &&
+            {reservationStatusTab === "checked-in" &&
               pendingRoomReturns.length > 0 && (
                 <section
                   className="panel"
@@ -1286,7 +1547,39 @@ export function HostelModule({
                 </div>
               </label>
 
-              {reservationStatusTab === "converted" && (
+              <label className="reservation-field">
+                <span>Check-in date</span>
+
+                <div className="reservation-date-range">
+                  <div className="reservation-input-control">
+                    <DateField
+                      type="date"
+                      value={reservationCheckInFrom}
+                      onChange={(event) =>
+                        setReservationCheckInFrom(event.target.value)
+                      }
+                      max={reservationCheckInTo || undefined}
+                      aria-label="Check-in date from"
+                    />
+                  </div>
+
+                  <span className="reservation-date-range-sep">to</span>
+
+                  <div className="reservation-input-control">
+                    <DateField
+                      type="date"
+                      value={reservationCheckInTo}
+                      onChange={(event) =>
+                        setReservationCheckInTo(event.target.value)
+                      }
+                      min={reservationCheckInFrom || undefined}
+                      aria-label="Check-in date to"
+                    />
+                  </div>
+                </div>
+              </label>
+
+              {reservationStatusTab === "reserved" && (
                 <label className="reservation-field">
                   <span>Payment status</span>
 
@@ -1300,19 +1593,19 @@ export function HostelModule({
                       }
                     >
                       <option value="all">
-                        All ({convertedPaymentCounts.all})
+                        All ({reservedPaymentCounts.all})
                       </option>
                       <option value="partial">
-                        Partial ({convertedPaymentCounts.partial})
+                        Partial ({reservedPaymentCounts.partial})
                       </option>
                       <option value="unpaid">
-                        Unpaid ({convertedPaymentCounts.unpaid})
+                        Unpaid ({reservedPaymentCounts.unpaid})
                       </option>
                       <option value="admin-fee">
-                        Admin fee ({convertedPaymentCounts["admin-fee"]})
+                        Admin fee ({reservedPaymentCounts["admin-fee"]})
                       </option>
                       <option value="full">
-                        Full payment ({convertedPaymentCounts.full})
+                        Full payment ({reservedPaymentCounts.full})
                       </option>
                     </select>
                   </div>
@@ -1392,9 +1685,14 @@ export function HostelModule({
                           <div className="reservation-card-title" style={{ margin: '4px 0' }}>
                             <h4 style={{ margin: 0, fontSize: '1.25rem' }}>{r.studentName}</h4>
 
-                            {isConverted && (
+                            {/* A group holds a unit and never gets a tenancy,
+                                so nothing below reports its state — this pill
+                                is the only place it shows. An individual
+                                booking says where its student is instead, on
+                                the arrival line further down. */}
+                            {isConverted && r.reservationType === "group" && (
                               <span className="reservation-converted-label">
-                                Converted
+                                Unit confirmed
                               </span>
                             )}
                           </div>
@@ -1475,17 +1773,36 @@ export function HostelModule({
                         {(r.status === "reserved" ||
                           r.status === "converted") && (
                           <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                            {r.status === "reserved" && (
-                              <button
-                                type="button"
-                                className="reservation-btn reservation-btn-convert"
-                                style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                                disabled={busy}
-                                onClick={() => setConvertReservation(r)}
-                              >
-                                Convert assignment
-                              </button>
-                            )}
+                            {/* Only a group still confirms anything by hand:
+                                it holds a unit rather than a bed, so there is
+                                no tenancy for a payment to create. An
+                                individual booking becomes a tenancy the
+                                moment its payment is recorded — the step that
+                                used to live here. */}
+                            {r.status === "reserved" &&
+                              r.reservationType === "group" && (
+                                <button
+                                  type="button"
+                                  className="reservation-btn reservation-btn-convert"
+                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                  disabled={busy}
+                                  onClick={() => setConvertReservation(r)}
+                                >
+                                  Confirm unit
+                                </button>
+                              )}
+                            {/* Paid, but nobody picked a room, so there is
+                                nothing to promote it into. Says which step is
+                                missing instead of leaving the card inert. */}
+                            {r.status === "reserved" &&
+                              r.reservationType !== "group" &&
+                              commitsInventory(r) &&
+                              !r.provisionalBedSpaceId && (
+                                <p className="reservation-needs-room">
+                                  Paid, but no room chosen — edit this booking
+                                  and pick one to complete it.
+                                </p>
+                              )}
 
                             {/* The arrival is the next thing to do on this
                                 booking, so it leads over Change room. */}
@@ -1550,8 +1867,8 @@ export function HostelModule({
                 <h4>No reservations found</h4>
 
                 <p>
-                  No reservations match the current student name, reference or hostel
-                  filters.
+                  No reservations match the current student name, reference,
+                  hostel or check-in date filters.
                 </p>
 
                 <button
@@ -1560,6 +1877,8 @@ export function HostelModule({
                   onClick={() => {
                     setReservationQuery("");
                     setReservationHostelFilter("all");
+                    setReservationCheckInFrom("");
+                    setReservationCheckInTo("");
                   }}
                 >
                   Clear filters
@@ -1593,28 +1912,16 @@ export function HostelModule({
                 </div>
 
                 {/* Room transfer fee */}
-                <section
-                  className="pricing-card"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    gap: '16px',
-                    flexWrap: 'wrap',
-                    marginBottom: '16px',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: '220px' }}>
-                    <small style={{ fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', fontSize: '11px' }}>
-                      Room transfer fee
-                    </small>
-                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#4b5563' }}>
-                      Default amount offered when changing a converted
-                      reservation&apos;s room. Staff can still waive it or
-                      edit the amount per case.
+                <section className="pricing-card pricing-editor pricing-fee-row">
+                  <div className="pricing-fee-row-copy">
+                    <small>Room transfer fee</small>
+                    <p>
+                      Default amount offered when moving a booking to a
+                      different room. Staff can still waive it or edit the
+                      amount per case.
                     </p>
                   </div>
                   <form
-                    style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}
                     onSubmit={async (event) => {
                       event.preventDefault();
                       await save(
@@ -1635,7 +1942,6 @@ export function HostelModule({
                         min="0"
                         step="0.01"
                         defaultValue={data.settings.roomTransferFee}
-                        style={{ width: '140px' }}
                       />
                     </label>
                     <button className="secondary compact" disabled={busy}>
@@ -1815,7 +2121,7 @@ export function HostelModule({
                           </span>
 
                           <div className="pricing-control">
-                            <input
+                            <DateField
                               type="date"
                               value={promotionStart}
                               onChange={(event) =>
@@ -1829,7 +2135,7 @@ export function HostelModule({
                           <span className="pricing-field-label">Promotion ends</span>
 
                           <div className="pricing-control">
-                            <input
+                            <DateField
                               type="date"
                               value={promotionEnd}
                               onChange={(event) =>
@@ -2101,7 +2407,7 @@ export function HostelModule({
               </label>
               <label>
                 Contract end date
-                <input
+                <DateField
                   type="date"
                   value={occupancyContractEnd}
                   onChange={(event) =>
@@ -2247,7 +2553,7 @@ export function HostelModule({
         <Modal
           title={editingReservation ? "Edit reservation" : "New reservation"}
           kicker="SALES RESERVATION"
-          description="Check-in date and student gender drive availability. Room assignment remains manual."
+          description="Estimated intake month and student gender drive availability. Room assignment remains manual."
           onClose={() => setReservationOpen(false)}
           wide
         >
@@ -2340,13 +2646,9 @@ export function HostelModule({
       )}
       {convertReservation && (
         <Modal
-          title="Convert to actual assignment"
-          kicker="MANUAL ASSIGNMENT"
-          description={
-            convertReservation.reservationType === "group"
-              ? "Confirm the whole unit. Tenant names can be added later in Student Information."
-              : "Keep the provisional option or manually choose another vacant room code."
-          }
+          title="Confirm the unit"
+          kicker="GROUP BOOKING"
+          description="Confirm the whole unit this group takes. Tenant names can be added later in Student Information."
           onClose={() => setConvertReservation(null)}
         >
           <ConvertAssignmentForm
@@ -2492,11 +2794,11 @@ function ConvertAssignmentForm({
         e.preventDefault();
         const ok = await save(
           {
-            action: "reservation-convert",
+            action: "reservation-confirm-unit",
             reservationId: convertReservation.id,
             ...formValues(e),
           },
-          "Reservation converted to assignment",
+          "Unit confirmed",
         );
         if (ok) onDone();
       }}
@@ -3145,7 +3447,7 @@ function ChangeRoomForm({
 
       <label className="wide">
         Expected return date (optional)
-        <input name="expectedReturnDate" type="date" />
+        <DateField name="expectedReturnDate" type="date" />
         <small style={{ fontWeight: 400, color: '#6b7280' }}>
           Only fill this in for a temporary move (e.g. a maintenance issue in
           their usual room). Leave blank for a permanent room change — a
@@ -3247,7 +3549,7 @@ function ReservationManageDetails({
   const commitmentDescription = isCancelled
     ? `Cancelled ${dateLabel(r.cancelledAt)} — no longer holds a room`
     : isConverted
-      ? "Reservation converted to an actual room assignment"
+      ? "This booking now holds a real room assignment"
       : r.inventoryCommitted
         ? "This reservation reduces sellable availability"
         : "This enquiry does not reduce room availability";
@@ -3643,13 +3945,12 @@ function ReservationManageDetails({
               <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>
                 Payment slip <span className="reservation-field-required">(required)</span>
               </span>
-              <input
+              <FileField
                 name="paymentProof"
-                type="file"
                 accept={ATTACHMENT_ACCEPT}
                 required
                 disabled={busy}
-                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#fff' }}
+                hint="Photo, PDF, Word, Excel or CSV."
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -3793,8 +4094,6 @@ function ReservationEditor({
       ? editingReservation?.identityNo || ""
       : formatIC(editingReservation?.identityNo || ""),
   );
-  const [race, setRace] = useState(editingReservation?.race || "");
-  const [religion, setReligion] = useState(editingReservation?.religion || "");
   const [date, setDate] = useState(
     editingReservation?.targetMoveInDate || availableDate,
   );
@@ -3955,6 +4254,10 @@ function ReservationEditor({
             reservationId: editingReservation?.id,
             chargeBreakdown: charges,
             ...formValues(event),
+            // The month picker carries no `name` — its own "YYYY-MM" value
+            // never reaches FormData — so the full date tracked in state
+            // (rounded to the 1st) is what actually goes out here.
+            targetMoveInDate: date,
           },
           editingReservation ? "Reservation updated" : "Reservation created",
         );
@@ -4051,7 +4354,7 @@ function ReservationEditor({
         </label>
         <label>
           Date of birth
-          <input
+          <DateField
             name="dateOfBirth"
             type="date"
             defaultValue={editingReservation?.dateOfBirth || ""}
@@ -4118,23 +4421,21 @@ function ReservationEditor({
         </label>
         <label>
           School
-          <select name="school" defaultValue={editingReservation?.school || ""}>
-            <option value="">Not set</option>
-            {data.schools.map((school: Row) => (
-              <option key={school.id} value={school.name}>
-                {school.name}
-              </option>
-            ))}
-          </select>
+          <SchoolSelect
+            name="school"
+            schools={data.schools}
+            defaultValue={editingReservation?.school || ""}
+            save={save}
+          />
         </label>
         <label>
           Course enrolled
-          <select name="course" defaultValue={editingReservation?.course || ""}>
-            <CourseOptions
-              courses={data.courses}
-              current={editingReservation?.course}
-            />
-          </select>
+          <CourseSelect
+            name="course"
+            courses={data.courses}
+            defaultValue={editingReservation?.course || ""}
+            save={save}
+          />
         </label>
         {nationality === "Malaysian" && (
           <label>
@@ -4172,50 +4473,22 @@ function ReservationEditor({
         )}
         <label>
           Race
-          <select
+          <RaceSelect
             name="race"
-            value={race}
-            onChange={(event) => setRace(event.target.value)}
-          >
-            <option value="">Select race</option>
-            {RACES.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
+            races={data.races}
+            defaultValue={editingReservation?.race || ""}
+            save={save}
+          />
         </label>
-        {race === "Others" && (
-          <label>
-            Specify race
-            <input
-              name="raceOther"
-              placeholder="e.g. Eurasian"
-              defaultValue={editingReservation?.raceOther || ""}
-            />
-          </label>
-        )}
         <label>
           Religion
-          <select
+          <ReligionSelect
             name="religion"
-            value={religion}
-            onChange={(event) => setReligion(event.target.value)}
-          >
-            <option value="">Select religion</option>
-            {RELIGIONS.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
+            religions={data.religions}
+            defaultValue={editingReservation?.religion || ""}
+            save={save}
+          />
         </label>
-        {religion === "Others" && (
-          <label>
-            Specify religion
-            <input
-              name="religionOther"
-              placeholder="e.g. Sikhism"
-              defaultValue={editingReservation?.religionOther || ""}
-            />
-          </label>
-        )}
         {kind === "group" && (
           <>
             <label>
@@ -4253,13 +4526,19 @@ function ReservationEditor({
 
       <div style={{ display: step === 2 ? "contents" : "none" }}>
         <label className="wide">
-          Check-in date
-          <input
-            name="targetMoveInDate"
-            type="date"
+          Estimated intake month
+          {/* A booking rarely has an exact arrival day yet — only which
+              month the student expects to move in. The precise date is
+              captured for real at Check in, which overwrites it; this stays
+              a full date underneath (rounded to the 1st) purely so every
+              existing date comparison downstream — availability, billing's
+              cut-off check, the move-in invoice date — keeps working
+              unchanged. No `name` here: the raw "YYYY-MM" this control hands
+              back is never what gets submitted, only shown. */}
+          <MonthField
             required
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
+            value={date.slice(0, 7)}
+            onChange={(event) => setDate(`${event.target.value}-01`)}
           />
         </label>
         <label>

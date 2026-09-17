@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import {
+  DateField,
   Modal,
   ParkingRentalForm,
   SearchIcon,
@@ -559,7 +560,7 @@ export function ParkingModule({
                 </label>
                 <label>
                   Start date
-                  <input
+                  <DateField
                     name="startDate"
                     type="date"
                     required
@@ -569,7 +570,7 @@ export function ParkingModule({
                 </label>
                 <label>
                   Paid until
-                  <input
+                  <DateField
                     name="paidUntil"
                     type="date"
                     placeholder="e.g. 2026-01-01"
@@ -588,7 +589,7 @@ export function ParkingModule({
                 </label>
                 <label>
                   Next payment due
-                  <input
+                  <DateField
                     name="nextDueDate"
                     type="date"
                     defaultValue={rental.nextDueDate || ""}

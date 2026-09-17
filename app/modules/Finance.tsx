@@ -4,8 +4,11 @@
 import { useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  DateField,
   Empty,
+  FileField,
   Modal,
+  MonthField,
   SearchIcon,
   Stat,
   StatusPill,
@@ -223,6 +226,40 @@ export function FinanceModule({
     string
   > | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // The gate between "generated" and "posted". A cycle's invoices exist in
+  // the database (and residents cannot see them yet — see billing-cycle's
+  // tenant-visibility filter) the moment "Generate invoices" is pressed;
+  // this is Accounts checking them before "Post monthly billing" makes them
+  // real. reviewCycleId names which cycle is open; cycleReview is the
+  // per-invoice {chargedRent, expectedRent} the server just computed fresh
+  // — never cached, since an edit made while this is open should be judged
+  // against the current answer, not the one from when the modal opened.
+  const [reviewCycleId, setReviewCycleId] = useState<number | null>(null);
+  const [cycleReview, setCycleReview] = useState<
+    { invoiceId: number; chargedRent: number; expectedRent: number }[] | null
+  >(null);
+  const [reviewOnlyIssues, setReviewOnlyIssues] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  // Which row's rent is mid-edit, and what's typed into it — only one at a
+  // time, so switching rows without saving just discards the abandoned one.
+  const [rentEditInvoiceId, setRentEditInvoiceId] = useState<number | null>(
+    null,
+  );
+  const [rentEditAmount, setRentEditAmount] = useState("");
+  const [rentEditReason, setRentEditReason] = useState("");
+  const loadCycleReview = async (cycleId: number) => {
+    setReviewBusy(true);
+    const result = await save(
+      { action: "billing-cycle-review", cycleId },
+      "",
+    );
+    setReviewBusy(false);
+    if (result?.cycleReview) {
+      setCycleReview(result.cycleReview);
+      setReviewCycleId(cycleId);
+      setModal("review");
+    }
+  };
   // Ticked by the staff member after the server refused an over-payment.
   const [confirmOverpay, setConfirmOverpay] = useState(false);
   // The house rule, in one place: a month is cut off on the same day of that
@@ -257,7 +294,13 @@ export function FinanceModule({
   >("invoices");
   const [invoiceQuery, setInvoiceQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
-  const [cycleFilter, setCycleFilter] = useState("all");
+  // A due-date range replaces the old "All months" dropdown — that one only
+  // covered invoices belonging to a billing cycle, so the move-in invoices
+  // (INV-MI-*, no cycleId at all) never showed up under any month. Every
+  // invoice has a due date regardless of whether it has a cycle, so the
+  // range reaches both kinds.
+  const [dueDateFrom, setDueDateFrom] = useState("");
+  const [dueDateTo, setDueDateTo] = useState("");
   const [page, setPage] = useState(1);
   const filteredInvoices = data.invoices.filter((invoice) => {
     const balance =
@@ -277,11 +320,12 @@ export function FinanceModule({
       `${invoice.studentName} ${invoice.roomCode} ${invoice.unitCode} ${invoice.invoiceNo}`
         .toLowerCase()
         .includes(search);
-    return (
-      statusMatch &&
-      searchMatch &&
-      (cycleFilter === "all" || String(invoice.cycleId) === cycleFilter)
-    );
+    // Plain string comparison — dueDate is always "YYYY-MM-DD", the same
+    // shape the date inputs hand back, so it sorts the same as a real date.
+    const dueDateMatch =
+      (!dueDateFrom || String(invoice.dueDate || "") >= dueDateFrom) &&
+      (!dueDateTo || String(invoice.dueDate || "") <= dueDateTo);
+    return statusMatch && searchMatch && dueDateMatch;
   });
   const totalPages = Math.max(
     1,
@@ -592,14 +636,10 @@ export function FinanceModule({
             data.currentUser?.roleKey !== "tenant" && (
               <button
                 className="primary"
-                onClick={() =>
-                  save(
-                    { action: "billing-post", cycleId: latest.id },
-                    "Billing cycle posted",
-                  )
-                }
+                disabled={reviewBusy}
+                onClick={() => loadCycleReview(latest.id)}
               >
-                Post monthly billing
+                {reviewBusy ? "Checking…" : "Review & post"}
               </button>
             )}
         </section>
@@ -683,27 +723,37 @@ export function FinanceModule({
             <option value="credit">Excess / credit</option>
             <option value="pending">Pending verification</option>
           </select>
-          <select
-            className="v2-pill-select"
-            value={cycleFilter}
-            onChange={(event) => {
-              setCycleFilter(event.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="all">All months</option>
-            {data.billingCycles.map((cycle) => (
-              <option key={cycle.id} value={cycle.id}>
-                {cycle.periodLabel}
-              </option>
-            ))}
-          </select>
+          <div className="v2-date-range">
+            <span className="v2-date-range-label">Due</span>
+            <DateField
+              className="v2-date-input"
+              value={dueDateFrom}
+              onChange={(event) => {
+                setDueDateFrom(event.target.value);
+                setPage(1);
+              }}
+              max={dueDateTo || undefined}
+              aria-label="Due date from"
+            />
+            <span className="v2-date-range-sep">–</span>
+            <DateField
+              className="v2-date-input"
+              value={dueDateTo}
+              onChange={(event) => {
+                setDueDateTo(event.target.value);
+                setPage(1);
+              }}
+              min={dueDateFrom || undefined}
+              aria-label="Due date to"
+            />
+          </div>
           <button
             className="v2-reset"
             onClick={() => {
               setInvoiceQuery("");
+              setDueDateFrom("");
+              setDueDateTo("");
               setPaymentStatusFilter("all");
-              setCycleFilter("all");
               setPage(1);
             }}
           >
@@ -1632,9 +1682,8 @@ export function FinanceModule({
             >
               <label>
                 Billing month
-                <input
+                <MonthField
                   name="periodLabel"
-                  type="month"
                   required
                   value={cycleMonth}
                   onChange={(event) => {
@@ -1648,7 +1697,7 @@ export function FinanceModule({
               </label>
               <label>
                 Cut-off date
-                <input
+                <DateField
                   name="cutoffDate"
                   type="date"
                   required
@@ -1658,7 +1707,7 @@ export function FinanceModule({
               </label>
               <label>
                 Payment due date
-                <input
+                <DateField
                   name="dueDate"
                   type="date"
                   required
@@ -1878,6 +1927,300 @@ export function FinanceModule({
           )}
         </Modal>
       )}
+      {modal === "review" &&
+        reviewCycleId &&
+        cycleReview &&
+        (() => {
+          const cycle = data.billingCycles.find(
+            (c: Row) => c.id === reviewCycleId,
+          );
+          const reviewByInvoice = new Map(
+            cycleReview.map((row) => [row.invoiceId, row]),
+          );
+          const reviewRows = data.invoices
+            .filter((invoice: Row) => invoice.cycleId === reviewCycleId)
+            .map((invoice: Row) => {
+              const review = reviewByInvoice.get(invoice.id);
+              const chargedRent = review?.chargedRent ?? 0;
+              const expectedRent = review?.expectedRent ?? chargedRent;
+              const diff = chargedRent - expectedRent;
+              const rentState: "under" | "over" | "match" =
+                Math.abs(diff) < 0.005 ? "match" : diff < 0 ? "under" : "over";
+              return { invoice, chargedRent, expectedRent, rentState };
+            });
+          const issueCount = reviewRows.filter(
+            (row) => row.rentState !== "match",
+          ).length;
+          const visibleRows = reviewOnlyIssues
+            ? reviewRows.filter((row) => row.rentState !== "match")
+            : reviewRows;
+          const closeReview = () => {
+            setModal("");
+            setReviewCycleId(null);
+            setCycleReview(null);
+            setReviewOnlyIssues(false);
+            setRentEditInvoiceId(null);
+          };
+          return (
+            <Modal
+              title={`Review — ${cycle?.periodLabel || reviewCycleId}`}
+              kicker="ACCOUNTS REVIEW"
+              description="Generated, but not sent out yet — residents can't see any of this until it's posted. Check the rent on each room, fix or drop anything wrong, then post."
+              onClose={closeReview}
+              wide
+            >
+              <div className="billing-review">
+                {issueCount > 0 && (
+                  <p className="billing-review-banner">
+                    <b>{issueCount}</b> of {reviewRows.length} invoice
+                    {reviewRows.length === 1 ? "" : "s"} charge{" "}
+                    {issueCount === 1
+                      ? "a rent that doesn't"
+                      : "rents that don't"}{" "}
+                    match the room&apos;s contracted rate — check before
+                    posting.
+                  </p>
+                )}
+                <label className="billing-review-toggle">
+                  <input
+                    type="checkbox"
+                    checked={reviewOnlyIssues}
+                    onChange={(event) =>
+                      setReviewOnlyIssues(event.target.checked)
+                    }
+                  />
+                  Show only rooms that need checking
+                </label>
+                <div className="table-wrap">
+                  <table className="billing-review-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice</th>
+                        <th>Student</th>
+                        <th>Rent charged</th>
+                        <th>Other charges</th>
+                        <th>Total</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleRows.map(
+                        ({ invoice, chargedRent, expectedRent, rentState }) => {
+                          const rentItem = (invoice.items || []).find(
+                            (item: Row) => item.itemType === "room-rental",
+                          );
+                          const otherItems = (invoice.items || []).filter(
+                            (item: Row) => item.itemType !== "room-rental",
+                          );
+                          const editingThis =
+                            rentEditInvoiceId === invoice.id;
+                          return (
+                            <tr
+                              key={invoice.id}
+                              className={`billing-review-row is-${rentState}`}
+                            >
+                              <td>
+                                <code>{invoice.invoiceNo}</code>
+                              </td>
+                              <td>
+                                <strong>{invoice.studentName}</strong>
+                                <small>{invoice.roomCode}</small>
+                              </td>
+                              <td>
+                                {editingThis ? (
+                                  <div className="billing-review-edit">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      autoFocus
+                                      value={rentEditAmount}
+                                      onChange={(event) =>
+                                        setRentEditAmount(event.target.value)
+                                      }
+                                    />
+                                    <input
+                                      placeholder="Reason for the change"
+                                      value={rentEditReason}
+                                      onChange={(event) =>
+                                        setRentEditReason(event.target.value)
+                                      }
+                                    />
+                                    <div className="billing-review-edit-actions">
+                                      <button
+                                        type="button"
+                                        className="secondary compact"
+                                        disabled={busy}
+                                        onClick={() =>
+                                          setRentEditInvoiceId(null)
+                                        }
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="primary compact"
+                                        disabled={
+                                          busy ||
+                                          rentEditAmount === "" ||
+                                          !rentEditReason.trim() ||
+                                          !rentItem
+                                        }
+                                        onClick={async () => {
+                                          if (!rentItem) return;
+                                          const ok = await save(
+                                            {
+                                              action: "billing-item-adjust",
+                                              itemId: rentItem.id,
+                                              newAmount: rentEditAmount,
+                                              reason: rentEditReason,
+                                            },
+                                            "Rent updated",
+                                          );
+                                          if (ok) {
+                                            setRentEditInvoiceId(null);
+                                            setRentEditAmount("");
+                                            setRentEditReason("");
+                                            await loadCycleReview(
+                                              reviewCycleId,
+                                            );
+                                          }
+                                        }}
+                                      >
+                                        Save
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <strong>{money(chargedRent, true)}</strong>
+                                    {rentState !== "match" && (
+                                      <small>
+                                        Contracted {money(expectedRent, true)}
+                                      </small>
+                                    )}
+                                    {rentItem ? (
+                                      <button
+                                        type="button"
+                                        className="secondary compact"
+                                        disabled={busy}
+                                        onClick={() => {
+                                          setRentEditInvoiceId(invoice.id);
+                                          setRentEditAmount(
+                                            String(chargedRent),
+                                          );
+                                          setRentEditReason("");
+                                        }}
+                                      >
+                                        Edit
+                                      </button>
+                                    ) : (
+                                      rentState !== "match" && (
+                                        <small className="billing-review-no-item">
+                                          No rent line to edit — use Edit
+                                          invoice.
+                                        </small>
+                                      )
+                                    )}
+                                  </>
+                                )}
+                              </td>
+                              <td>
+                                {otherItems.length ? (
+                                  otherItems.map((item: Row) => (
+                                    <small key={item.id}>
+                                      {chargeTypeMeta(item.itemType).label}:{" "}
+                                      {money(item.amount, true)}
+                                    </small>
+                                  ))
+                                ) : (
+                                  <small>—</small>
+                                )}
+                              </td>
+                              <td>
+                                <strong>
+                                  {money(invoice.totalAmount, true)}
+                                </strong>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  onClick={() =>
+                                    setModal(`invoice:${invoice.id}`)
+                                  }
+                                >
+                                  Open
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger compact"
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    const confirmed = confirm(
+                                      `Delete invoice ${invoice.invoiceNo}? This also removes its payment records and cannot be undone.`,
+                                    );
+                                    if (!confirmed) return;
+                                    const ok = await save(
+                                      {
+                                        action: "billing-invoice-delete",
+                                        invoiceId: invoice.id,
+                                      },
+                                      "Invoice deleted",
+                                    );
+                                    if (ok)
+                                      await loadCycleReview(reviewCycleId);
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        },
+                      )}
+                      {!visibleRows.length && (
+                        <tr>
+                          <td colSpan={6}>
+                            <em>
+                              {reviewOnlyIssues
+                                ? "Nothing left to check — every rent matches."
+                                : "No invoices in this cycle."}
+                            </em>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="form-actions wide">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={closeReview}
+                >
+                  Back — keep as draft
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || !reviewRows.length}
+                  onClick={async () => {
+                    const ok = await save(
+                      { action: "billing-post", cycleId: reviewCycleId },
+                      "Billing cycle posted",
+                    );
+                    if (ok) closeReview();
+                  }}
+                >
+                  Confirm & post
+                </button>
+              </div>
+            </Modal>
+          );
+        })()}
       {modal.startsWith("invoice:") &&
         (() => {
           const invoice = data.invoices.find(
@@ -1918,23 +2261,6 @@ export function FinanceModule({
                               Edit
                             </button>
                           )}
-                          {data.currentUser?.roleKey !== "tenant" &&
-                            (x.verifiedAt ? (
-                              <span className="invoice-item-verified">✓ Verified</span>
-                            ) : (
-                              <button
-                                className="secondary compact"
-                                disabled={busy}
-                                onClick={() =>
-                                  save(
-                                    { action: "billing-item-verify", itemId: x.id },
-                                    "Billing item verified",
-                                  )
-                                }
-                              >
-                                Verify
-                              </button>
-                            ))}
                         </div>
                       </div>
                     );
@@ -1970,6 +2296,63 @@ export function FinanceModule({
                   )}
                 </div>
               </div>
+              {/* The bill is confirmed once, as a whole: staff read the
+                  charges above and confirm the total, instead of ticking
+                  every line. It is still stored per line, so a line whose
+                  amount is changed afterwards comes back unverified on its
+                  own — and this box asks for the check again. */}
+              {data.currentUser?.roleKey !== "tenant" &&
+                invoice.items.length > 0 &&
+                (() => {
+                  const items: Row[] = invoice.items;
+                  const count = `${items.length} charge${items.length === 1 ? "" : "s"}`;
+                  const verified = items.every((item) => item.verifiedAt);
+                  const latest = verified
+                    ? [...items].sort((a, b) =>
+                        String(b.verifiedAt).localeCompare(String(a.verifiedAt)),
+                      )[0]
+                    : null;
+                  return (
+                    <div
+                      className={`invoice-verify${verified ? " is-verified" : ""}`}
+                    >
+                      {verified ? (
+                        <>
+                          <span className="invoice-item-verified">
+                            ✓ Charges verified
+                          </span>
+                          <p>
+                            {count}, <b>{money(invoice.totalAmount, true)}</b> —
+                            checked by {latest?.verifiedBy || "staff"} on{" "}
+                            {dateLabel(latest?.verifiedAt)}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p>
+                            Check the {count} above, then confirm the total of{" "}
+                            <b>{money(invoice.totalAmount, true)}</b> is right.
+                          </p>
+                          <button
+                            className="primary compact"
+                            disabled={busy}
+                            onClick={() =>
+                              save(
+                                {
+                                  action: "billing-invoice-verify",
+                                  invoiceId: invoice.id,
+                                },
+                                "Invoice charges verified",
+                              )
+                            }
+                          >
+                            Confirm charges
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               <div className="button-row">
                 <button className="secondary" onClick={() => window.print()}>
                   Print / download PDF
@@ -2014,74 +2397,107 @@ export function FinanceModule({
               </div>
               {invoice.payments.length > 0 && (
                 <div className="payment-review">
-                  <h4>Payment submissions</h4>
-                  {invoice.payments.map((p: Row) => (
-                    <div key={p.id} className="payment-review-item">
-                      <div className="payment-review-item-main">
-                        <strong>{money(p.verifiedAmount ?? p.amount, true)}</strong>
-                        <span className="payment-review-item-covers">
-                          {p.remark || "No remark"}
-                        </span>
-                        <span
-                          className={`payment-review-item-status${p.status === "verified" ? " is-verified" : ""}`}
-                        >
-                          {titleCase(p.status)}
-                        </span>
-                      </div>
-                      <div className="payment-review-item-actions">
-                        {data.attachments
-                          .filter(
-                            (attachment) =>
-                              attachment.contextType === "payment-proof" &&
-                              attachment.recordId === p.id,
-                          )
-                          .map((attachment) => (
-                            <span key={attachment.id} className="payment-review-item-slip">
-                              <a
-                                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {attachment.fileName || "View payment slip"}
-                              </a>
-                              <button
-                                type="button"
-                                className="secondary compact"
-                                disabled={busy}
-                                onClick={async () => {
-                                  const newName = prompt(
-                                    "Rename this payment slip:",
-                                    attachment.fileName,
-                                  );
-                                  if (newName && newName.trim()) {
-                                    await renameAttachment(attachment.id, newName.trim());
-                                    await load();
-                                  }
-                                }}
-                              >
-                                Rename
-                              </button>
+                  <h4>
+                    Payment submissions
+                    <span className="payment-review-count">
+                      {invoice.payments.length}
+                    </span>
+                  </h4>
+                  {invoice.payments.map((p: Row) => {
+                    const slips = data.attachments.filter(
+                      (attachment) =>
+                        attachment.contextType === "payment-proof" &&
+                        attachment.recordId === p.id,
+                    );
+                    return (
+                      <div key={p.id} className="payment-review-item">
+                        <div className="payment-review-item-head">
+                          <strong>{money(p.verifiedAmount ?? p.amount, true)}</strong>
+                          <span
+                            className={`payment-review-item-status${p.status === "verified" ? " is-verified" : ""}`}
+                          >
+                            {titleCase(p.status)}
+                          </span>
+                          <span className="payment-review-item-date">
+                            {dateLabel(p.verifiedAt || p.submittedAt)}
+                          </span>
+                        </div>
+                        <div className="payment-review-item-meta">
+                          <span className="payment-review-item-covers">
+                            {p.remark || "No remark"}
+                          </span>
+                          {(p.actualReference || p.reference) && (
+                            <span className="payment-review-item-ref">
+                              Ref {p.actualReference || p.reference}
                             </span>
-                          ))}
-                        {p.status !== "verified" && (
-                          <button
-                            className="secondary compact"
-                            onClick={() => setModal(`verify:${p.id}`)}
-                          >
-                            Verify & issue receipt
-                          </button>
+                          )}
+                        </div>
+                        {slips.length > 0 && (
+                          <div className="payment-review-item-slips">
+                            {slips.map((attachment) => (
+                              <div
+                                key={attachment.id}
+                                className="payment-review-item-slip"
+                              >
+                                <svg
+                                  className="payment-review-item-slip-icon"
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+                                  <path d="M14 2v6h6" />
+                                </svg>
+                                <a
+                                  href={`${BASE_PATH}/api/files?id=${attachment.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {attachment.fileName || "View payment slip"}
+                                </a>
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    const newName = prompt(
+                                      "Rename this payment slip:",
+                                      attachment.fileName,
+                                    );
+                                    if (newName && newName.trim()) {
+                                      await renameAttachment(
+                                        attachment.id,
+                                        newName.trim(),
+                                      );
+                                      await load();
+                                    }
+                                  }}
+                                >
+                                  Rename
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         )}
-                        {p.status === "verified" && (
-                          <button
-                            className="secondary compact"
-                            onClick={() => window.print()}
-                          >
-                            Receipt {p.receiptNo}
-                          </button>
-                        )}
+                        <div className="payment-review-item-actions">
+                          {p.status !== "verified" ? (
+                            <button
+                              className="secondary compact"
+                              onClick={() => setModal(`verify:${p.id}`)}
+                            >
+                              Verify & issue receipt
+                            </button>
+                          ) : (
+                            <button
+                              className="secondary compact"
+                              onClick={() => window.print()}
+                            >
+                              Receipt {p.receiptNo}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Modal>
@@ -2146,11 +2562,11 @@ export function FinanceModule({
                 </label>
                 <label className="wide">
                   Payment slip
-                  <input
+                  <FileField
                     name="proof"
-                    type="file"
                     accept={ATTACHMENT_ACCEPT}
                     required
+                    hint="Photo, PDF, Word, Excel or CSV."
                   />
                 </label>
                 <SuspiciousConfirm
@@ -2339,7 +2755,7 @@ export function FinanceModule({
               >
                 <label>
                   Due date
-                  <input
+                  <DateField
                     name="dueDate"
                     type="date"
                     required

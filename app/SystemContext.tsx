@@ -30,10 +30,18 @@ const SystemContext = createContext<SystemContextValue | null>(null);
 // reload via the null return below.
 function scopedModulesForAction(action: string): string[] | null {
   if (/^parking-/.test(action)) return ["parking"];
-  if (/^(ticket-|general-cost)/.test(action)) return ["maintenance-tickets"];
+  // "rooms" rides along because the two turnover tickets a move-out raises
+  // are what put a room in the "being prepared" state on the availability
+  // board. Completing one has to take the room off that list, and the bed
+  // rows carry the flag — refreshing only the tickets would leave the board
+  // showing work that is finished. Nothing in the action name says whether a
+  // given ticket is a turnover one, so every ticket save pays for it.
+  if (/^(ticket-|general-cost)/.test(action))
+    return ["maintenance-tickets", "rooms"];
   if (/^announcement/.test(action)) return ["announcements"];
   if (/^(role-|user-|reminder-)/.test(action)) return ["users"];
-  if (/^(school-|course-)/.test(action)) return ["schools-courses"];
+  if (/^(school-|course-|race-|religion-)/.test(action))
+    return ["schools-courses"];
   // A meter reading changes readings and nothing else. Falling through to
   // the full reload meant keying in a month's readings pulled the entire
   // dataset down once per room.
@@ -107,6 +115,10 @@ export function SystemProvider({ children }: { children: ReactNode }) {
         id?: number;
         linkedPaymentId?: number;
         preview?: unknown;
+        // Set when the save worked but there is something to say about it —
+        // it replaces the caller's generic success message rather than
+        // reading as an error.
+        notice?: string;
       };
       if (!response.ok) {
         // A figure that is only suspicious, not invalid, is offered back to
@@ -118,8 +130,8 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       const action =
         typeof payload.action === "string" ? payload.action : "";
       await load(scopedModulesForAction(action) ?? undefined);
-      setNotice(success);
-      window.setTimeout(() => setNotice(""), 3000);
+      setNotice(result.notice || success);
+      window.setTimeout(() => setNotice(""), result.notice ? 7000 : 3000);
       return result as {
         ok: boolean;
         id?: number;

@@ -488,6 +488,22 @@ export const courses = pgTable("courses", {
     .default(sql`(CURRENT_TIMESTAMP)::text`),
 });
 
+export const races = pgTable("races", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  name: text("name").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
+export const religions = pgTable("religions", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  name: text("name").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
 export const maintenanceTickets = pgTable("maintenance_tickets", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   ticketNo: text("ticket_no").notNull().unique(),
@@ -530,6 +546,11 @@ export const maintenanceTickets = pgTable("maintenance_tickets", {
   billedCycleId: bigint("billed_cycle_id", { mode: "number" }).references(
     () => billingCycles.id,
   ),
+  // Set on the two tickets a move-out raises: the inspection that decides
+  // what comes out of the deposit, and the cleaning. Null on every ordinary
+  // fault report. Named rather than inferred from `category`, which is free
+  // text staff can rename from the categories screen at any time.
+  turnoverStage: text("turnover_stage"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

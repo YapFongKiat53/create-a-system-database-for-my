@@ -1,8 +1,8 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useId, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { FormEvent, InputHTMLAttributes, ReactNode } from "react";
 import { BASE_PATH } from "../basePath";
 
 export type Row = Record<string, any>;
@@ -23,6 +23,8 @@ export type Data = {
   parkingRentals: Row[];
   schools: Row[];
   courses: Row[];
+  races: Row[];
+  religions: Row[];
   categoryRates: Row[];
   tickets: Row[];
   ticketMessages: Row[];
@@ -31,6 +33,10 @@ export type Data = {
   // trimmed to the newest few per room, so the month picker still offers
   // every month rather than only the ones the trimmed set happens to cover.
   meterMonths: string[];
+  // Rooms whose electricity would go unbilled if the next, not-yet-run
+  // cycle were generated right now — see computeUnreadMeterRooms /
+  // upcomingMeterCutoff in app/api/system/route.ts. Empty for tenants.
+  overdueMeterRooms: { roomCode: string; lastReadingDate: string | null }[];
   billingCycles: Row[];
   invoices: Row[];
   announcements: Row[];
@@ -327,6 +333,169 @@ export const dateLabel = (value: string | null | undefined, short = false) =>
           : { day: "2-digit", month: "short", year: "numeric" },
       ).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`))
     : "-";
+
+/**
+ * A date field that reads "01 Sept 2026" instead of "01/09/2026".
+ *
+ * The browser draws a native date input's own text from the OS locale and
+ * offers no way to reformat it — so the real input stays exactly where it
+ * was, keeping its value, name, required/min/max validation and its own
+ * calendar, and only its *text* is made transparent. The month-name version
+ * is painted over the top. Clicking anywhere on the field opens the same
+ * native calendar it always did.
+ *
+ * Blur-on-pick is what makes this work: a date input keeps focus after the
+ * calendar closes, and a focused one highlights the segment under the
+ * (now invisible) numbers, which would show through as an empty blue block.
+ * Dropping focus the moment a date is chosen leaves the formatted label
+ * clean.
+ */
+const monthLabel = (value: string) =>
+  new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" }).format(
+    new Date(`${value}-01T00:00:00Z`),
+  );
+
+// datetime-local's value has no timezone offset — it's the wall-clock time
+// the user picked, so parsed as-is (no "Z") rather than forced to UTC the
+// way dateLabel forces a pure date string to avoid a day-off-by-one shift.
+const dateTimeLabel = (value: string) =>
+  new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+
+/**
+ * The engine behind DateField/MonthField/DateTimeField — one native
+ * type="date"/"month"/"datetime-local" input with its own text made
+ * transparent and a custom-formatted label painted over it (see DateField's
+ * doc comment above for why: the browser won't let you reformat its own
+ * locale text). type-specific pieces are just which native input type is
+ * rendered and how its value is formatted; everything else — controlled vs
+ * uncontrolled display, blur-on-pick, matching the label's metrics to the
+ * real input — is identical across all three, so it lives here once.
+ */
+function TemporalField({
+  type,
+  formatValue,
+  emptyLabel,
+  value,
+  defaultValue,
+  onChange,
+  className,
+  ...rest
+}: {
+  type: "date" | "month" | "datetime-local";
+  formatValue: (value: string) => string;
+  emptyLabel: string;
+} & InputHTMLAttributes<HTMLInputElement>) {
+  const isControlled = value !== undefined;
+  // A controlled field's display is just its prop, recomputed every render
+  // — no state of its own needed. An uncontrolled one has no prop to read
+  // after the first render, so its value lives only in this state, moved by
+  // its own onChange below.
+  const [uncontrolledDisplay, setUncontrolledDisplay] = useState(
+    String(defaultValue ?? ""),
+  );
+  const display = isControlled ? String(value ?? "") : uncontrolledDisplay;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
+  // The label has to sit exactly where the browser would have drawn the
+  // numbers, and these fields are 39px/11px in a form and 48px/14px in the
+  // reservation filters — among others. Reading the metrics off the input
+  // itself lands it correctly in every one of them without this component
+  // having to know which screen it is on.
+  useEffect(() => {
+    const input = inputRef.current;
+    const label = labelRef.current;
+    if (!input || !label) return;
+    const style = getComputedStyle(input);
+    label.style.paddingLeft = style.paddingLeft;
+    label.style.paddingRight = style.paddingRight;
+    label.style.fontSize = style.fontSize;
+    label.style.fontWeight = style.fontWeight;
+    label.style.fontFamily = style.fontFamily;
+  });
+  return (
+    <span className="date-field">
+      <input
+        ref={inputRef}
+        type={type}
+        className={className ? `date-field-input ${className}` : "date-field-input"}
+        onClick={(event) => {
+          // Only the little calendar icon opens the picker by default, and
+          // the rest of the field now has nothing visible to click into.
+          try {
+            event.currentTarget.showPicker?.();
+          } catch {
+            // Chrome throws if the picker is already open or the click
+            // wasn't treated as a user gesture — either way the native
+            // behaviour still applies, so there is nothing to recover.
+          }
+        }}
+        onChange={(event) => {
+          if (!isControlled) setUncontrolledDisplay(event.target.value);
+          event.currentTarget.blur();
+          onChange?.(event);
+        }}
+        {...(isControlled ? { value } : { defaultValue })}
+        {...rest}
+      />
+      <span
+        ref={labelRef}
+        className={display ? "date-field-label" : "date-field-label is-empty"}
+        aria-hidden="true"
+      >
+        {display ? formatValue(display) : emptyLabel}
+      </span>
+    </span>
+  );
+}
+
+export function DateField({
+  type: _ignoredType,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <TemporalField
+      type="date"
+      formatValue={dateLabel}
+      emptyLabel="Select date"
+      {...rest}
+    />
+  );
+}
+
+export function MonthField({
+  type: _ignoredType,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <TemporalField
+      type="month"
+      formatValue={monthLabel}
+      emptyLabel="Select month"
+      {...rest}
+    />
+  );
+}
+
+export function DateTimeField({
+  type: _ignoredType,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <TemporalField
+      type="datetime-local"
+      formatValue={dateTimeLabel}
+      emptyLabel="Select date & time"
+      {...rest}
+    />
+  );
+}
+
 export const genderLabel = (value: string) =>
   value === "unspecified"
     ? "To confirm"
@@ -425,6 +594,116 @@ export const isImageAttachment = (type?: string | null) =>
   String(type || "").startsWith("image/");
 export const isVideoAttachment = (type?: string | null) =>
   String(type || "").startsWith("video/");
+
+/**
+ * Every upload field in the app used the browser's own "Choose File / No
+ * file chosen" control — different on every OS, impossible to restyle, and
+ * gives no feedback once a file is actually picked beyond that one grey
+ * label. This puts a real (accessible, still-submits-with-the-form) file
+ * input behind a click-or-drag box that shows what was picked and, via the
+ * optional `hint`, what's accepted — so a form finally looks like the rest
+ * of it instead of falling back to OS chrome.
+ *
+ * The box is a <span >, not a <label>, even though every call site already
+ * wraps it in its own `<label>Field name<FileField /></label>` — nesting a
+ * second label inside that would be invalid HTML and made click-to-focus
+ * unreliable across browsers. A plain click handler that calls
+ * inputRef.current.click() does the same job; the real input still sits
+ * inside the outer label, so that label's implicit "click anywhere in me
+ * activates my control" behaviour keeps working exactly as it did for the
+ * native input this replaces.
+ */
+export function FileField({
+  hint,
+  multiple,
+  disabled,
+  onChange,
+  ...rest
+}: { hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <span className="file-field">
+      <span
+        className={
+          dragOver ? "file-field-control is-dragover" : "file-field-control"
+        }
+        onClick={(event) => {
+          // inputRef.current.click() below dispatches its own bubbling
+          // click, which reaches this same span a second time with the
+          // input itself as the target — return then, or this recurses.
+          if (event.target === inputRef.current) return;
+          // Every call site already wraps this in its own
+          // `<label>Field name<FileField /></label>` for the field-caption
+          // styling — without stopping the bubble here, the *first* click
+          // would open the native dialog once via inputRef.click() below
+          // and a second time via that outer label's own implicit
+          // "click landed on me, forward it to my nested control" behaviour.
+          event.stopPropagation();
+          inputRef.current?.click();
+        }}
+        onDragOver={(event) => {
+          if (disabled) return;
+          event.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(event) => {
+          if (disabled) return;
+          event.preventDefault();
+          setDragOver(false);
+          const dropped = event.dataTransfer.files;
+          // Assigning to the real input's .files (rather than reading the
+          // drop event directly) is what makes a dropped file submit with
+          // the form exactly like a picked one — and dispatching "change"
+          // on it is what tells this component (and any onChange the
+          // caller passed in) that something changed, the same event a
+          // click-to-browse pick fires natively.
+          if (!dropped.length || !inputRef.current) return;
+          inputRef.current.files = dropped;
+          inputRef.current.dispatchEvent(new Event("change", { bubbles: true }));
+        }}
+      >
+        <svg
+          className="file-field-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
+          <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+        </svg>
+        <span
+          className={
+            fileNames.length ? "file-field-text" : "file-field-text is-empty"
+          }
+        >
+          {fileNames.length ? fileNames.join(", ") : "Click to browse, or drag a file here"}
+        </span>
+        <span className="file-field-button">Browse</span>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple={multiple}
+          disabled={disabled}
+          className="file-field-input"
+          onChange={(event) => {
+            setFileNames(Array.from(event.target.files || []).map((f) => f.name));
+            onChange?.(event);
+          }}
+          {...rest}
+        />
+      </span>
+      {hint && <small className="field-note">{hint}</small>}
+    </span>
+  );
+}
 
 // Short badge for a stored file. Reads the extension first because that is
 // what staff recognise, and falls back to the MIME type for files saved
@@ -725,9 +1004,10 @@ export function DemographicFields({
   state: initialState = "",
   hometown: initialHometown = "",
   race: initialRace = "",
-  raceOther: initialRaceOther = "",
   religion: initialReligion = "",
-  religionOther: initialReligionOther = "",
+  races,
+  religions,
+  save,
 }: {
   identityNo?: string;
   nationality?: string;
@@ -735,13 +1015,12 @@ export function DemographicFields({
   state?: string;
   hometown?: string;
   race?: string;
-  raceOther?: string;
   religion?: string;
-  religionOther?: string;
+  races: Row[];
+  religions: Row[];
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
 }) {
   const [nationality, setNationality] = useState(initialNationality);
-  const [race, setRace] = useState(initialRace);
-  const [religion, setReligion] = useState(initialReligion);
   const [identityNo, setIdentityNo] = useState(
     nationality === "International" ? initialIdentityNo : formatIC(initialIdentityNo),
   );
@@ -815,50 +1094,22 @@ export function DemographicFields({
       )}
       <label>
         Race
-        <select
+        <RaceSelect
           name="race"
-          value={race}
-          onChange={(event) => setRace(event.target.value)}
-        >
-          <option value="">Select race</option>
-          {RACES.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
+          races={races}
+          defaultValue={initialRace}
+          save={save}
+        />
       </label>
-      {race === "Others" && (
-        <label>
-          Specify race
-          <input
-            name="raceOther"
-            placeholder="e.g. Eurasian"
-            defaultValue={initialRaceOther}
-          />
-        </label>
-      )}
       <label>
         Religion
-        <select
+        <ReligionSelect
           name="religion"
-          value={religion}
-          onChange={(event) => setReligion(event.target.value)}
-        >
-          <option value="">Select religion</option>
-          {RELIGIONS.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
+          religions={religions}
+          defaultValue={initialReligion}
+          save={save}
+        />
       </label>
-      {religion === "Others" && (
-        <label>
-          Specify religion
-          <input
-            name="religionOther"
-            placeholder="e.g. Sikhism"
-            defaultValue={initialReligionOther}
-          />
-        </label>
-      )}
     </>
   );
 }
@@ -871,39 +1122,225 @@ export const COURSE_LEVEL_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-// Courses grouped by programme level so staff pick from a list instead of
-// retyping the full course name each time. Falls back to showing whatever
-// free-text value a student/reservation already has, in case it predates
-// this list. Shared by Student Information's Academic information section
-// and the Hostel Information reservation form, so both pick from the same
-// schools/courses tables instead of one of them being free text.
-export function CourseOptions({
-  courses,
-  current,
+// Type-to-filter a small staff-editable reference list (course, race,
+// religion, ...), with an inline "add new" row when nothing matches — so an
+// entry only ever has to be typed out in full once. Backs
+// CourseSelect/RaceSelect/ReligionSelect below; all three used to be a
+// plain `<select>` (course's was grouped by level — see git history)
+// before this replaced them.
+//
+// Deliberately drops typed text that was never confirmed by clicking a
+// match or "Add new" — same rule SearchSelect already uses elsewhere in
+// this file — so a half-typed entry can't slip into a save as a throwaway
+// free-text value that never makes it into the table backing this list.
+function SearchCreateSelect({
+  name,
+  items,
+  defaultValue,
+  save,
+  createAction,
+  entityLabel,
+  placeholder,
+  renderMeta,
 }: {
-  courses: Row[];
-  current?: string;
+  name: string;
+  items: Row[];
+  defaultValue?: string;
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
+  /** e.g. "course-create" */
+  createAction: string;
+  /** e.g. "course" — human-readable, used only in copy */
+  entityLabel: string;
+  placeholder: string;
+  renderMeta?: (item: Row) => string;
+}) {
+  const [query, setQuery] = useState(defaultValue || "");
+  // The value that will actually submit — starts as whatever the record
+  // already had (even if that name no longer matches anything in the
+  // list, e.g. legacy free text), and only changes when the user picks a
+  // match or adds a new one.
+  const [confirmed, setConfirmed] = useState(defaultValue || "");
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickAway = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickAway);
+    return () => document.removeEventListener("mousedown", handleClickAway);
+  }, [open]);
+
+  const matches = items.filter((item) =>
+    item.name.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const exactMatch = items.some(
+    (item) => item.name.toLowerCase() === query.trim().toLowerCase(),
+  );
+
+  const choose = (itemName: string) => {
+    setQuery(itemName);
+    setConfirmed(itemName);
+    setOpen(false);
+  };
+
+  const addNew = async () => {
+    const itemName = query.trim();
+    if (!itemName) return;
+    setCreating(true);
+    const ok = await save(
+      { action: createAction, name: itemName },
+      `${titleCase(entityLabel)} added`,
+    );
+    setCreating(false);
+    if (ok) choose(itemName);
+  };
+
+  return (
+    <div className="search-create-select" ref={wrapRef}>
+      <input
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <input type="hidden" name={name} value={confirmed} />
+      {open && (
+        <div className="search-create-select-dropdown">
+          {matches.length > 0 ? (
+            matches.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="search-create-select-option"
+                onClick={() => choose(item.name)}
+              >
+                {item.name}
+                {renderMeta && <small>{renderMeta(item)}</small>}
+              </button>
+            ))
+          ) : query.trim() ? null : (
+            <p className="search-create-select-empty">Start typing to search.</p>
+          )}
+          {query.trim() && !exactMatch && (
+            <button
+              type="button"
+              className="search-create-select-add"
+              disabled={creating}
+              onClick={addNew}
+            >
+              {creating
+                ? "Adding…"
+                : `+ Add "${query.trim()}" as new ${entityLabel}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SchoolSelect({
+  name,
+  schools,
+  defaultValue,
+  save,
+}: {
+  name: string;
+  schools: Row[];
+  defaultValue?: string;
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
 }) {
   return (
-    <>
-      <option value="">Not set</option>
-      {COURSE_LEVELS.map((level) => {
-        const levelCourses = courses.filter((c) => c.level === level);
-        if (!levelCourses.length) return null;
-        return (
-          <optgroup key={level} label={COURSE_LEVEL_LABELS[level]}>
-            {levelCourses.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </optgroup>
-        );
-      })}
-      {current && !courses.some((c) => c.name === current) && (
-        <option value={current}>{current}</option>
-      )}
-    </>
+    <SearchCreateSelect
+      name={name}
+      items={schools}
+      defaultValue={defaultValue}
+      save={save}
+      createAction="school-create"
+      entityLabel="school"
+      placeholder="Type to search or add a school..."
+    />
+  );
+}
+
+export function CourseSelect({
+  name,
+  courses,
+  defaultValue,
+  save,
+}: {
+  name: string;
+  courses: Row[];
+  defaultValue?: string;
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
+}) {
+  return (
+    <SearchCreateSelect
+      name={name}
+      items={courses}
+      defaultValue={defaultValue}
+      save={save}
+      createAction="course-create"
+      entityLabel="course"
+      placeholder="Type to search or add a course..."
+      renderMeta={(course) => COURSE_LEVEL_LABELS[course.level] || course.level}
+    />
+  );
+}
+
+export function RaceSelect({
+  name,
+  races,
+  defaultValue,
+  save,
+}: {
+  name: string;
+  races: Row[];
+  defaultValue?: string;
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
+}) {
+  return (
+    <SearchCreateSelect
+      name={name}
+      items={races}
+      defaultValue={defaultValue}
+      save={save}
+      createAction="race-create"
+      entityLabel="race"
+      placeholder="Type to search or add a race..."
+    />
+  );
+}
+
+export function ReligionSelect({
+  name,
+  religions,
+  defaultValue,
+  save,
+}: {
+  name: string;
+  religions: Row[];
+  defaultValue?: string;
+  save: (payload: Record<string, unknown>, success?: string) => Promise<any>;
+}) {
+  return (
+    <SearchCreateSelect
+      name={name}
+      items={religions}
+      defaultValue={defaultValue}
+      save={save}
+      createAction="religion-create"
+      entityLabel="religion"
+      placeholder="Type to search or add a religion..."
+    />
   );
 }
 
@@ -974,7 +1411,7 @@ export function CheckInModal({
         </label>
         <label>
           Actual arrival date
-          <input name="checkInDate" type="date" required defaultValue={today} />
+          <DateField name="checkInDate" type="date" required defaultValue={today} />
           <small className="field-note">
             Planned move-in was {dateLabel(tenancy.checkInDate) || "not set"}.
           </small>
@@ -1223,17 +1660,17 @@ export function ParkingRentalForm({
       </label>
       <label>
         Start date
-        <input name="startDate" type="date" required />
+        <DateField name="startDate" type="date" required />
       </label>
       {tenantType === "outside" && (
         <>
           <label>
             Paid until
-            <input name="paidUntil" type="date" />
+            <DateField name="paidUntil" type="date" />
           </label>
           <label>
             Next payment due
-            <input name="nextDueDate" type="date" />
+            <DateField name="nextDueDate" type="date" />
           </label>
           <label>
             Payment status

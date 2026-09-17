@@ -4,7 +4,9 @@
 import { useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  DateField,
   DocumentTile,
+  FileField,
   Modal,
   ParkingRentalForm,
   SearchIcon,
@@ -19,6 +21,240 @@ import {
 } from "./shared";
 import type { Data, Row } from "./shared";
 import { BASE_PATH } from "../basePath";
+
+// Line icons for the Rooms section of the unit drawer. Stroke-only and drawn
+// in currentColor, so each takes the colour of the button or badge it is in.
+const UNIT_ROOM_ICON_PATHS: Record<string, string> = {
+  door: "M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M4 21h16M14 12h.01",
+  plus: "M12 5v14M5 12h14",
+  save: "M5 3h11l3 3v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 3v5h7V3M8 21v-7h8v7",
+  eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  trash:
+    "M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+  users:
+    "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-4-6.3",
+  bath: "M4 12h16v3a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-3zM6 12V6a2 2 0 0 1 4 0M7 19l-1 2M17 19l1 2",
+  code: "M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16",
+  key: "M8 19a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM10.8 12.2 20 3M17 6l3 3M14.5 8.5l2 2",
+  bed: "M3 19v-7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7M3 19v2M21 19v2M3 14h18M6 10V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4",
+};
+
+function UnitRoomIcon({ name }: { name: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={UNIT_ROOM_ICON_PATHS[name]} />
+    </svg>
+  );
+}
+
+const UNIT_ROOM_TONES = 5;
+
+// bed_spaces.bed_type options surfaced in the room forms. Set once per room
+// (not per bed code) and applied to every bed code under it — see
+// "room-details"/"room-add" in app/api/system/route.ts. bunk-upper/
+// bunk-lower exist in the backend enum for a future per-bed split but have
+// no UI yet, so they are left out here.
+const BED_TYPE_OPTIONS: [string, string][] = [
+  ["unknown", "Not set"],
+  ["single", "Single bed"],
+  ["bunk", "Double decker"],
+  ["queen", "Queen bed"],
+  ["two-single", "Single bed × 2"],
+];
+
+const BED_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  BED_TYPE_OPTIONS,
+);
+
+function bedTypeLabel(value?: string | null) {
+  return BED_TYPE_LABELS[value || "unknown"] || "Not set";
+}
+
+// One room in the unit drawer: settings up top, its codes on a shelf
+// inside the same card. A component of its own only so the icon beside
+// "Room type" can follow the dropdown as it changes — the form still reads
+// the select itself when saved.
+function UnitRoomCard({
+  room,
+  save,
+  onView,
+}: {
+  room: Row;
+  save: (payload: Record<string, unknown>, success?: string) => unknown;
+  onView: () => void;
+}) {
+  const [roomType, setRoomType] = useState(String(room.type || "single"));
+  const label = String(room.label || "");
+  const beds: Row[] = room.beds || [];
+  // The mockup's "4 room(s)" line was the same on every card; what staff
+  // editing a room actually need to know is whether anyone is in it.
+  const occupied = beds.filter((bed) => bed.status === "occupied").length;
+  const reserved = beds.filter((bed) => bed.status === "reserved").length;
+  const occupancy = !beds.length
+    ? "No room codes yet"
+    : occupied || reserved
+      ? `${occupied} of ${beds.length} occupied${reserved ? ` · ${reserved} reserved` : ""}`
+      : "Vacant";
+  // Keyed on the letter, not the position, so Room B keeps its colour when
+  // Room A is deleted.
+  const tone = (label.charCodeAt(0) || 0) % UNIT_ROOM_TONES;
+
+  return (
+    <article className="unit-room">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save(
+            { action: "room-details", roomId: room.id, ...formValues(e) },
+            "Room updated",
+          );
+        }}
+      >
+        {/* room-details rewrites the label on every save, and the card no
+            longer has a field for it — renaming lives in View room. Sending
+            the current label (controlled, so it follows a rename made
+            there) keeps Save room from blanking it. */}
+        <input type="hidden" name="roomLabel" value={label} readOnly />
+        <div className="unit-room-head">
+          <span className={`unit-room-avatar tone-${tone}`} aria-hidden="true">
+            {label.slice(0, 2).toUpperCase() || "?"}
+          </span>
+          <div className="unit-room-title">
+            <h4>Room {label}</h4>
+            <small>{occupancy}</small>
+          </div>
+          <div className="unit-room-actions">
+            <button className="secondary unit-room-btn">
+              <UnitRoomIcon name="save" />
+              Save room
+            </button>
+            <button
+              type="button"
+              className="primary unit-room-btn"
+              onClick={onView}
+            >
+              <UnitRoomIcon name="eye" />
+              View room
+            </button>
+            <button
+              type="button"
+              className="danger unit-room-btn"
+              onClick={() =>
+                save({ action: "room-delete", roomId: room.id }, "Room deleted")
+              }
+            >
+              <UnitRoomIcon name="trash" />
+              Delete room
+            </button>
+          </div>
+        </div>
+        <div className="unit-room-fields">
+          <label className="unit-room-field">
+            <span>Room type</span>
+            <span className="unit-room-select">
+              <UnitRoomIcon name={roomType === "sharing" ? "users" : "user"} />
+              <select
+                name="roomType"
+                value={roomType}
+                onChange={(event) => setRoomType(event.target.value)}
+              >
+                <option value="single">Single room</option>
+                <option value="sharing">Sharing room</option>
+              </select>
+            </span>
+          </label>
+          <label className="unit-room-field">
+            <span>Bathroom</span>
+            <span className="unit-room-select">
+              <UnitRoomIcon name="bath" />
+              <select name="bathroomType" defaultValue={room.bathroomType}>
+                <option value="unknown">Bathroom not set</option>
+                <option value="attached">Attached</option>
+                <option value="non-attached">Non-attached</option>
+              </select>
+            </span>
+          </label>
+          <label className="unit-room-field">
+            <span>Bed type</span>
+            <span className="unit-room-select">
+              <UnitRoomIcon name="bed" />
+              <select name="bedType" defaultValue={room.bedType || "unknown"}>
+                {BED_TYPE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </label>
+        </div>
+      </form>
+      <div className="unit-room-codes">
+        <div className="unit-room-codes-head">
+          <UnitRoomIcon name="code" />
+          <strong>Room Codes</strong>
+          <span className="unit-room-codes-count">
+            {beds.length} code{beds.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        {beds.length ? (
+          <div className="unit-room-code-list">
+            {beds.map((bed) => (
+              <form
+                key={bed.id}
+                className="unit-room-code"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  save(
+                    { action: "bed-code", bedId: bed.id, ...formValues(e) },
+                    "Room code updated",
+                  );
+                }}
+              >
+                <span className="unit-room-code-icon" aria-hidden="true">
+                  <UnitRoomIcon name="key" />
+                </span>
+                <input
+                  name="legacyCode"
+                  defaultValue={bed.legacyCode}
+                  aria-label="Room code"
+                />
+                <button className="secondary unit-room-btn">
+                  <UnitRoomIcon name="save" />
+                  Save code
+                </button>
+                <button
+                  type="button"
+                  className="danger unit-room-btn"
+                  onClick={() =>
+                    save(
+                      { action: "bed-delete", bedId: bed.id },
+                      "Room code deleted",
+                    )
+                  }
+                >
+                  <UnitRoomIcon name="trash" />
+                  Delete
+                </button>
+              </form>
+            ))}
+          </div>
+        ) : (
+          <p className="unit-room-code-empty">No codes in this room yet.</p>
+        )}
+      </div>
+    </article>
+  );
+}
 
 // Hostels that organise units into lettered/numbered blocks (e.g. Damai's
 // D1/D2/D3, Nadayu's NB/NC/NE). Hostels not listed here have no block
@@ -257,11 +493,11 @@ function AddUnitForm({
           </div>
           <label>
             Lease start
-            <input name="leaseStartDate" type="date" />
+            <DateField name="leaseStartDate" type="date" />
           </label>
           <label>
             Lease end
-            <input name="leaseEndDate" type="date" />
+            <DateField name="leaseEndDate" type="date" />
           </label>
           {agreementType === "rental" ? (
             <>
@@ -331,9 +567,9 @@ function AddUnitForm({
           </label>
           <label className="wide">
             Upload signed agreement
-            <input
-              type="file"
+            <FileField
               accept={ATTACHMENT_ACCEPT}
+              hint="Photo, PDF, Word, Excel or CSV."
               onChange={(event) =>
                 setAgreementFile(event.target.files?.[0] || null)
               }
@@ -396,6 +632,7 @@ export function UnitsModule({
           label: b.roomLabel,
           type: b.roomType,
           bathroomType: b.bathroomType,
+          bedType: b.bedType,
           beds: [],
         });
       map.get(b.roomId)!.beds.push(b);
@@ -751,7 +988,7 @@ export function UnitsModule({
                     {unit.status !== "active" && (
                       <label>
                         Surrender date
-                        <input
+                        <DateField
                           name="surrenderDate"
                           type="date"
                           defaultValue={unit.surrenderDate || ""}
@@ -995,121 +1232,34 @@ export function UnitsModule({
                   )}
                 </section>
                 <section className="drawer-section">
-                  <div className="section-title">
+                  <div className="unit-rooms-head">
+                    <span className="unit-rooms-head-icon" aria-hidden="true">
+                      <UnitRoomIcon name="door" />
+                    </span>
                     <div>
-                      <small>ROOMS</small>
-                      <h3>{rooms.length} room{rooms.length === 1 ? "" : "s"}</h3>
+                      <h3>Rooms</h3>
+                      <p>
+                        {rooms.length} room{rooms.length === 1 ? "" : "s"} ·
+                        room settings and codes
+                      </p>
                     </div>
                     <button
                       type="button"
-                      className="secondary compact"
+                      className="primary unit-room-btn"
                       onClick={() => setModal("room")}
                     >
-                      + Add room
+                      <UnitRoomIcon name="plus" />
+                      Add room
                     </button>
                   </div>
-                  <div className="room-list">
+                  <div className="unit-rooms">
                     {rooms.map((room) => (
-                      <article key={room.id} className="room-card">
-                        <form
-                          className="room-row editable-room"
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            save(
-                              {
-                                action: "room-details",
-                                roomId: room.id,
-                                ...formValues(e),
-                              },
-                              "Room updated",
-                            );
-                          }}
-                        >
-                          <input
-                            name="roomLabel"
-                            defaultValue={room.label}
-                            aria-label="Room category"
-                          />
-                          <select name="roomType" defaultValue={room.type}>
-                            <option value="single">Single room</option>
-                            <option value="sharing">Sharing room</option>
-                          </select>
-                          <select
-                            name="bathroomType"
-                            defaultValue={room.bathroomType}
-                          >
-                            <option value="unknown">Bathroom not set</option>
-                            <option value="attached">Attached</option>
-                            <option value="non-attached">Non-attached</option>
-                          </select>
-                          <div className="room-actions">
-                            <button className="secondary compact">
-                              Save room
-                            </button>
-                            <button
-                              type="button"
-                              className="primary compact"
-                              onClick={() => setSelectedRoom(room)}
-                            >
-                              View room
-                            </button>
-                            <button
-                              type="button"
-                              className="danger compact"
-                              onClick={() =>
-                                save(
-                                  { action: "room-delete", roomId: room.id },
-                                  "Room deleted",
-                                )
-                              }
-                            >
-                              Delete room
-                            </button>
-                          </div>
-                        </form>
-                        <div className="bed-config">
-                          <small className="bed-config-caption">
-                            Room codes
-                          </small>
-                          {room.beds.map((bed: Row) => (
-                            <form
-                              key={bed.id}
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                save(
-                                  {
-                                    action: "bed-code",
-                                    bedId: bed.id,
-                                    ...formValues(e),
-                                  },
-                                  "Room code updated",
-                                );
-                              }}
-                            >
-                              <input
-                                name="legacyCode"
-                                defaultValue={bed.legacyCode}
-                                aria-label="Room code"
-                              />
-                              <button className="secondary compact">
-                                Save code
-                              </button>
-                              <button
-                                type="button"
-                                className="danger compact"
-                                onClick={() =>
-                                  save(
-                                    { action: "bed-delete", bedId: bed.id },
-                                    "Room code deleted",
-                                  )
-                                }
-                              >
-                                Delete
-                              </button>
-                            </form>
-                          ))}
-                        </div>
-                      </article>
+                      <UnitRoomCard
+                        key={room.id}
+                        room={room}
+                        save={save}
+                        onView={() => setSelectedRoom(room)}
+                      />
                     ))}
                   </div>
                 </section>
@@ -1286,7 +1436,7 @@ export function UnitsModule({
             </label>
             <label>
               Contract end
-              <input
+              <DateField
                 name="contractEndDate"
                 type="date"
                 defaultValue={editingAsset?.contractEndDate || ""}
@@ -1459,6 +1609,16 @@ export function UnitsModule({
                 <option value="unknown">Not set</option>
                 <option value="attached">Attached</option>
                 <option value="non-attached">Non-attached</option>
+              </select>
+            </label>
+            <label>
+              Bed type
+              <select name="bedType">
+                {BED_TYPE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
@@ -1694,7 +1854,7 @@ function RoomOverviewPanel({
             <span className="room-stat-icon">▰</span>
             <div>
               <small>Bed type</small>
-              <strong>{titleCase(primaryBed.bedType || "not set")}</strong>
+              <strong>{bedTypeLabel(room.bedType)}</strong>
               <p>{titleCase(room.bathroomType || "Bathroom not set")}</p>
             </div>
           </article>
@@ -1753,6 +1913,16 @@ function RoomOverviewPanel({
                   </select>
                 </label>
                 <label>
+                  Bed type
+                  <select name="bedType" defaultValue={room.bedType || "unknown"}>
+                    {BED_TYPE_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Monthly sales rate
                   <input
                     name="monthlyRate"
@@ -1803,7 +1973,7 @@ function RoomOverviewPanel({
                 {beds.map((bed) => (
                   <div key={bed.id}>
                     <code>{bed.legacyCode || "Code not set"}</code>
-                    <span>{titleCase(bed.bedType || "Bed type not set")}</span>
+                    <span>{bedTypeLabel(bed.bedType)}</span>
                     <span>{titleCase(bed.status || "Vacant")}</span>
                   </div>
                 ))}
@@ -1913,9 +2083,9 @@ function RoomOverviewPanel({
               )}
               <label className="room-photo-upload">
                 Add photo or file
-                <input
-                  type="file"
+                <FileField
                   accept={ATTACHMENT_ACCEPT}
+                  hint="Photo, PDF, Word, Excel or CSV."
                   onChange={(event) =>
                     setPhotoFile(event.target.files?.[0] || null)
                   }
@@ -1949,7 +2119,7 @@ function RoomOverviewPanel({
                 ))}
                 <label>
                   Last inspected on
-                  <input
+                  <DateField
                     name="lastInspectedOn"
                     type="date"
                     defaultValue={roomValue(room, "lastInspectedOn", "")}
@@ -2128,7 +2298,7 @@ function OwnerAgreement({
         </div>
         <label>
           Lease start
-          <input
+          <DateField
             name="leaseStartDate"
             type="date"
             placeholder="e.g. 2026-01-01"
@@ -2137,7 +2307,7 @@ function OwnerAgreement({
         </label>
         <label>
           Lease end
-          <input
+          <DateField
             name="leaseEndDate"
             type="date"
             placeholder="e.g. 2026-01-01"
@@ -2252,9 +2422,9 @@ function OwnerAgreement({
         </label>
         <label className="wide">
           Upload signed agreement
-          <input
-            type="file"
+          <FileField
             accept={ATTACHMENT_ACCEPT}
+            hint="Photo, PDF, Word, Excel or CSV."
             onChange={(event) =>
               setAgreementFile(event.target.files?.[0] || null)
             }

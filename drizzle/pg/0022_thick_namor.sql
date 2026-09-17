@@ -1,0 +1,1 @@
+ALTER TABLE "maintenance_tickets" ADD COLUMN "turnover_stage" text;

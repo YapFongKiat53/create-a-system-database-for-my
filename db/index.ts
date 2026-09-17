@@ -26,10 +26,18 @@ function getClient() {
   // Supavisor's transaction-mode pooler does not keep a query's backend
   // connection pinned across statements, so postgres-js's default
   // prepared-statement caching deadlocks as soon as more than a couple of
-  // queries run concurrently on the same client. `max: 20` covers the
-  // heaviest handler (the dashboard's GET /api/system, which fires ~30
-  // reads via `Promise.all([...])` against a single client) — see Task 15
-  // verification for why an undersized pool stalls those queries.
+  // queries run concurrently on the same client. `max` has to cover the
+  // heaviest handler (the dashboard's GET /api/system, which fires one
+  // `Promise.all([...])` against a single client) — see Task 15
+  // verification for why an undersized pool stalls those queries. That
+  // handler's own query count keeps growing as features are added (it was
+  // ~30 when max was first set to 20; it is 41 as of the meter-overdue and
+  // race/religion work) — reproduced directly this session: 41 queries
+  // against max:20 hangs every full load indefinitely, while the exact
+  // same queries succeed in under 3s once max covers the count with
+  // headroom. Bump this alongside that handler's query count, not just
+  // when a hang is reported — the margin is what prevents the next
+  // addition from being the one that tips it over.
   // idle_timeout / max_lifetime are what stop the "fresh client per call"
   // rule above from becoming a connection leak. Nothing in the codebase ever
   // calls .end() — a handler takes a client, uses it, and drops it — so
@@ -40,7 +48,7 @@ function getClient() {
   // is locked out, which is exactly how it presented. These two make an
   // abandoned pool close itself shortly after the request that opened it.
   return postgres(databaseUrl, {
-    max: 20,
+    max: 50,
     prepare: false,
     // Seconds a connection may sit unused before it is closed. Longer than a
     // request takes, short enough that an abandoned pool does not outlive it
