@@ -30,6 +30,11 @@ import {
   permissionsForRole,
 } from "../../../db/auth";
 import {
+  getNotificationSummary,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "./notifications";
+import {
   accessCards,
   accommodationAssignments,
   announcements,
@@ -804,12 +809,16 @@ const SCOPED_MODULE_KEYS = [
   // is what a save from the meter screens refreshes, instead of pulling the
   // whole ~11,900-row payload back down.
   "meter-readings",
+  // The bell's 60s poll — just the current user's own unread count and
+  // recent list, never the full ~30-query load.
+  "notifications",
 ] as const;
 type ScopedModuleKey = (typeof SCOPED_MODULE_KEYS)[number];
 
 async function loadScopedModules(
   db: ReturnType<typeof getDb>,
   scopes: Set<ScopedModuleKey>,
+  currentUserId: number,
 ) {
   const result: Record<string, unknown> = {};
   const tasks: Promise<void>[] = [];
@@ -877,6 +886,14 @@ async function loadScopedModules(
         // breakdown belongs to Billing.
         result.invoices = invoices;
         result.hostels = derived.hostels;
+      })(),
+    );
+  }
+
+  if (scopes.has("notifications")) {
+    tasks.push(
+      (async () => {
+        result.notifications = await getNotificationSummary(db, currentUserId);
       })(),
     );
   }
@@ -2290,7 +2307,11 @@ export async function GET(request: Request) {
       );
       if (scopes.size > 0) {
         await scopedWarmup;
-        const scopedResult = await loadScopedModules(scopedDb!, scopes);
+        const scopedResult = await loadScopedModules(
+          scopedDb!,
+          scopes,
+          currentUser.id,
+        );
         return Response.json(scopedResult);
       }
     }
@@ -2338,6 +2359,7 @@ export async function GET(request: Request) {
       salesPersonRows,
       turnoverByRoom,
       overdueMeterRooms,
+      notificationSummary,
     ] = await Promise.all([
       selectRawBeds(db),
       db
@@ -2772,6 +2794,7 @@ export async function GET(request: Request) {
       // with every other query above instead of waiting for the whole
       // Promise.all to settle first.
       (async () => computeUnreadMeterRooms(db, await upcomingMeterCutoff(db)))(),
+      getNotificationSummary(db, currentUser.id),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -2951,6 +2974,7 @@ export async function GET(request: Request) {
       users: userRows,
       rolePermissions: permissionRows,
       reminderTemplates: reminderRows,
+      notifications: notificationSummary,
       currentUser,
       importProgress: {
         assignments: studentRows.filter((student) => student.assignmentId)
@@ -3065,6 +3089,7 @@ export async function GET(request: Request) {
         rolePermissions: [],
         reminderTemplates: [],
         overdueMeterRooms: [],
+        notifications: { unreadCount: 0, recent: [] },
       });
     }
     return Response.json(responseData);
@@ -7278,6 +7303,12 @@ export async function POST(request: Request) {
         .where(eq(appUsers.id, targetId));
       // Force a fresh sign-in everywhere with the old password.
       await db.delete(userSessions).where(eq(userSessions.userId, targetId));
+    } else if (action === "notification-mark-read") {
+      const notificationId = asNumber(body.notificationId);
+      if (!notificationId) throw new Error("Notification is required");
+      await markNotificationRead(db, currentUser.id, notificationId);
+    } else if (action === "notification-mark-all-read") {
+      await markAllNotificationsRead(db, currentUser.id);
     } else if (action === "role-permission") {
       if (!body.roleId || !asText(body.moduleKey))
         throw new Error("Role and module are required");
