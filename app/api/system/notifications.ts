@@ -1,6 +1,13 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import type { getDb } from "../../../db";
-import { appRoles, appUsers, notifications, rolePermissions } from "../../../db/schema";
+import {
+  accommodationAssignments,
+  appRoles,
+  appUsers,
+  notifications,
+  rolePermissions,
+  studentProfiles,
+} from "../../../db/schema";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -101,4 +108,70 @@ export async function markAllNotificationsRead(db: Db, userId: number) {
     .where(
       and(eq(notifications.recipientUserId, userId), isNull(notifications.readAt)),
     );
+}
+
+function addDays(isoDate: string, days: number) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Runs fire-and-forget from the request handler (see route.ts), which on
+// this app's Workers-flavoured runtime means it gets killed the instant the
+// response flushes — there is no waitUntil() keeping it alive past that.
+// The original version awaited one dedup SELECT and one role lookup PER
+// expiring row in a sequential loop; against ~150 real tenancies that's
+// ~300 round trips, easily outliving the response and getting cut off
+// mid-scan (confirmed directly: only the first 5 of 146 rows ever got
+// notified, across three separate runs). Down to three queries total plus
+// one bulk insert fixes both the correctness and the cost.
+export async function checkExpiringLeases(db: Db, today: string) {
+  const in60Days = addDays(today, 60);
+  const [expiring, salesRecipients, existingLinks] = await Promise.all([
+    db
+      .select({
+        id: accommodationAssignments.id,
+        studentName: studentProfiles.fullName,
+        leaseEndDate: accommodationAssignments.agreementEndDate,
+      })
+      .from(accommodationAssignments)
+      .innerJoin(studentProfiles, eq(studentProfiles.id, accommodationAssignments.studentId))
+      .where(
+        and(
+          eq(accommodationAssignments.status, "active"),
+          gte(accommodationAssignments.agreementEndDate, today),
+          lte(accommodationAssignments.agreementEndDate, in60Days),
+        ),
+      ),
+    db
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .innerJoin(appRoles, eq(appRoles.id, appUsers.roleId))
+      .where(and(eq(appRoles.roleKey, "sales"), eq(appUsers.status, "active"))),
+    db
+      .select({ link: notifications.link })
+      .from(notifications)
+      .where(eq(notifications.type, "lease-expiring")),
+  ]);
+  const alreadyNotified = new Set(existingLinks.map((row) => row.link));
+  const newRows = expiring.filter(
+    (row) => !alreadyNotified.has(`/students?tenancy=${row.id}`),
+  );
+  if (!newRows.length || !salesRecipients.length) return;
+
+  await db.insert(notifications).values(
+    newRows.flatMap((row) =>
+      salesRecipients.map((recipient) => ({
+        recipientUserId: recipient.id,
+        type: "lease-expiring",
+        // dateLabel() is a frontend-only formatter (app/modules/shared.tsx,
+        // a client module) — the backend has no equivalent, so the title
+        // carries the raw ISO date rather than reaching across that
+        // boundary.
+        title: `${row.studentName}'s lease ends ${row.leaseEndDate}`,
+        body: "",
+        link: `/students?tenancy=${row.id}`,
+      })),
+    ),
+  );
 }

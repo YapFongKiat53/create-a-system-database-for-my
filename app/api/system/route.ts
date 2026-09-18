@@ -30,6 +30,7 @@ import {
   permissionsForRole,
 } from "../../../db/auth";
 import {
+  checkExpiringLeases,
   getNotificationSummary,
   markAllNotificationsRead,
   markNotificationRead,
@@ -257,6 +258,7 @@ let inventorySeeded = false;
 let knownRoomFeaturesSeeded = false;
 let studentAssignmentsSeeded = false;
 let lateChargesAppliedOn: string | null = null;
+let leaseExpiryCheckedOn: string | null = null;
 
 function fullUnitAddress(
   unitCode: string,
@@ -2293,6 +2295,14 @@ export async function GET(request: Request) {
     void runScheduledBilling(seedDb).catch((failure) => {
       console.error("Scheduled billing failed", failure);
     });
+    const leaseCheckDate = todayInKL();
+    if (leaseExpiryCheckedOn !== leaseCheckDate) {
+      leaseExpiryCheckedOn = leaseCheckDate;
+      void checkExpiringLeases(seedDb, leaseCheckDate).catch((failure) => {
+        leaseExpiryCheckedOn = "";
+        console.error("Lease expiry check failed", failure);
+      });
+    }
     // Scoped refresh: after a save() that only touched a few tables, the
     // client asks for just those via ?modules=a,b instead of the full
     // ~30-query load below. Tenants always fall through to the full load
