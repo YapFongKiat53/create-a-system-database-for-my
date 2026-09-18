@@ -33,6 +33,8 @@ import {
   getNotificationSummary,
   markAllNotificationsRead,
   markNotificationRead,
+  notifyRole,
+  notifyRoleWithApproval,
 } from "./notifications";
 import {
   accessCards,
@@ -5215,6 +5217,19 @@ export async function POST(request: Request) {
           .from(reservationPayments)
           .where(eq(reservationPayments.id, paymentId!))
       )[0]?.id ?? undefined;
+      const paidReservation = (
+        await db
+          .select({ studentName: reservations.studentName, referenceNo: reservations.referenceNo })
+          .from(reservations)
+          .where(eq(reservations.id, reservationId))
+      )[0];
+      if (paidReservation)
+        await notifyRole(db, "finance", {
+          type: "payment-pending",
+          title: `New reservation payment from ${paidReservation.studentName}`,
+          body: `${paidReservation.referenceNo} — RM ${amount.toLocaleString()}`,
+          link: "/finance?tab=deposits",
+        });
     } else if (action === "reservation-finance-review") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
@@ -6908,6 +6923,11 @@ export async function POST(request: Request) {
         invoiceFrequency: asText(body.invoiceFrequency, "on-request"),
         actorName: currentUser.displayName,
       });
+      await notifyRole(db, "finance", {
+        type: "billing-cycle-ready",
+        title: `${asText(body.periodLabel)} billing is ready to review`,
+        link: "/finance?tab=invoices",
+      });
     } else if (action === "billing-cycle-review") {
       // What Accounts checks before posting: for every invoice this cycle
       // already generated, the room-rental line it actually charged against
@@ -7006,6 +7026,12 @@ export async function POST(request: Request) {
         })
         .returning({ id: billingPaymentRecords.id });
       createdId = inserted[0]?.id;
+      await notifyRole(db, "finance", {
+        type: "payment-pending",
+        title: `New payment on invoice ${target.invoice_no}`,
+        body: `RM ${amount.toLocaleString()}`,
+        link: `/finance?tab=invoices&invoice=${invoiceId}`,
+      });
     } else if (action === "billing-verify") {
       const paymentId = asNumber(body.paymentId);
       if (!paymentId) throw new Error("Payment is required");
@@ -7091,6 +7117,13 @@ export async function POST(request: Request) {
         await db.execute(
           sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${item.invoiceId}) WHERE id=${item.invoiceId}`,
         );
+      } else {
+        await notifyRoleWithApproval(db, "finance", "finance", {
+          type: "adjustment-pending",
+          title: `Electricity adjustment needs approval — ${item.description}`,
+          body: `RM ${item.amount.toLocaleString()} → RM ${newAmount.toLocaleString()}`,
+          link: "/finance?tab=adjustments",
+        });
       }
     } else if (action === "billing-adjust-approve") {
       const adjustmentId = asNumber(body.adjustmentId);
