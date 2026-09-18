@@ -5428,6 +5428,12 @@ export async function POST(request: Request) {
     } else if (action === "reservation-cancel") {
       const reservationId = asNumber(body.reservationId);
       if (!reservationId) throw new Error("Reservation is required");
+      const cancelledReservation = (
+        await db
+          .select({ referenceNo: reservations.referenceNo, studentName: reservations.studentName })
+          .from(reservations)
+          .where(eq(reservations.id, reservationId))
+      )[0];
       // Cancelling a booking that had already converted has to give the room
       // back — the confirmation says so, but only the reservation's own
       // status was ever changed, leaving the room held and a tenancy running
@@ -5474,6 +5480,13 @@ export async function POST(request: Request) {
           WHERE id = ${reservationId}
         `);
       });
+      if (cancelledReservation)
+        await notifyRole(db, "sales", {
+          type: "reservation-changed",
+          title: `Reservation ${cancelledReservation.referenceNo} was cancelled`,
+          body: cancelledReservation.studentName,
+          link: "/hostels?tab=reservations",
+        });
     } else if (action === "reservation-confirm-unit") {
       // Only group bookings still need a step of their own. A group takes a
       // whole unit and creates no tenancy — the individual names arrive
@@ -5501,6 +5514,12 @@ export async function POST(request: Request) {
           convertedAt: nowIso(),
         })
         .where(eq(reservations.id, reservationId));
+      await notifyRole(db, "sales", {
+        type: "reservation-changed",
+        title: `Reservation ${reservation.referenceNo} — room confirmed`,
+        body: reservation.studentName,
+        link: "/hostels?tab=reservations",
+      });
     } else if (action === "reservation-room-change") {
       // Swaps the actual room on an already-converted reservation (e.g. the
       // student wants a different room after paying and converting, before
@@ -5648,6 +5667,12 @@ export async function POST(request: Request) {
       // in — otherwise Finance keeps billing the old room's rate and the
       // over/under-payment shown there contradicts the reservation.
       await syncMoveInInvoice(db, reservationId, currentUser.displayName);
+      await notifyRole(db, "sales", {
+        type: "reservation-changed",
+        title: `Reservation ${reservation.referenceNo} — room changed`,
+        body: reservation.studentName,
+        link: "/hostels?tab=reservations",
+      });
     } else if (action === "student-update") {
       const studentId = asNumber(body.studentId);
       if (!studentId) throw new Error("Student is required");
