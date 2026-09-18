@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   doublePrecision,
+  index,
   pgTable,
   text,
   uniqueIndex,
@@ -853,6 +854,37 @@ export const reminderTemplates = pgTable("reminder_templates", {
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
 });
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+    recipientUserId: bigint("recipient_user_id", { mode: "number" })
+      .notNull()
+      .references(() => appUsers.id),
+    // A short event key ("ticket-created", "ticket-assigned",
+    // "payment-pending", "adjustment-pending", "billing-cycle-ready",
+    // "reservation-changed", "lease-expiring") — not a DB enum, same
+    // convention chargeType/action already use throughout this schema.
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    // Where clicking this notification navigates — a relative path,
+    // optionally carrying the query params the target page's tab/record
+    // picker reads (see app/api/system/notifications.ts).
+    link: text("link").notNull().default(""),
+    readAt: text("read_at"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(CURRENT_TIMESTAMP)::text`),
+  },
+  (table) => [
+    index("notifications_recipient_unread").on(
+      table.recipientUserId,
+      table.readAt,
+    ),
+  ],
+);
 
 // Small system-wide key/value config editable from the UI — e.g. the
 // standard room transfer fee shown on room-change. Not per-hostel; add a
