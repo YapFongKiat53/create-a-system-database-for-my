@@ -164,3 +164,25 @@ export function SignOutIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function BellIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </Svg>
+  );
+}
+
+// Points left (rail open → tap to close). The collapse button rotates this
+// 180° via CSS rather than swapping to a mirrored icon component, so the
+// direction change animates instead of popping.
+export function CollapseIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      <path d="m14 9-3 3 3 3" />
+    </Svg>
+  );
+}

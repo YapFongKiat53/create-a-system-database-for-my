@@ -21,7 +21,17 @@ import {
   AccessIcon,
   BrandIcon,
   SignOutIcon,
+  CollapseIcon,
+  BellIcon,
 } from "./NavIcons";
+
+// Desktop only — the phone rail already collapses behind its own Menu
+// button (see menuOpen/nav-toggle below), and this key is separate from
+// that so the two never fight over the same piece of state. Read on mount
+// rather than as the initial useState value: SSR has no localStorage, so
+// starting from it would either throw or make the first server-rendered
+// frame guess wrong and flash once the client corrects it.
+const SIDEBAR_COLLAPSED_KEY = "hostel-sidebar-collapsed";
 
 type NavItem = {
   href: string;
@@ -147,12 +157,119 @@ function Chrome({ children }: { children: ReactNode }) {
   // Phone-only: the nav rail collapses behind a Menu button. Ignored on a
   // wide screen, where the rail is always a column.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Desktop-only: the rail narrows to an icon strip. Starts false on every
+  // render (including the server's) and is corrected from localStorage just
+  // after mount, so a saved preference survives a reload without a
+  // hydration mismatch.
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setShowTop(window.scrollY > 650);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    try {
+      // Syncing from localStorage, which doesn't exist during SSR, so it
+      // can only be read after mount (see SIDEBAR_COLLAPSED_KEY above).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+    } catch {
+      // Private browsing can throw on localStorage access — the rail just
+      // stays expanded for that session instead of erroring out.
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // Same as above — collapsing still works this session even if it
+        // can't be remembered for next time.
+      }
+      return next;
+    });
+  };
+
+  // Shared by the two sign-out buttons below — the desktop icon in
+  // .sidebar-foot and the phone one at the bottom of the nav list — so
+  // logging out works the same way regardless of which screen size put it
+  // where.
+  const signOut = async () => {
+    await fetch(`${BASE_PATH}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    });
+    window.location.replace(`${BASE_PATH}/login`);
+  };
+
+  type NotificationRow = {
+    id: number;
+    type: string;
+    title: string;
+    body: string;
+    link: string;
+    readAt: string | null;
+    createdAt: string;
+  };
+  const [notifState, setNotifState] = useState<{
+    unreadCount: number;
+    recent: NotificationRow[];
+  }>({ unreadCount: 0, recent: [] });
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const loadNotifications = async () => {
+    try {
+      const response = await fetch(
+        `${BASE_PATH}/api/system?modules=notifications`,
+        { cache: "no-store" },
+      );
+      const result = (await response.json()) as {
+        notifications?: typeof notifState;
+      };
+      if (result.notifications) setNotifState(result.notifications);
+    } catch {
+      // A missed poll just means a stale badge for 60s — not worth surfacing
+      // as an error banner.
+    }
+  };
+
+  useEffect(() => {
+    // Fires the first poll immediately on mount, then every 60s — the
+    // resulting setState is what keeps the bell's badge in sync with the
+    // server, not a derived-state anti-pattern this rule usually guards
+    // against.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadNotifications();
+    const interval = window.setInterval(loadNotifications, 60000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const markNotificationRead = async (notificationId: number) => {
+    await fetch(`${BASE_PATH}/api/system`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "notification-mark-read",
+        notificationId,
+      }),
+    });
+    loadNotifications();
+  };
+
+  const markAllNotificationsRead = async () => {
+    await fetch(`${BASE_PATH}/api/system`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "notification-mark-all-read" }),
+    });
+    loadNotifications();
+  };
 
   const navigation = allNavigation.filter(
     (item) =>
@@ -178,7 +295,7 @@ function Chrome({ children }: { children: ReactNode }) {
   }, [data, pathname]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
       <div className="sidebar-trigger" aria-hidden="true" />
       <aside className={`sidebar${menuOpen ? " menu-open" : ""}`}>
         <div className="brand">
@@ -189,6 +306,22 @@ function Chrome({ children }: { children: ReactNode }) {
             <strong>Hostel Operations</strong>
             <small>Management console</small>
           </div>
+          {/* Desktop only — see .nav-toggle below for the phone equivalent.
+              A normal flex child of .brand rather than positioned off the
+              rail's edge: .sidebar clips its own overflow, so anything
+              hanging outside its box (as this first tried to do) is cut
+              off — only ever visible as a sliver. */}
+          <button
+            type="button"
+            className="sidebar-collapse-toggle"
+            aria-expanded={!collapsed}
+            aria-controls="primary-nav"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={toggleCollapsed}
+          >
+            <CollapseIcon />
+          </button>
         </div>
         {/* Phone only. The rail is a permanent column on a wide screen, but
             on a phone ten links across the top pushed the actual page below
@@ -218,6 +351,10 @@ function Chrome({ children }: { children: ReactNode }) {
                     key={item.href}
                     href={item.href}
                     className={pathname === item.href ? "active" : ""}
+                    // Only reaches the browser's native tooltip, which is
+                    // exactly what's needed when collapsed hides .nav-copy
+                    // — the label the icon alone can no longer show.
+                    title={collapsed ? item.label : undefined}
                     /* Navigating does not unmount the rail, so the phone
                        menu would otherwise stay open over the page the tap
                        just asked for. */
@@ -235,6 +372,23 @@ function Chrome({ children }: { children: ReactNode }) {
               </div>
             );
           })}
+          {/* Phone only (see .nav-signout-mobile) — on a wide screen sign-out
+              stays the icon button in .sidebar-foot below. Squeezed into the
+              header next to Menu, it was competing with the wordmark for the
+              same few pixels; here it's just the last row of the list
+              that's already open. */}
+          <button
+            type="button"
+            className="nav-signout-mobile"
+            onClick={signOut}
+          >
+            <span className="nav-icon">
+              <SignOutIcon />
+            </span>
+            <span className="nav-copy">
+              <b>Sign out</b>
+            </span>
+          </button>
         </nav>
         <div className="sidebar-foot">
           <span>
@@ -250,14 +404,7 @@ function Chrome({ children }: { children: ReactNode }) {
             className="sidebar-signout"
             title="Sign out"
             aria-label="Sign out"
-            onClick={async () => {
-              await fetch(`${BASE_PATH}/api/auth`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ action: "logout" }),
-              });
-              window.location.replace(`${BASE_PATH}/login`);
-            }}
+            onClick={signOut}
           >
             <SignOutIcon />
           </button>
@@ -268,6 +415,64 @@ function Chrome({ children }: { children: ReactNode }) {
           <div>
             <h1>{current?.label}</h1>
             <p className="topbar-note">{current?.note}</p>
+          </div>
+          <div className="notif-bell-wrap">
+            <button
+              type="button"
+              className="notif-bell"
+              aria-label="Notifications"
+              onClick={() => setNotifOpen((open) => !open)}
+            >
+              <BellIcon />
+              {notifState.unreadCount > 0 && (
+                <span className="notif-badge">
+                  {notifState.unreadCount > 9 ? "9+" : notifState.unreadCount}
+                </span>
+              )}
+            </button>
+            {notifOpen && (
+              <div
+                className="notif-dropdown-backdrop"
+                onMouseDown={(e) =>
+                  e.target === e.currentTarget && setNotifOpen(false)
+                }
+              >
+                <div className="notif-dropdown">
+                  <div className="notif-dropdown-head">
+                    <strong>Notifications</strong>
+                    {notifState.unreadCount > 0 && (
+                      <button type="button" onClick={markAllNotificationsRead}>
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+                  {notifState.recent.length === 0 && (
+                    <p className="notif-empty">Nothing yet.</p>
+                  )}
+                  {notifState.recent.map((item) => (
+                    <Link
+                      key={item.id}
+                      href={item.link || "#"}
+                      className={`notif-item${item.readAt ? "" : " is-unread"}`}
+                      onClick={() => {
+                        setNotifOpen(false);
+                        if (!item.readAt) markNotificationRead(item.id);
+                      }}
+                    >
+                      <strong>{item.title}</strong>
+                      {item.body && <small>{item.body}</small>}
+                    </Link>
+                  ))}
+                  <Link
+                    href={`${BASE_PATH}/notifications`}
+                    className="notif-view-all"
+                    onClick={() => setNotifOpen(false)}
+                  >
+                    View all →
+                  </Link>
+                </div>
+              </div>
+            )}
           </div>
         </header>
         {error && (
