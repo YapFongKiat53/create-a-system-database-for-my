@@ -35,6 +35,7 @@ import {
   markNotificationRead,
   notifyRole,
   notifyRoleWithApproval,
+  notifyUser,
 } from "./notifications";
 import {
   accessCards,
@@ -6492,10 +6493,25 @@ export async function POST(request: Request) {
             : "Room cleaning logged"),
         statusAfter: assign ? "submitted" : "completed",
       });
+      if (assign) {
+        const assignedUserId = Number(asText(body.assignedTo));
+        if (Number.isFinite(assignedUserId) && assignedUserId > 0)
+          await notifyUser(db, assignedUserId, {
+            type: "ticket-assigned",
+            title: "You were assigned a cleaning ticket",
+            link: `/maintenance?ticket=${createdId}`,
+          });
+      }
     } else if (action === "ticket-message") {
       let chargedStudentUpdate: number | null = null;
       const ticketId = asNumber(body.ticketId);
       if (!ticketId) throw new Error("Ticket is required");
+      const priorTicket = (
+        await db
+          .select({ assignedTo: maintenanceTickets.assignedTo, ticketNo: maintenanceTickets.ticketNo })
+          .from(maintenanceTickets)
+          .where(eq(maintenanceTickets.id, ticketId))
+      )[0];
       if (currentUser.roleKey === "tenant") {
         const ownTicket = (
           await db
@@ -6590,18 +6606,24 @@ export async function POST(request: Request) {
         .update(maintenanceTickets)
         .set(changes)
         .where(eq(maintenanceTickets.id, ticketId));
-      if (currentUser.roleKey === "tenant") {
-        const messagedTicket = (
-          await db
-            .select({ ticketNo: maintenanceTickets.ticketNo })
-            .from(maintenanceTickets)
-            .where(eq(maintenanceTickets.id, ticketId))
-        )[0];
-        if (messagedTicket)
-          await notifyRole(db, "maintenance", {
-            type: "ticket-message",
-            title: `New message on ${messagedTicket.ticketNo}`,
-            body: message,
+      if (currentUser.roleKey === "tenant" && priorTicket)
+        await notifyRole(db, "maintenance", {
+          type: "ticket-message",
+          title: `New message on ${priorTicket.ticketNo}`,
+          body: message,
+          link: `/maintenance?ticket=${ticketId}`,
+        });
+      const newAssignedTo = changes.assignedTo as string | undefined;
+      if (
+        newAssignedTo &&
+        newAssignedTo !== priorTicket?.assignedTo &&
+        priorTicket
+      ) {
+        const assignedUserId = Number(newAssignedTo);
+        if (Number.isFinite(assignedUserId) && assignedUserId > 0)
+          await notifyUser(db, assignedUserId, {
+            type: "ticket-assigned",
+            title: `You were assigned ${priorTicket.ticketNo}`,
             link: `/maintenance?ticket=${ticketId}`,
           });
       }

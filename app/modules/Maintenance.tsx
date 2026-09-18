@@ -185,6 +185,8 @@ export function MaintenanceModule({
   const [ticketStatusFilter, setTicketStatusFilter] = useState("open");
   const [ticketQuery, setTicketQuery] = useState("");
   const [ticketHostel, setTicketHostel] = useState("all");
+  const [ticketCategoryFilter, setTicketCategoryFilter] = useState("all");
+  const [ticketPriorityFilter, setTicketPriorityFilter] = useState("all");
   // Its own filter rather than sharing the ticket list's: 151 empty rooms is
   // a long list, and whoever is looking at it is usually going to one
   // building today.
@@ -296,6 +298,11 @@ export function MaintenanceModule({
   const closedCount = data.tickets.filter((item) =>
     closedStatuses.includes(item.status),
   ).length;
+  // Only the categories actually used by an existing ticket — a config-list
+  // category nobody has ever raised would just be a dead option here.
+  const ticketCategoryOptions = [
+    ...new Set(data.tickets.map((item) => item.category).filter(Boolean)),
+  ].sort((a, b) => String(a).localeCompare(String(b)));
   const filteredTickets = data.tickets.filter((item) => {
     const search = ticketQuery.trim().toLowerCase();
     const text =
@@ -310,6 +317,10 @@ export function MaintenanceModule({
       statusMatch &&
       (ticketHostel === "all" ||
         String(item.hostelId || "") === ticketHostel) &&
+      (ticketCategoryFilter === "all" ||
+        item.category === ticketCategoryFilter) &&
+      (ticketPriorityFilter === "all" ||
+        item.priority === ticketPriorityFilter) &&
       (!search || text.includes(search))
     );
   });
@@ -519,6 +530,15 @@ export function MaintenanceModule({
       entry.lastCleanedAt &&
       String(entry.lastCleanedAt).slice(0, 10) >= THIRTY_DAYS_AGO,
   ).length;
+  // assignedTo now stores a user id (see the picker above) — this resolves
+  // it back to a display name. Falls back to the raw stored string for any
+  // ticket assigned before this change, whose assignedTo still holds free
+  // text that won't match any account.
+  const assigneeNameFor = (assignedTo: string) => {
+    if (!assignedTo) return "";
+    const match = data.users.find((user: Row) => String(user.id) === assignedTo);
+    return match?.displayName || assignedTo;
+  };
   // Shared by the Cleaning tab's "Mark done" and Room turnover's move-out
   // cleaning: ticket-message resets assignedTo/costResponsibility/actualCost
   // to whatever is in the payload, so completing has to resend the ticket's
@@ -935,11 +955,35 @@ export function MaintenanceModule({
                   </option>
                 ))}
               </select>
+              <select
+                className="v2-pill-select"
+                value={ticketCategoryFilter}
+                onChange={(event) => setTicketCategoryFilter(event.target.value)}
+              >
+                <option value="all">All categories</option>
+                {ticketCategoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="v2-pill-select"
+                value={ticketPriorityFilter}
+                onChange={(event) => setTicketPriorityFilter(event.target.value)}
+              >
+                <option value="all">All priorities</option>
+                <option value="high">P1 · High</option>
+                <option value="average">P2 · Average</option>
+                <option value="low">P3 · Low</option>
+              </select>
               <button
                 className="v2-reset"
                 onClick={() => {
                   setTicketQuery("");
                   setTicketHostel("all");
+                  setTicketCategoryFilter("all");
+                  setTicketPriorityFilter("all");
                   setTicketStatusFilter("open");
                 }}
               >
@@ -1639,7 +1683,7 @@ export function MaintenanceModule({
                                 {ticket.turnoverStage === "cleaning" ? (
                                   ticket.assignedTo ? (
                                     <div className="button-row">
-                                      <strong>{ticket.assignedTo}</strong>
+                                      <strong>{assigneeNameFor(ticket.assignedTo)}</strong>
                                       <button
                                         type="button"
                                         className="secondary compact"
@@ -1673,7 +1717,7 @@ export function MaintenanceModule({
                                   )
                                 ) : (
                                   <span>
-                                    {ticket.assignedTo || (
+                                    {assigneeNameFor(ticket.assignedTo) || (
                                       <span className="turnover-unassigned">
                                         Nobody yet
                                       </span>
@@ -1828,7 +1872,7 @@ export function MaintenanceModule({
                       <td>
                         {pending ? (
                           <>
-                            <strong>{pending.assignedTo || "Not named"}</strong>
+                            <strong>{assigneeNameFor(pending.assignedTo) || "Not named"}</strong>
                             <small>
                               Assigned {dateLabel(String(pending.createdAt).slice(0, 10))}
                             </small>
@@ -2142,7 +2186,7 @@ export function MaintenanceModule({
             <section className="drawer-section ticket-summary">
               <div>
                 <span>Assigned to</span>
-                <b>{ticket.assignedTo || "Not assigned"}</b>
+                <b>{assigneeNameFor(ticket.assignedTo) || "Not assigned"}</b>
               </div>
               <div>
                 <span>Responsibility</span>
@@ -2327,10 +2371,20 @@ export function MaintenanceModule({
                       </label>
                       <label>
                         Assigned to
-                        <input
-                          name="assignedTo"
-                          defaultValue={ticket.assignedTo}
-                        />
+                        <select name="assignedTo" defaultValue={ticket.assignedTo}>
+                          <option value="">Unassigned</option>
+                          {data.users
+                            .filter(
+                              (user: Row) =>
+                                ["maintenance", "technician"].includes(user.roleKey) &&
+                                user.status === "active",
+                            )
+                            .map((user: Row) => (
+                              <option key={user.id} value={user.id}>
+                                {user.displayName}
+                              </option>
+                            ))}
+                        </select>
                       </label>
                       <label>
                         Cost responsibility
@@ -3327,7 +3381,22 @@ export function MaintenanceModule({
           >
             <label className="wide">
               Assign to
-              <input name="assignedTo" required placeholder="Staff name" />
+              <select name="assignedTo" required defaultValue="">
+                <option value="" disabled>
+                  Select who&rsquo;s doing this
+                </option>
+                {data.users
+                  .filter(
+                    (user: Row) =>
+                      ["maintenance", "technician"].includes(user.roleKey) &&
+                      user.status === "active",
+                  )
+                  .map((user: Row) => (
+                    <option key={user.id} value={user.id}>
+                      {user.displayName}
+                    </option>
+                  ))}
+              </select>
             </label>
             <label className="wide">
               Notes (optional)
@@ -3371,7 +3440,26 @@ export function MaintenanceModule({
           >
             <label className="wide">
               Assign to
-              <input name="assignedTo" required placeholder="Staff name" />
+              <select
+                name="assignedTo"
+                required
+                defaultValue={assigningTurnoverTicket.assignedTo || ""}
+              >
+                <option value="" disabled>
+                  Select who&rsquo;s doing this
+                </option>
+                {data.users
+                  .filter(
+                    (user: Row) =>
+                      ["maintenance", "technician"].includes(user.roleKey) &&
+                      user.status === "active",
+                  )
+                  .map((user: Row) => (
+                    <option key={user.id} value={user.id}>
+                      {user.displayName}
+                    </option>
+                  ))}
+              </select>
             </label>
             <label className="wide">
               Notes (optional)
