@@ -6344,8 +6344,8 @@ export async function POST(request: Request) {
         throw new Error("Only staff can schedule room turnover");
       const bedSpaceId = asNumber(body.bedSpaceId);
       if (!bedSpaceId) throw new Error("Room is required");
-      const [bed] = await db.execute<{ status: string }>(
-        sql`SELECT status FROM bed_spaces WHERE id = ${bedSpaceId}`,
+      const [bed] = await db.execute<{ status: string; legacy_code: string }>(
+        sql`SELECT status, legacy_code FROM bed_spaces WHERE id = ${bedSpaceId}`,
       );
       if (!bed) throw new Error("Room not found");
       if (bed.status !== "vacant")
@@ -6353,6 +6353,12 @@ export async function POST(request: Request) {
           "This room is not empty — turnover is for a room a student has left.",
         );
       const raised = await raiseTurnoverTickets(db, bedSpaceId, {});
+      if (raised.length)
+        await notifyRole(db, "maintenance", {
+          type: "turnover-scheduled",
+          title: `Turnover scheduled — room ${bed.legacy_code}`,
+          link: "/maintenance?tab=turnover",
+        });
       noticeForClient = raised.length
         ? `Raised ${raised.length === 2 ? "inspection and cleaning" : raised[0]} for this room.`
         : "Inspection and cleaning are already open for this room.";
@@ -6385,6 +6391,7 @@ export async function POST(request: Request) {
         !asText(body.subcategory)
       )
         throw new Error("Hostel, unit, category and subcategory are required");
+      const ticketPriority = asText(body.priority, "average");
       const inserted = await db
         .insert(maintenanceTickets)
         .values({
@@ -6400,7 +6407,7 @@ export async function POST(request: Request) {
           subcategory: asText(body.subcategory),
           subject: asText(body.subcategory),
           description: asText(body.description),
-          priority: asText(body.priority, "average"),
+          priority: ticketPriority,
           status: "submitted",
           submittedByType:
             currentUser.roleKey === "tenant" ? "student" : "staff",
@@ -6420,6 +6427,12 @@ export async function POST(request: Request) {
         authorRole: currentUser.roleKey === "tenant" ? "student" : "staff",
         message: asText(body.description) || asText(body.subcategory),
         statusAfter: "submitted",
+      });
+      await notifyRole(db, "maintenance", {
+        type: "ticket-created",
+        title: `New ${ticketPriority === "high" ? "URGENT " : ""}ticket — ${asText(body.category)}`,
+        body: asText(body.subcategory),
+        link: `/maintenance?ticket=${createdId}`,
       });
     } else if (action === "ticket-clean-create") {
       // The Cleaning tab's two ways to open a cleaning ticket:
@@ -6577,6 +6590,21 @@ export async function POST(request: Request) {
         .update(maintenanceTickets)
         .set(changes)
         .where(eq(maintenanceTickets.id, ticketId));
+      if (currentUser.roleKey === "tenant") {
+        const messagedTicket = (
+          await db
+            .select({ ticketNo: maintenanceTickets.ticketNo })
+            .from(maintenanceTickets)
+            .where(eq(maintenanceTickets.id, ticketId))
+        )[0];
+        if (messagedTicket)
+          await notifyRole(db, "maintenance", {
+            type: "ticket-message",
+            title: `New message on ${messagedTicket.ticketNo}`,
+            body: message,
+            link: `/maintenance?ticket=${ticketId}`,
+          });
+      }
     } else if (action === "ticket-delete") {
       const ticketId = asNumber(body.ticketId);
       if (!ticketId) throw new Error("Ticket is required");
