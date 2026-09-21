@@ -1385,6 +1385,11 @@ export function StudentsModule({
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [schoolFilter, setSchoolFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("all");
+  // The same three values the edit form's own "Status" field offers — see
+  // profileStatus below.
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [salesFilter, setSalesFilter] = useState("all");
   const [completionFilter, setCompletionFilter] =
     useState<CompletionFilter>("all");
   // Check-in is reachable from the directory row as well as from inside the
@@ -1406,6 +1411,16 @@ export function StudentsModule({
   const [editRace, setEditRace] = useState<Row | null>(null);
   const [editReligion, setEditReligion] = useState<Row | null>(null);
   const [drawerRecordsTab, setDrawerRecordsTab] = useState("profile");
+  // Whether the profile drawer's Student information / Room details / Other
+  // information accordion starts open — read once at mount, not on every
+  // resize: a live resize listener would blow away any section a user had
+  // opened or closed by hand. Desktop has room to show everything at once;
+  // a phone screen doesn't, so there it starts collapsed until tapped open.
+  // Matches the app's own mobile breakpoint (see .sidebar's own
+  // @media max-width: 900px).
+  const [drawerSectionsOpenByDefault] = useState(
+    () => typeof window === "undefined" || window.innerWidth > 900,
+  );
   // Which invoice's charge lines and receipts are expanded in the billing tab.
   const [openInvoiceId, setOpenInvoiceId] = useState<string | number | null>(
     null,
@@ -1567,6 +1582,16 @@ export function StudentsModule({
     [selectedHostelStudents],
   );
 
+  const scopedSalesOptions = useMemo(
+    () =>
+      [...new Set(
+        selectedHostelStudents
+          .map((item) => String(item.salesperson || "").trim())
+          .filter(Boolean),
+      )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })),
+    [selectedHostelStudents],
+  );
+
   const filteredStudents = useMemo(() => {
     const search = query.trim().toLowerCase();
 
@@ -1589,6 +1614,14 @@ export function StudentsModule({
           unitFilter === "all" || String(item.unitCode || "") === unitFilter;
         const schoolMatch =
           schoolFilter === "all" || String(item.school || "") === schoolFilter;
+        const genderMatch =
+          genderFilter === "all" || String(item.gender || "") === genderFilter;
+        const statusMatch =
+          statusFilter === "all" ||
+          normaliseStatus(item.profileStatus, "active") === statusFilter;
+        const salesMatch =
+          salesFilter === "all" ||
+          String(item.salesperson || "") === salesFilter;
         const completionMatch =
           completionFilter === "all" ||
           (completionFilter === "incomplete"
@@ -1603,6 +1636,9 @@ export function StudentsModule({
           tabMatch &&
           unitMatch &&
           schoolMatch &&
+          genderMatch &&
+          statusMatch &&
+          salesMatch &&
           completionMatch &&
           (!search || text.includes(search))
         );
@@ -1619,11 +1655,14 @@ export function StudentsModule({
   }, [
     completionFilter,
     directoryTab,
+    genderFilter,
     query,
+    salesFilter,
     schoolFilter,
     selectedHostelStudents,
     sortDirection,
     sortKey,
+    statusFilter,
     unitFilter,
   ]);
 
@@ -1666,6 +1705,9 @@ export function StudentsModule({
     setQuery("");
     setUnitFilter("all");
     setSchoolFilter("all");
+    setGenderFilter("all");
+    setStatusFilter("all");
+    setSalesFilter("all");
     setCompletionFilter("all");
     setPage(1);
     if (resetTab) setDirectoryTab("active");
@@ -1947,6 +1989,49 @@ export function StudentsModule({
                   {scopedSchoolOptions.map((school) => (
                     <option key={school} value={school}>
                       {school}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="v2-pill-select"
+                  value={genderFilter}
+                  onChange={(event) => {
+                    setGenderFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All genders</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+
+                <select
+                  className="v2-pill-select"
+                  value={statusFilter}
+                  onChange={(event) => {
+                    setStatusFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="moved-out">Moved out</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+
+                <select
+                  className="v2-pill-select"
+                  value={salesFilter}
+                  onChange={(event) => {
+                    setSalesFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All sales / agents</option>
+                  {scopedSalesOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -2296,8 +2381,16 @@ export function StudentsModule({
                 </button>
               </div>
 
-              <div className="drawer-subsection">
-                <h4>Student information</h4>
+              <details
+                className="drawer-subsection"
+                open={drawerSectionsOpenByDefault}
+              >
+                <summary>
+                  <h4>Student information</h4>
+                  <span className="drawer-accordion-caret" aria-hidden>
+                    ›
+                  </span>
+                </summary>
                 {studentPastRooms.length > 0 && (
                   <p className="prior-room-note">
                     Previously lived in:{" "}
@@ -2354,12 +2447,6 @@ export function StudentsModule({
                     religions={data.religions}
                     save={save}
                   />
-                </div>
-              </div>
-
-              <div className="drawer-subsection">
-                <h4>Contacts</h4>
-                <div className="form-grid">
                   <label>
                     Contact number
                     <input
@@ -2377,44 +2464,50 @@ export function StudentsModule({
                     />
                   </label>
                 </div>
-              </div>
+              </details>
 
-              <div className="drawer-subsection">
-                <div className="subsection-head">
+              <details
+                className="drawer-subsection"
+                open={drawerSectionsOpenByDefault}
+              >
+                <summary>
                   <h4>Room details</h4>
-                  {student.assignmentId ? (
-                    <div className="subsection-actions">
-                      {/* The room is held for them but they haven't arrived
-                          — checking in is the only sensible next step, so
-                          it leads. */}
-                      {isAwaitingCheckIn(student) && (
-                        <button
-                          type="button"
-                          className="primary compact"
-                          onClick={() => setCheckInTarget(student)}
-                        >
-                          Check in
-                        </button>
-                      )}
+                  <span className="drawer-accordion-caret" aria-hidden>
+                    ›
+                  </span>
+                </summary>
+                {student.assignmentId ? (
+                  <div className="subsection-actions">
+                    {/* The room is held for them but they haven't arrived
+                        — checking in is the only sensible next step, so
+                        it leads. */}
+                    {isAwaitingCheckIn(student) && (
                       <button
                         type="button"
-                        className="secondary compact"
-                        onClick={() => setModal("moveout")}
+                        className="primary compact"
+                        onClick={() => setCheckInTarget(student)}
                       >
-                        Move out / deactivate
+                        Check in
                       </button>
-                    </div>
-                  ) : (
-                    // No tenancy yet, so offer to place the student instead
+                    )}
                     <button
                       type="button"
-                      className="primary compact"
-                      onClick={() => setModal("assign")}
+                      className="secondary compact"
+                      onClick={() => setModal("moveout")}
                     >
-                      Assign a room
+                      Move out / deactivate
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  // No tenancy yet, so offer to place the student instead
+                  <button
+                    type="button"
+                    className="primary compact subsection-actions"
+                    onClick={() => setModal("assign")}
+                  >
+                    Assign a room
+                  </button>
+                )}
                 {student.assignmentId ? (
                   <>
                     <div className="form-grid">
@@ -2572,10 +2665,18 @@ export function StudentsModule({
                     )}
                   </>
                 )}
-              </div>
+              </details>
 
-              <div className="drawer-subsection">
-
+              <details
+                className="drawer-subsection"
+                open={drawerSectionsOpenByDefault}
+              >
+                <summary>
+                  <h4>Other information</h4>
+                  <span className="drawer-accordion-caret" aria-hidden>
+                    ›
+                  </span>
+                </summary>
                 <div className="form-grid">
                   <label>
                     School
@@ -2602,12 +2703,6 @@ export function StudentsModule({
                       defaultValue={student.applicationFormNo}
                     />
                   </label>
-                </div>
-              </div>
-
-              <div className="drawer-subsection">
-                <h4>Other information</h4>
-                <div className="form-grid">
                   <label>
                     Sales person
                     <select name="salesperson" defaultValue={student.salesperson || ""}>
@@ -2646,7 +2741,7 @@ export function StudentsModule({
                     <input name="remarks" placeholder="e.g. Student is relocating to a different unit" defaultValue={student.remarks} />
                   </label>
                 </div>
-              </div>
+              </details>
             </form>
             )}
 

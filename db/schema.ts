@@ -685,6 +685,18 @@ export const billingInvoices = pgTable("billing_invoices", {
   totalAmount: doublePrecision("total_amount").notNull().default(0),
   amountPaid: doublePrecision("amount_paid").notNull().default(0),
   invoiceFrequency: text("invoice_frequency").notNull().default("on-request"),
+  // Finance's escape hatch for a student with a genuine special
+  // circumstance — applyLatePaymentCharges() skips any invoice with this
+  // set, and setting it also removes whatever late-payment-charge line the
+  // invoice had already accrued. Scoped to this one invoice, not a
+  // standing exemption for the student, since the circumstance is usually
+  // a one-off ("hospitalised the week rent was due"), not permanent.
+  lateChargeExempt: boolean("late_charge_exempt").notNull().default(false),
+  lateChargeExemptReason: text("late_charge_exempt_reason")
+    .notNull()
+    .default(""),
+  lateChargeExemptBy: text("late_charge_exempt_by").notNull().default(""),
+  lateChargeExemptAt: text("late_charge_exempt_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

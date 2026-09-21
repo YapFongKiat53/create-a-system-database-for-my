@@ -6982,6 +6982,37 @@
     color: var(--ink);
   }
 
+  /* Amber while a late charge is actively accruing (matches the urgency of
+     money still growing daily); calm green once Finance has waived it —
+     same visual language .invoice-verify already uses for "done". */
+  .invoice-late-charge {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin-top: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-md);
+    background: var(--warn-wash);
+  }
+
+  .invoice-late-charge.is-exempt {
+    border-color: var(--ok-line);
+    background: var(--ok-wash);
+  }
+
+  .invoice-late-charge p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .invoice-late-charge p b {
+    color: var(--ink);
+  }
+
   /* =========================================================
      BILLING CYCLE REVIEW (generate -> check -> post gate)
      ========================================================= */
@@ -10537,6 +10568,29 @@
      existing td:hover rule below already opens it back up on hover. */
   .finance-invoices td:not(:hover) {
     overflow: hidden;
+  }
+
+  /* Move-in (INV-MI-*, raised the moment a reservation converts, no
+     cycleId) vs billing-cycle (raised by "Prepare billing month") — the
+     invoice number alone doesn't make that obvious at a glance. */
+  .invoice-type-badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .invoice-type-badge.is-movein {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .invoice-type-badge.is-cycle {
+    background: #ede9fe;
+    color: #6d28d9;
   }
 
   /* The fixed-percentage layout above trades a horizontal scrollbar for

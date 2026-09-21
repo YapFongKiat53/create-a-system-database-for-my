@@ -290,8 +290,12 @@ export function FinanceModule({
     setModal("cycle");
   };
   const [financeTab, setFinanceTab] = useState<
-    "invoices" | "deposits" | "adjustments" | "maintenance" | "parking"
+    "invoices" | "cycles" | "deposits" | "adjustments" | "maintenance" | "parking"
   >("invoices");
+  // The reservation whose deposit detail modal is open — replaces the old
+  // "Mark as reviewed" action, which just stamped a timestamp nobody
+  // downstream ever read.
+  const [openDeposit, setOpenDeposit] = useState<Row | null>(null);
   const [invoiceQuery, setInvoiceQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
   // A due-date range replaces the old "All months" dropdown — that one only
@@ -301,6 +305,14 @@ export function FinanceModule({
   // range reaches both kinds.
   const [dueDateFrom, setDueDateFrom] = useState("");
   const [dueDateTo, setDueDateTo] = useState("");
+  // Lines up with the "WHERE THE MONEY IS" breakdown above the table — lets
+  // Accounts jump straight to, say, every invoice still carrying a late fee.
+  const [chargeTypeFilter, setChargeTypeFilter] = useState("all");
+  // A move-in invoice (INV-MI-*) has no cycleId at all — it's raised the
+  // moment a reservation converts, not by a billing run. Everything else
+  // came out of "Prepare billing month". Lets staff tell the two apart
+  // instead of hunting for "MI" in the invoice number.
+  const [invoiceTypeFilter, setInvoiceTypeFilter] = useState("all");
   const [page, setPage] = useState(1);
   const filteredInvoices = data.invoices.filter((invoice) => {
     const balance =
@@ -325,7 +337,17 @@ export function FinanceModule({
     const dueDateMatch =
       (!dueDateFrom || String(invoice.dueDate || "") >= dueDateFrom) &&
       (!dueDateTo || String(invoice.dueDate || "") <= dueDateTo);
-    return statusMatch && searchMatch && dueDateMatch;
+    const chargeTypeMatch =
+      chargeTypeFilter === "all" ||
+      (invoice.items as Row[]).some(
+        (item) => (item.itemType || "other") === chargeTypeFilter,
+      );
+    const typeMatch =
+      invoiceTypeFilter === "all" ||
+      (invoiceTypeFilter === "move-in" ? !invoice.cycleId : !!invoice.cycleId);
+    return (
+      statusMatch && searchMatch && dueDateMatch && chargeTypeMatch && typeMatch
+    );
   });
   const totalPages = Math.max(
     1,
@@ -346,12 +368,7 @@ export function FinanceModule({
   // Sales collects deposits/admin fees while a reservation is still an
   // enquiry, well before the student has a monthly invoice — Finance has
   // no other way to see that money came in, so it gets its own register
-  // here. "Pending review" just means Finance hasn't acknowledged the
-  // latest payment yet (reviewed timestamp missing or stale).
-  const isReservationPendingReview = (reservation: Row) =>
-    !reservation.financeReviewedAt ||
-    (reservation.paymentUpdatedAt &&
-      reservation.financeReviewedAt < reservation.paymentUpdatedAt);
+  // here.
   // Only the charge types that are actually refundable deposits belong
   // here — admin fee, first month rental, access card handling, etc. are
   // real income, not money Finance will ever hand back. "Deposit" and
@@ -405,9 +422,6 @@ export function FinanceModule({
     .filter((row) => movementState(row) !== "settled")
     .reduce((sum: number, row: Row) => sum + Number(row.amount || 0), 0);
 
-  const pendingReservationReviews = reservationDeposits.filter(
-    isReservationPendingReview,
-  );
   const pendingAdjustments = data.billingAdjustments.filter(
     (adjustment) => adjustment.approvalStatus === "pending",
   );
@@ -511,8 +525,11 @@ export function FinanceModule({
             >
               Automatic billing
             </button>
-            <button className="v2-btn-primary" onClick={openCycleModal}>
-              + Prepare billing month
+            <button
+              className="v2-btn-primary"
+              onClick={() => setFinanceTab("cycles")}
+            >
+              Billing cycles
             </button>
           </div>
         )}
@@ -589,61 +606,6 @@ export function FinanceModule({
           </div>
         </section>
       )}
-      {latest && (
-        <section className="cycle-banner">
-          <div>
-            <small>LATEST BILLING CYCLE</small>
-            <h3>{latest.periodLabel}</h3>
-            <p>
-              Cut-off {dateLabel(latest.cutoffDate)} · Due{" "}
-              {dateLabel(latest.dueDate)} · {titleCase(latest.status)}
-              {latest.status === "draft" &&
-                latestCycleInvoiceCount === 0 &&
-                " · Reserved, not yet generated"}
-            </p>
-          </div>
-          {latest.status === "draft" &&
-            latestCycleInvoiceCount === 0 &&
-            data.currentUser?.roleKey !== "tenant" && (
-              <button
-                className="primary"
-                disabled={previewBusy}
-                onClick={async () => {
-                  const values = {
-                    periodLabel: latest.periodLabel,
-                    cutoffDate: latest.cutoffDate,
-                    dueDate: latest.dueDate,
-                    invoiceFrequency: "monthly",
-                  };
-                  setPreviewBusy(true);
-                  const result = await save(
-                    { action: "billing-cycle-preview", ...values },
-                    "Preview ready",
-                  );
-                  setPreviewBusy(false);
-                  if (result?.preview) {
-                    setCycleInputs(values);
-                    setCyclePreview(result.preview);
-                    setModal("cycle");
-                  }
-                }}
-              >
-                {previewBusy ? "Calculating…" : "Preview & generate"}
-              </button>
-            )}
-          {latest.status === "draft" &&
-            latestCycleInvoiceCount > 0 &&
-            data.currentUser?.roleKey !== "tenant" && (
-              <button
-                className="primary"
-                disabled={reviewBusy}
-                onClick={() => loadCycleReview(latest.id)}
-              >
-                {reviewBusy ? "Checking…" : "Review & post"}
-              </button>
-            )}
-        </section>
-      )}
       <div className="workspace-tabs module-tabs">
         <button
           className={financeTab === "invoices" ? "active" : ""}
@@ -652,13 +614,16 @@ export function FinanceModule({
           Invoices
         </button>
         <button
+          className={financeTab === "cycles" ? "active" : ""}
+          onClick={() => setFinanceTab("cycles")}
+        >
+          Billing cycles
+        </button>
+        <button
           className={financeTab === "deposits" ? "active" : ""}
           onClick={() => setFinanceTab("deposits")}
         >
           Reservation deposits
-          {pendingReservationReviews.length > 0 && (
-            <span>{pendingReservationReviews.length}</span>
-          )}
         </button>
         <button
           className={financeTab === "adjustments" ? "active" : ""}
@@ -685,6 +650,164 @@ export function FinanceModule({
           )}
         </button>
       </div>
+      {financeTab === "cycles" && (
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <small>MONTHLY BILLING RUNS</small>
+            <h3>Billing cycles</h3>
+            <p>
+              Each month&rsquo;s billing run, separate from the individual bills it
+              produces — those live under Invoices.
+            </p>
+          </div>
+          {data.currentUser?.roleKey !== "tenant" && (
+            <button className="v2-btn-primary" onClick={openCycleModal}>
+              + Prepare billing month
+            </button>
+          )}
+        </div>
+        {latest && (
+          <section className="cycle-banner">
+            <div>
+              <small>LATEST BILLING CYCLE</small>
+              <h3>{latest.periodLabel}</h3>
+              <p>
+                Cut-off {dateLabel(latest.cutoffDate)} · Due{" "}
+                {dateLabel(latest.dueDate)} · {titleCase(latest.status)}
+                {latest.status === "draft" &&
+                  latestCycleInvoiceCount === 0 &&
+                  " · Reserved, not yet generated"}
+              </p>
+            </div>
+            {latest.status === "draft" &&
+              latestCycleInvoiceCount === 0 &&
+              data.currentUser?.roleKey !== "tenant" && (
+                <button
+                  className="primary"
+                  disabled={previewBusy}
+                  onClick={async () => {
+                    const values = {
+                      periodLabel: latest.periodLabel,
+                      cutoffDate: latest.cutoffDate,
+                      dueDate: latest.dueDate,
+                      invoiceFrequency: "monthly",
+                    };
+                    setPreviewBusy(true);
+                    const result = await save(
+                      { action: "billing-cycle-preview", ...values },
+                      "Preview ready",
+                    );
+                    setPreviewBusy(false);
+                    if (result?.preview) {
+                      setCycleInputs(values);
+                      setCyclePreview(result.preview);
+                      setModal("cycle");
+                    }
+                  }}
+                >
+                  {previewBusy ? "Calculating…" : "Preview & generate"}
+                </button>
+              )}
+            {latest.status === "draft" &&
+              latestCycleInvoiceCount > 0 &&
+              data.currentUser?.roleKey !== "tenant" && (
+                <button
+                  className="primary"
+                  disabled={reviewBusy}
+                  onClick={() => loadCycleReview(latest.id)}
+                >
+                  {reviewBusy ? "Checking…" : "Review & post"}
+                </button>
+              )}
+          </section>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Cut-off</th>
+                <th>Due</th>
+                <th>Status</th>
+                <th>Invoices</th>
+                <th>Total billed</th>
+                <th>Outstanding</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {data.billingCycles.map((cycle) => {
+                const cycleInvoices = data.invoices.filter(
+                  (invoice) => invoice.cycleId === cycle.id,
+                );
+                const cycleTotal = cycleInvoices.reduce(
+                  (sum: number, invoice: Row) =>
+                    sum + Number(invoice.totalAmount || 0),
+                  0,
+                );
+                const cycleOutstanding = cycleInvoices.reduce(
+                  (sum: number, invoice: Row) =>
+                    sum +
+                    Number(invoice.totalAmount || 0) -
+                    Number(invoice.amountPaid || 0),
+                  0,
+                );
+                return (
+                  <tr key={cycle.id}>
+                    <td>
+                      <strong>{cycle.periodLabel}</strong>
+                    </td>
+                    <td>{dateLabel(cycle.cutoffDate)}</td>
+                    <td>{dateLabel(cycle.dueDate)}</td>
+                    <td>
+                      <StatusPill status={cycle.status} />
+                    </td>
+                    <td>{cycleInvoices.length}</td>
+                    <td>{money(cycleTotal, true)}</td>
+                    <td>{money(cycleOutstanding, true)}</td>
+                    <td>
+                      {cycle.status === "draft" &&
+                      cycleInvoices.length > 0 &&
+                      data.currentUser?.roleKey !== "tenant" ? (
+                        <button
+                          className="secondary compact"
+                          disabled={reviewBusy}
+                          onClick={() => loadCycleReview(cycle.id)}
+                        >
+                          {reviewBusy ? "Checking…" : "Review & post"}
+                        </button>
+                      ) : (
+                        cycleInvoices.length > 0 && (
+                          <button
+                            className="secondary compact"
+                            onClick={() => {
+                              setInvoiceQuery("");
+                              setDueDateFrom(cycle.dueDate);
+                              setDueDateTo(cycle.dueDate);
+                              setFinanceTab("invoices");
+                            }}
+                          >
+                            View invoices
+                          </button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!data.billingCycles.length && (
+                <tr>
+                  <td colSpan={8}>
+                    <em>No billing cycles yet — prepare the first one above.</em>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      )}
       {financeTab === "invoices" && (
       <section className="panel">
         <div className="section-heading">
@@ -723,6 +846,33 @@ export function FinanceModule({
             <option value="credit">Excess / credit</option>
             <option value="pending">Pending verification</option>
           </select>
+          <select
+            className="v2-pill-select"
+            value={chargeTypeFilter}
+            onChange={(event) => {
+              setChargeTypeFilter(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="all">All charge types</option>
+            {chargeTypeOrder.map((type) => (
+              <option key={type} value={type}>
+                {chargeTypeMeta(type).label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="v2-pill-select"
+            value={invoiceTypeFilter}
+            onChange={(event) => {
+              setInvoiceTypeFilter(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="all">Move-in & billing cycles</option>
+            <option value="move-in">Move-in only</option>
+            <option value="cycle">Billing cycles only</option>
+          </select>
           <div className="v2-date-range">
             <span className="v2-date-range-label">Due</span>
             <DateField
@@ -754,6 +904,8 @@ export function FinanceModule({
               setDueDateFrom("");
               setDueDateTo("");
               setPaymentStatusFilter("all");
+              setChargeTypeFilter("all");
+              setInvoiceTypeFilter("all");
               setPage(1);
             }}
           >
@@ -778,7 +930,11 @@ export function FinanceModule({
                 <tr key={i.id}>
                   <td>
                     <code>{i.invoiceNo}</code>
-                    <small>{titleCase(i.invoiceFrequency)}</small>
+                    <span
+                      className={`invoice-type-badge ${i.cycleId ? "is-cycle" : "is-movein"}`}
+                    >
+                      {i.cycleId ? "📅 Billing cycle" : "🏠 Move-in"}
+                    </span>
                   </td>
                   <td>
                     <strong>{i.studentName}</strong>
@@ -917,11 +1073,6 @@ export function FinanceModule({
               the house will hand back appears here.
             </p>
           </div>
-          {pendingReservationReviews.length > 0 && (
-            <span className="v2-pending-badge">
-              {pendingReservationReviews.length} pending review
-            </span>
-          )}
         </div>
 
         <div className="deposit-ledger">
@@ -992,9 +1143,9 @@ export function FinanceModule({
                 const hostel = data.hostels.find(
                   (item) => item.id === reservation.preferredHostelId,
                 );
-                const pending = isReservationPendingReview(reservation);
+                const depositCharges = depositChargesOf(reservation);
                 const depositPaymentIds = new Set(
-                  depositChargesOf(reservation)
+                  depositCharges
                     .filter((charge: Row) => charge.paidAt)
                     .map((charge: Row) => charge.paymentId),
                 );
@@ -1063,25 +1214,13 @@ export function FinanceModule({
                       />
                     </td>
                     <td>
-                      {pending ? (
-                        <button
-                          className="secondary compact"
-                          disabled={busy}
-                          onClick={() =>
-                            save(
-                              {
-                                action: "reservation-finance-review",
-                                reservationId: reservation.id,
-                              },
-                              "Marked as reviewed",
-                            )
-                          }
-                        >
-                          Mark as reviewed
-                        </button>
-                      ) : (
-                        <span className="muted">Reviewed</span>
-                      )}
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        onClick={() => setOpenDeposit(reservation)}
+                      >
+                        Open
+                      </button>
                     </td>
                   </tr>
                 );
@@ -1096,6 +1235,122 @@ export function FinanceModule({
             </tbody>
           </table>
         </div>
+
+        {openDeposit &&
+          (() => {
+            const hostel = data.hostels.find(
+              (item) => item.id === openDeposit.preferredHostelId,
+            );
+            const depositCharges = depositChargesOf(openDeposit);
+            const depositPaymentIds = new Set(
+              depositCharges
+                .filter((charge: Row) => charge.paidAt)
+                .map((charge: Row) => charge.paymentId),
+            );
+            const slips = data.attachments.filter(
+              (attachment) =>
+                attachment.contextType === "payment-proof" &&
+                depositPaymentIds.has(attachment.recordId),
+            );
+            const paid = depositPaidOf(openDeposit);
+            const payable = depositPayableOf(openDeposit);
+            return (
+              <Modal
+                title={openDeposit.studentName}
+                kicker="RESERVATION DEPOSIT"
+                description={`${openDeposit.referenceNo} · ${hostel?.name || "Hostel not set"}`}
+                onClose={() => setOpenDeposit(null)}
+              >
+                <div className="deposit-modal-summary">
+                  <div>
+                    <small>DEPOSIT PAID</small>
+                    <strong>{money(paid, true)}</strong>
+                    <span>of {money(payable, true)} required</span>
+                  </div>
+                  <StatusPill status={paid >= payable ? "full" : "partial"} />
+                </div>
+
+                <div className="deposit-modal-meta">
+                  <div>
+                    <small>ROOM</small>
+                    <span>
+                      {openDeposit.roomCategory === "any"
+                        ? "Any room"
+                        : `Room ${openDeposit.roomCategory}`}
+                    </span>
+                  </div>
+                  <div>
+                    <small>TYPE</small>
+                    <span>{titleCase(openDeposit.reservationType)}</span>
+                  </div>
+                  <div>
+                    <small>SALESPERSON</small>
+                    <span>{openDeposit.salesPerson || "-"}</span>
+                  </div>
+                  <div>
+                    <small>LAST PAYMENT</small>
+                    <span>{dateLabel(openDeposit.paymentUpdatedAt)}</span>
+                  </div>
+                </div>
+
+                <h4 className="deposit-section-label">Charges</h4>
+                <div className="deposit-breakdown">
+                  {depositCharges.length ? (
+                    depositCharges.map((charge: Row) => {
+                      const meta = chargeTypeMeta(charge.chargeType);
+                      return (
+                        <div
+                          key={charge.id}
+                          className="deposit-breakdown-item"
+                        >
+                          <span
+                            className="deposit-breakdown-icon"
+                            style={{
+                              background: meta.background,
+                              color: meta.color,
+                            }}
+                          >
+                            {meta.icon}
+                          </span>
+                          <div>
+                            <strong>{meta.label}</strong>
+                            <small>
+                              {charge.paidAt
+                                ? `Paid ${dateLabel(charge.paidAt)}`
+                                : "Not yet paid"}
+                              {charge.notes ? ` · ${charge.notes}` : ""}
+                            </small>
+                          </div>
+                          <b>{money(charge.amount, true)}</b>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <em>No deposit charges on this reservation.</em>
+                  )}
+                </div>
+
+                {slips.length > 0 && (
+                  <>
+                    <h4 className="deposit-section-label">Payment slips</h4>
+                    <div className="button-row">
+                      {slips.map((attachment) => (
+                        <a
+                          key={attachment.id}
+                          className="secondary compact"
+                          href={`${BASE_PATH}/api/files?id=${attachment.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View slip
+                        </a>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </Modal>
+            );
+          })()}
 
         <h4 className="deposit-section-label">Changes during tenancy</h4>
         <p className="deposit-section-note">
@@ -2229,9 +2484,9 @@ export function FinanceModule({
           if (!invoice) return null;
           return (
             <Modal
-              title={invoice.invoiceNo}
+              title={invoice.studentName}
               kicker="STUDENT BILL"
-              description={`${invoice.studentName} · Due ${dateLabel(invoice.dueDate)}`}
+              description={`${invoice.invoiceNo} · ${invoice.roomCode ? `Room ${invoice.roomCode}` : "No room assigned"} · Due ${dateLabel(invoice.dueDate)}`}
               onClose={() => setModal("")}
             >
               <div className="invoice-sheet">
@@ -2296,6 +2551,77 @@ export function FinanceModule({
                   )}
                 </div>
               </div>
+              {data.currentUser?.roleKey !== "tenant" &&
+                (() => {
+                  const lateCharge = (invoice.items as Row[]).find(
+                    (item) => item.itemType === "late-payment-charge",
+                  );
+                  if (!lateCharge && !invoice.lateChargeExempt) return null;
+                  return (
+                    <div
+                      className={`invoice-late-charge${invoice.lateChargeExempt ? " is-exempt" : ""}`}
+                    >
+                      {invoice.lateChargeExempt ? (
+                        <>
+                          <p>
+                            <b>Late charges waived</b> for this invoice
+                            {invoice.lateChargeExemptReason
+                              ? ` — ${invoice.lateChargeExemptReason}`
+                              : ""}
+                            . Set by {invoice.lateChargeExemptBy || "staff"} on{" "}
+                            {dateLabel(invoice.lateChargeExemptAt)}.
+                          </p>
+                          <button
+                            className="secondary compact"
+                            disabled={busy}
+                            onClick={() =>
+                              save(
+                                {
+                                  action: "billing-late-charge-exempt",
+                                  invoiceId: invoice.id,
+                                  exempt: false,
+                                },
+                                "Late charges re-enabled",
+                              )
+                            }
+                          >
+                            Re-enable late charges
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p>
+                            This invoice is accruing a late payment charge —{" "}
+                            <b>{money(lateCharge!.amount, true)}</b> so far.
+                            If the student has a genuine special
+                            circumstance, waive it here.
+                          </p>
+                          <button
+                            className="secondary compact"
+                            disabled={busy}
+                            onClick={() => {
+                              const reason = window.prompt(
+                                "Reason for waiving this late charge (shown on the invoice):",
+                              );
+                              if (reason === null) return;
+                              save(
+                                {
+                                  action: "billing-late-charge-exempt",
+                                  invoiceId: invoice.id,
+                                  exempt: true,
+                                  reason,
+                                },
+                                "Late charge waived",
+                              );
+                            }}
+                          >
+                            Waive late charge
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               {/* The bill is confirmed once, as a whole: staff read the
                   charges above and confirm the total, instead of ticking
                   every line. It is still stored per line, so a line whose

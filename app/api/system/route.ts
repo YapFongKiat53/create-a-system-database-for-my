@@ -745,6 +745,10 @@ function selectInvoices(db: ReturnType<typeof getDb>) {
       totalAmount: billingInvoices.totalAmount,
       amountPaid: billingInvoices.amountPaid,
       invoiceFrequency: billingInvoices.invoiceFrequency,
+      lateChargeExempt: billingInvoices.lateChargeExempt,
+      lateChargeExemptReason: billingInvoices.lateChargeExemptReason,
+      lateChargeExemptBy: billingInvoices.lateChargeExemptBy,
+      lateChargeExemptAt: billingInvoices.lateChargeExemptAt,
       createdAt: billingInvoices.createdAt,
     })
     .from(billingInvoices)
@@ -1452,7 +1456,7 @@ async function applyLatePaymentCharges(db: ReturnType<typeof getDb>) {
       COALESCE((SELECT SUM(amount) FROM billing_items WHERE invoice_id=i.id AND item_type='room-rental'),0) rental
     FROM billing_invoices i
     JOIN billing_cycles c ON c.id=i.cycle_id
-    WHERE c.status='posted' AND i.due_date < ${today}
+    WHERE c.status='posted' AND i.due_date < ${today} AND i.late_charge_exempt = false
   `);
 
   // Same eligibility/amount rules as before. The write is now a single
@@ -7253,6 +7257,44 @@ export async function POST(request: Request) {
       await db.execute(
         sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${item.invoiceId}) WHERE id=${item.invoiceId}`,
       );
+    } else if (action === "billing-late-charge-exempt") {
+      const invoiceId = asNumber(body.invoiceId);
+      if (!invoiceId) throw new Error("Invoice is required");
+      const exempt = boolValue(body.exempt);
+      if (exempt) {
+        await db
+          .update(billingInvoices)
+          .set({
+            lateChargeExempt: true,
+            lateChargeExemptReason: asText(body.reason),
+            lateChargeExemptBy: currentUser.displayName,
+            lateChargeExemptAt: nowIso(),
+          })
+          .where(eq(billingInvoices.id, invoiceId));
+        // Waiving takes effect immediately — remove whatever late charge
+        // had already accrued, not just stop it from growing further.
+        await db
+          .delete(billingItems)
+          .where(
+            and(
+              eq(billingItems.invoiceId, invoiceId),
+              eq(billingItems.itemType, "late-payment-charge"),
+            ),
+          );
+        await db.execute(
+          sql`UPDATE billing_invoices SET total_amount=(SELECT COALESCE(SUM(amount),0) FROM billing_items WHERE invoice_id=${invoiceId}) WHERE id=${invoiceId}`,
+        );
+      } else {
+        await db
+          .update(billingInvoices)
+          .set({
+            lateChargeExempt: false,
+            lateChargeExemptReason: "",
+            lateChargeExemptBy: "",
+            lateChargeExemptAt: null,
+          })
+          .where(eq(billingInvoices.id, invoiceId));
+      }
     } else if (action === "billing-invoice-verify") {
       // Confirms a whole bill at once: "these charges, this total, are
       // right". Replaces ticking every line — the flag still lives on each
