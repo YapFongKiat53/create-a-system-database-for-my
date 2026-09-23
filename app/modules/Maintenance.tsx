@@ -4,8 +4,8 @@
 import { useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  AttachmentGrid,
   DateField,
-  DocumentTile,
   Empty,
   FileField,
   Modal,
@@ -18,8 +18,6 @@ import {
   blockOf,
   dateLabel,
   formValues,
-  isImageAttachment,
-  isVideoAttachment,
   money,
   titleCase,
   today,
@@ -34,128 +32,6 @@ import { BASE_PATH } from "../basePath";
 const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   .toISOString()
   .slice(0, 10);
-
-// Pictures and videos render inline (no click-through needed) and split
-// into their own sections since they're viewed differently. Anything else —
-// PDF quotations, Excel costings, signed forms — can't be previewed, so it
-// falls into a documents group of click-through tiles rather than being
-// dropped from the list. Deleting calls the file store directly rather than
-// going through save()/action dispatch since attachments aren't part of the
-// /api/system action set.
-function TicketAttachments({
-  attachments,
-  onDeleted,
-  compact = false,
-}: {
-  attachments: Row[];
-  onDeleted: () => void;
-  compact?: boolean;
-}) {
-  const [deletingId, setDeletingId] = useState<string | number | null>(null);
-  const pictures = attachments.filter((attachment) =>
-    isImageAttachment(attachment.contentType),
-  );
-  const videos = attachments.filter((attachment) =>
-    isVideoAttachment(attachment.contentType),
-  );
-  const documents = attachments.filter(
-    (attachment) =>
-      !isImageAttachment(attachment.contentType) &&
-      !isVideoAttachment(attachment.contentType),
-  );
-  if (!pictures.length && !videos.length && !documents.length) return null;
-
-  const handleDelete = async (id: string | number) => {
-    if (!window.confirm("Delete this file? This cannot be undone.")) return;
-    setDeletingId(id);
-    try {
-      const response = await fetch(`${BASE_PATH}/api/files?id=${id}`, {
-        method: "DELETE",
-      });
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      if (!response.ok) {
-        window.alert(result.error || "Unable to delete file");
-        return;
-      }
-      await onDeleted();
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const group = (items: Row[], label: string) =>
-    items.length > 0 && (
-      <div className="attachment-thumb-grid">
-        <small className="attachment-group-label">{label}</small>
-        {items.map((attachment) => (
-          <figure key={attachment.id} className="attachment-thumb">
-            {attachment.contentType?.startsWith("video/") ? (
-              <video
-                src={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                controls
-                preload="metadata"
-              />
-            ) : (
-              <a
-                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <img
-                  src={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                  alt={attachment.fileName}
-                  loading="lazy"
-                />
-              </a>
-            )}
-            <button
-              type="button"
-              className="secondary compact attachment-delete"
-              disabled={deletingId === attachment.id}
-              onClick={() => handleDelete(attachment.id)}
-            >
-              Delete
-            </button>
-          </figure>
-        ))}
-      </div>
-    );
-
-  const documentGroup = documents.length > 0 && (
-    <div className="attachment-thumb-grid">
-      <small className="attachment-group-label">DOCUMENT</small>
-      {documents.map((attachment) => (
-        <figure key={attachment.id} className="attachment-thumb">
-          <DocumentTile attachment={attachment} />
-          <button
-            type="button"
-            className="secondary compact attachment-delete"
-            disabled={deletingId === attachment.id}
-            onClick={() => handleDelete(attachment.id)}
-          >
-            Delete
-          </button>
-        </figure>
-      ))}
-    </div>
-  );
-
-  const content = (
-    <>
-      {!compact && <strong>Pictures, videos &amp; documents</strong>}
-      {group(pictures, "PICTURE")}
-      {group(videos, "VIDEO")}
-      {documentGroup}
-    </>
-  );
-  return compact ? (
-    <div className="attachment-list attachment-list-compact">{content}</div>
-  ) : (
-    <section className="drawer-section attachment-list">{content}</section>
-  );
-}
 
 export function MaintenanceModule({
   data,
@@ -2221,7 +2097,7 @@ export function MaintenanceModule({
                 <b>{money(ticket.studentCharge ?? ticket.actualCost)}</b>
               </div>
             </section>
-            <TicketAttachments
+            <AttachmentGrid
               attachments={data.attachments.filter(
                 (attachment) =>
                   attachment.contextType === "ticket" &&
@@ -2239,7 +2115,7 @@ export function MaintenanceModule({
                     <h3>Receipts</h3>
                   </div>
                 </div>
-                <TicketAttachments
+                <AttachmentGrid
                   attachments={ticketReceipts}
                   onDeleted={() => load(["attachments"])}
                   compact
@@ -2275,7 +2151,7 @@ export function MaintenanceModule({
                       {m.statusAfter && (
                         <span>Status: {titleCase(m.statusAfter)}</span>
                       )}
-                      <TicketAttachments
+                      <AttachmentGrid
                         attachments={data.attachments.filter(
                           (attachment) =>
                             attachment.contextType === "ticket-update" &&

@@ -4,8 +4,8 @@
 import { useMemo, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  AttachmentGrid,
   DateField,
-  DocumentTile,
   FileField,
   Modal,
   ParkingRentalForm,
@@ -590,10 +590,12 @@ export function UnitsModule({
   data,
   save,
   busy,
+  load,
 }: {
   data: Data;
   save: any;
   busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [activeHostelCode, setActiveHostelCode] = useState<string | null>(
@@ -1276,6 +1278,7 @@ export function UnitsModule({
                 uploadedBy={data.currentUser?.displayName}
                 save={save}
                 busy={busy}
+                load={load}
               />
             )}
           </aside>
@@ -1293,6 +1296,7 @@ export function UnitsModule({
           uploadedBy={data.currentUser?.displayName}
           save={save}
           busy={busy}
+          load={load}
           onClose={() => setSelectedRoom(null)}
         />
       )}
@@ -1693,6 +1697,7 @@ function RoomOverviewPanel({
   uploadedBy,
   save,
   busy,
+  load,
   onClose,
 }: {
   unit: Row;
@@ -1701,9 +1706,11 @@ function RoomOverviewPanel({
   uploadedBy?: string;
   save: any;
   busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
   onClose: () => void;
 }) {
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [fileFieldKey, setFileFieldKey] = useState(0);
   const [amenities, setAmenities] = useState<string[]>(
     normaliseAmenities(roomValue(room, "amenities", [])),
   );
@@ -1726,19 +1733,12 @@ function RoomOverviewPanel({
     "monthlyRate",
     roomValue(room, "salesRate", roomValue(room, "rent", "")),
   );
-  // A room's files are no longer photos only — floor plans, inventory lists
-  // and inspection reports land here too. Only the pictures can be shown as
-  // thumbnails; everything else needs a click-through tile.
+  // Used for the small preview thumbnail in the header only — the full
+  // photo/document list below renders through AttachmentGrid instead.
   const roomPhotos = attachments.filter((attachment) =>
     String(attachment.contentType || attachment.fileType || "").startsWith(
       "image/",
     ),
-  );
-  const roomDocuments = attachments.filter(
-    (attachment) =>
-      !String(attachment.contentType || attachment.fileType || "").startsWith(
-        "image/",
-      ),
   );
 
   const toggleAmenity = (key: string) => {
@@ -1864,7 +1864,7 @@ function RoomOverviewPanel({
           className="room-overview-layout"
           onSubmit={async (event) => {
             event.preventDefault();
-            const ok = await save(
+            await save(
               {
                 action: "room-details",
                 roomId: room.id,
@@ -1873,15 +1873,6 @@ function RoomOverviewPanel({
               },
               "Room overview updated",
             );
-            if (ok && photoFile) {
-              await uploadAttachment(
-                photoFile,
-                "room",
-                room.id,
-                uploadedBy,
-              );
-              setPhotoFile(null);
-            }
           }}
         >
           <div className="room-main-column">
@@ -2054,41 +2045,40 @@ function RoomOverviewPanel({
                   <h3>{attachments.length} uploaded</h3>
                 </div>
               </div>
-              <div className="room-photo-grid">
-                {roomPhotos.slice(0, 6).map((attachment) => (
-                  <a
-                    key={attachment.id}
-                    href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <img
-                      src={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                      alt={attachment.fileName || "Room photo"}
-                    />
-                  </a>
-                ))}
-                {!attachments.length && (
-                  <div className="room-photo-empty">
-                    No room photos or files yet
-                  </div>
-                )}
-              </div>
-              {roomDocuments.length > 0 && (
-                <div className="room-document-list">
-                  {roomDocuments.map((attachment) => (
-                    <DocumentTile key={attachment.id} attachment={attachment} />
-                  ))}
+              {attachments.length > 0 ? (
+                <AttachmentGrid
+                  attachments={attachments}
+                  onDeleted={() => load(["attachments"])}
+                  compact
+                />
+              ) : (
+                <div className="room-photo-empty">
+                  No room photos or files yet
                 </div>
               )}
               <label className="room-photo-upload">
                 Add photo or file
                 <FileField
+                  key={fileFieldKey}
                   accept={ATTACHMENT_ACCEPT}
-                  hint="Photo, PDF, Word, Excel or CSV."
-                  onChange={(event) =>
-                    setPhotoFile(event.target.files?.[0] || null)
+                  disabled={uploadingPhoto}
+                  hint={
+                    uploadingPhoto
+                      ? "Uploading…"
+                      : "Photo, PDF, Word, Excel or CSV. Uploads immediately."
                   }
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    setUploadingPhoto(true);
+                    try {
+                      await uploadAttachment(file, "room", room.id, uploadedBy);
+                      await load(["attachments"]);
+                      setFileFieldKey((key) => key + 1);
+                    } finally {
+                      setUploadingPhoto(false);
+                    }
+                  }}
                 />
               </label>
             </section>
@@ -2150,6 +2140,7 @@ function OwnerAgreement({
   uploadedBy,
   save,
   busy,
+  load,
 }: {
   unit: Row;
   owner: Row | undefined;
@@ -2157,27 +2148,20 @@ function OwnerAgreement({
   uploadedBy?: string;
   save: any;
   busy: boolean;
+  load: (modules?: string[]) => Promise<void>;
 }) {
   const [type, setType] = useState(owner?.agreementType || "rental");
-  const [agreementFile, setAgreementFile] = useState<File | null>(null);
+  const [uploadingAgreement, setUploadingAgreement] = useState(false);
+  const [fileFieldKey, setFileFieldKey] = useState(0);
   return (
     <form
       className="drawer-section owner-form"
       onSubmit={async (e) => {
         e.preventDefault();
-        const result = await save(
+        await save(
           { action: "unit-owner", unitId: unit.id, ...formValues(e) },
           "Owner agreement saved",
         );
-        if (result && agreementFile) {
-          await uploadAttachment(
-            agreementFile,
-            "agreement",
-            unit.id,
-            uploadedBy,
-          );
-          setAgreementFile(null);
-        }
       }}
     >
       <div className="section-title">
@@ -2423,26 +2407,36 @@ function OwnerAgreement({
         <label className="wide">
           Upload signed agreement
           <FileField
+            key={fileFieldKey}
             accept={ATTACHMENT_ACCEPT}
-            hint="Photo, PDF, Word, Excel or CSV."
-            onChange={(event) =>
-              setAgreementFile(event.target.files?.[0] || null)
+            disabled={uploadingAgreement}
+            hint={
+              uploadingAgreement
+                ? "Uploading…"
+                : "Photo, PDF, Word, Excel or CSV. Uploads immediately."
             }
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setUploadingAgreement(true);
+              try {
+                await uploadAttachment(file, "agreement", unit.id, uploadedBy);
+                await load(["attachments"]);
+                setFileFieldKey((key) => key + 1);
+              } finally {
+                setUploadingAgreement(false);
+              }
+            }}
           />
         </label>
         {attachments.length > 0 && (
-          <div className="wide attachment-list">
+          <div className="wide">
             <strong>Stored agreements</strong>
-            {attachments.map((attachment) => (
-              <a
-                key={attachment.id}
-                href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {attachment.fileName}
-              </a>
-            ))}
+            <AttachmentGrid
+              attachments={attachments}
+              onDeleted={() => load(["attachments"])}
+              compact
+            />
           </div>
         )}
       </div>

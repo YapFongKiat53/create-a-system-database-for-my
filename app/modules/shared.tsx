@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { FormEvent, InputHTMLAttributes, ReactNode } from "react";
+import type { CSSProperties, FormEvent, InputHTMLAttributes, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { BASE_PATH } from "../basePath";
 
 export type Row = Record<string, any>;
@@ -747,6 +748,117 @@ export const fileSizeLabel = (bytes?: number | string | null) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// Full-size pop-out viewer for a photo or video attachment, used in place
+// of opening the file in a new browser tab. `useLightbox` holds the
+// currently-open attachment (or null); render one <Lightbox> per page and
+// call `.open(attachment)` from any thumbnail's onClick.
+export function useLightbox() {
+  const [attachment, setAttachmentState] = useState<Row | null>(null);
+  return {
+    attachment,
+    open: (a: Row) => setAttachmentState(a),
+    close: () => setAttachmentState(null),
+  };
+}
+
+export function Lightbox({
+  attachment,
+  onClose,
+}: {
+  attachment: Row | null;
+  onClose: () => void;
+}) {
+  // Portalled straight to <body> rather than rendered in place: this can be
+  // opened from deep inside a room/reservation drawer, which is itself
+  // nested inside a lower-z-index stacking context, so a z-index alone
+  // wouldn't reliably put it above every modal/drawer on the page — only a
+  // real DOM move to the document root does that.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // Only runs in the browser, after the first client render — exactly
+    // when document.body below becomes safe to use (SSR has no document).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+  if (!attachment || !mounted) return null;
+  return createPortal(
+    <div className="lightbox-backdrop" onClick={onClose}>
+      <button
+        type="button"
+        className="lightbox-close"
+        onClick={onClose}
+        aria-label="Close"
+      >
+        ×
+      </button>
+      <div className="lightbox-content" onClick={(event) => event.stopPropagation()}>
+        {isVideoAttachment(attachment.contentType) ? (
+          <video
+            src={`${BASE_PATH}/api/files?id=${attachment.id}`}
+            controls
+            autoPlay
+          />
+        ) : (
+          <img
+            src={`${BASE_PATH}/api/files?id=${attachment.id}`}
+            alt={attachment.fileName || "Attachment"}
+          />
+        )}
+        {attachment.fileName && (
+          <span className="lightbox-caption">{attachment.fileName}</span>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// Drop-in replacement for a plain `<a href=".../api/files?id=..." target="_blank">`
+// around a photo or video: pops it open in the Lightbox instead of a new tab,
+// keeping the same className/children so call sites don't need restyling.
+// Anything that isn't a photo or video (PDF, Word, Excel...) still can't be
+// shown in the Lightbox, so it falls back to the original new-tab link.
+export function AttachmentLink({
+  attachment,
+  onOpen,
+  className,
+  style,
+  children,
+}: {
+  attachment: Row;
+  onOpen: (attachment: Row) => void;
+  className?: string;
+  style?: CSSProperties;
+  children: ReactNode;
+}) {
+  const isMedia =
+    isImageAttachment(attachment.contentType) ||
+    isVideoAttachment(attachment.contentType);
+  if (isMedia) {
+    return (
+      <button
+        type="button"
+        className={className}
+        style={style}
+        onClick={() => onOpen(attachment)}
+      >
+        {children}
+      </button>
+    );
+  }
+  return (
+    <a
+      className={className}
+      style={style}
+      href={`${BASE_PATH}/api/files?id=${attachment.id}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {children}
+    </a>
+  );
+}
+
 // Non-media attachments can't be previewed inline, so they render as a
 // labelled tile that opens the file in a new tab instead.
 export function DocumentTile({ attachment }: { attachment: Row }) {
@@ -764,6 +876,132 @@ export function DocumentTile({ attachment }: { attachment: Row }) {
       <span className="document-tile-name">{attachment.fileName}</span>
       {size && <small>{size}</small>}
     </a>
+  );
+}
+
+// Pictures and videos render inline (no click-through needed) and split
+// into their own sections since they're viewed differently. Anything else —
+// PDF quotations, Excel costings, signed forms — can't be previewed, so it
+// falls into a documents group of click-through tiles rather than being
+// dropped from the list. Deleting calls the file store directly rather than
+// going through save()/action dispatch since attachments aren't part of the
+// /api/system action set. Shared by every module that lists uploaded files
+// (tickets, room photos, owner agreements, payment slips) so every one of
+// them gets the same delete-with-confirmation behaviour.
+export function AttachmentGrid({
+  attachments,
+  onDeleted,
+  compact = false,
+}: {
+  attachments: Row[];
+  onDeleted: () => void;
+  compact?: boolean;
+}) {
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const lightbox = useLightbox();
+  const pictures = attachments.filter((attachment) =>
+    isImageAttachment(attachment.contentType),
+  );
+  const videos = attachments.filter((attachment) =>
+    isVideoAttachment(attachment.contentType),
+  );
+  const documents = attachments.filter(
+    (attachment) =>
+      !isImageAttachment(attachment.contentType) &&
+      !isVideoAttachment(attachment.contentType),
+  );
+  if (!pictures.length && !videos.length && !documents.length) return null;
+
+  const handleDelete = async (id: string | number) => {
+    if (!window.confirm("Delete this file? This cannot be undone.")) return;
+    setDeletingId(id);
+    try {
+      const response = await fetch(`${BASE_PATH}/api/files?id=${id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        window.alert(result.error || "Unable to delete file");
+        return;
+      }
+      await onDeleted();
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const group = (items: Row[], label: string) =>
+    items.length > 0 && (
+      <div className="attachment-thumb-grid">
+        <small className="attachment-group-label">{label}</small>
+        {items.map((attachment) => (
+          <figure key={attachment.id} className="attachment-thumb">
+            <button
+              type="button"
+              className="attachment-thumb-open"
+              onClick={() => lightbox.open(attachment)}
+            >
+              {attachment.contentType?.startsWith("video/") ? (
+                <video
+                  src={`${BASE_PATH}/api/files?id=${attachment.id}`}
+                  muted
+                  preload="metadata"
+                />
+              ) : (
+                <img
+                  src={`${BASE_PATH}/api/files?id=${attachment.id}`}
+                  alt={attachment.fileName}
+                  loading="lazy"
+                />
+              )}
+            </button>
+            <button
+              type="button"
+              className="secondary compact attachment-delete"
+              disabled={deletingId === attachment.id}
+              onClick={() => handleDelete(attachment.id)}
+            >
+              Delete
+            </button>
+          </figure>
+        ))}
+      </div>
+    );
+
+  const documentGroup = documents.length > 0 && (
+    <div className="attachment-thumb-grid">
+      <small className="attachment-group-label">DOCUMENT</small>
+      {documents.map((attachment) => (
+        <figure key={attachment.id} className="attachment-thumb">
+          <DocumentTile attachment={attachment} />
+          <button
+            type="button"
+            className="secondary compact attachment-delete"
+            disabled={deletingId === attachment.id}
+            onClick={() => handleDelete(attachment.id)}
+          >
+            Delete
+          </button>
+        </figure>
+      ))}
+    </div>
+  );
+
+  const content = (
+    <>
+      {!compact && <strong>Pictures, videos &amp; documents</strong>}
+      {group(pictures, "PICTURE")}
+      {group(videos, "VIDEO")}
+      {documentGroup}
+      <Lightbox attachment={lightbox.attachment} onClose={lightbox.close} />
+    </>
+  );
+  return compact ? (
+    <div className="attachment-list attachment-list-compact">{content}</div>
+  ) : (
+    <section className="drawer-section attachment-list">{content}</section>
   );
 }
 
@@ -1477,12 +1715,17 @@ export function ParkingRentalForm({
   save,
   busy,
   lockedLotId,
+  replacesRentalId,
   onDone,
 }: {
   data: Data;
   save: any;
   busy: boolean;
   lockedLotId?: string | number;
+  /** Ends this rental and inserts the new one in its place, instead of
+   * creating a first-ever rental for the lot — see the "replace the
+   * tenant" flow in Parking.tsx. */
+  replacesRentalId?: string | number;
   onDone: () => void;
 }) {
   const [tenantType, setTenantType] = useState("in-house");
@@ -1509,8 +1752,16 @@ export function ParkingRentalForm({
       onSubmit={async (e) => {
         e.preventDefault();
         const ok = await save(
-          { action: "parking-rental", ...formValues(e) },
-          "Parking rental created",
+          replacesRentalId !== undefined
+            ? {
+                action: "parking-rental-replace",
+                previousRentalId: replacesRentalId,
+                ...formValues(e),
+              }
+            : { action: "parking-rental", ...formValues(e) },
+          replacesRentalId !== undefined
+            ? "New tenant recorded"
+            : "Parking rental created",
         );
         if (ok) onDone();
       }}
@@ -1547,7 +1798,7 @@ export function ParkingRentalForm({
               setSelectedStudentId("");
             }}
             options={data.parkingLots
-              .filter((lot) => lot.status === "available")
+              .filter((lot) => lot.status === "available" && !lot.deletedAt)
               .map((lot) => ({
                 value: lot.id,
                 label: `${lot.hostelName} · ${lot.lotNumber} · ${lot.unitCode || "Common"}`,
@@ -1688,7 +1939,7 @@ export function ParkingRentalForm({
       </label>
       <div className="form-actions wide">
         <button className="primary" disabled={busy}>
-          Create rental
+          {replacesRentalId !== undefined ? "Start new rental" : "Create rental"}
         </button>
       </div>
     </form>

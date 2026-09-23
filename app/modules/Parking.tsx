@@ -168,12 +168,15 @@ export function ParkingModule({
   >(null);
   const [rentalSearch, setRentalSearch] = useState("");
   const [rentalTab, setRentalTab] = useState<
-    "all" | "active" | "ended" | "outside"
+    "all" | "active" | "ended" | "outside" | "deleted"
   >("active");
   const [rentalSort, setRentalSort] = useState("lotNumber");
   const [rentalSortDir, setRentalSortDir] = useState<"asc" | "desc">("asc");
   const [rental, setRental] = useState<Row | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showDeletedLots, setShowDeletedLots] = useState(false);
+  const [lot, setLot] = useState<Row | null>(null);
+  const [confirmDeleteLot, setConfirmDeleteLot] = useState(false);
   const sortRentals = (key: string) => {
     if (rentalSort === key)
       setRentalSortDir((direction) => (direction === "asc" ? "desc" : "asc"));
@@ -191,21 +194,28 @@ export function ParkingModule({
     </th>
   );
   const filteredLots = data.parkingLots.filter(
-    (lot) => hostelFilter === "all" || String(lot.hostelId) === hostelFilter,
+    (l) =>
+      (hostelFilter === "all" || String(l.hostelId) === hostelFilter) &&
+      (showDeletedLots ? Boolean(l.deletedAt) : !l.deletedAt),
   );
   const filteredRentals = data.parkingRentals
     .filter((r) => {
-      const lot = data.parkingLots.find((l) => l.id === r.parkingLotId);
+      const parkingLot = data.parkingLots.find((l) => l.id === r.parkingLotId);
       const hostelMatch =
-        hostelFilter === "all" || String(lot?.hostelId || "") === hostelFilter;
+        hostelFilter === "all" ||
+        String(parkingLot?.hostelId || "") === hostelFilter;
       const tabMatch =
-        rentalTab === "all"
-          ? true
-          : rentalTab === "outside"
-            ? r.tenantType === "outside"
-            : rentalTab === "active"
-              ? r.status === "active"
-              : r.status !== "active";
+        rentalTab === "deleted"
+          ? Boolean(r.deletedAt)
+          : r.deletedAt
+            ? false
+            : rentalTab === "all"
+              ? true
+              : rentalTab === "outside"
+                ? r.tenantType === "outside"
+                : rentalTab === "active"
+                  ? r.status === "active"
+                  : r.status !== "active";
       const search = rentalSearch.trim().toLowerCase();
       const text =
         `${r.tenantName} ${r.contactNumber} ${r.carPlateNumber} ${r.carModel} ${r.lotNumber} ${r.hostelName} ${r.unitNumber}`.toLowerCase();
@@ -238,17 +248,25 @@ export function ParkingModule({
         </div>
       </section>
       <section className="module-metrics">
-        <Stat value={data.parkingLots.length} label="Total lots" />
+        <Stat
+          value={data.parkingLots.filter((l) => !l.deletedAt).length}
+          label="Total lots"
+        />
         <Stat
           value={
-            data.parkingLots.filter((l) => l.status === "available").length
+            data.parkingLots.filter(
+              (l) => l.status === "available" && !l.deletedAt,
+            ).length
           }
           label="Available"
         />
         <Stat
           value={
             data.parkingRentals.filter(
-              (r) => r.status === "active" && r.tenantType === "in-house",
+              (r) =>
+                r.status === "active" &&
+                r.tenantType === "in-house" &&
+                !r.deletedAt,
             ).length
           }
           label="In-house"
@@ -256,7 +274,10 @@ export function ParkingModule({
         <Stat
           value={
             data.parkingRentals.filter(
-              (r) => r.status === "active" && r.tenantType === "outside",
+              (r) =>
+                r.status === "active" &&
+                r.tenantType === "outside" &&
+                !r.deletedAt,
             ).length
           }
           label="Outside tenants"
@@ -268,7 +289,7 @@ export function ParkingModule({
             className={rentalTab === "all" ? "active" : ""}
             onClick={() => setRentalTab("all")}
           >
-            All ({data.parkingRentals.length})
+            All ({data.parkingRentals.filter((r) => !r.deletedAt).length})
           </button>
           <button
             className={rentalTab === "active" ? "active" : ""}
@@ -287,6 +308,13 @@ export function ParkingModule({
             onClick={() => setRentalTab("outside")}
           >
             Outside tenants
+          </button>
+          <button
+            className={rentalTab === "deleted" ? "active" : ""}
+            onClick={() => setRentalTab("deleted")}
+          >
+            Deleted (
+            {data.parkingRentals.filter((r) => r.deletedAt).length})
           </button>
         </div>
         <div className="v2-toolbar">
@@ -377,7 +405,7 @@ export function ParkingModule({
                     )}
                   </td>
                   <td>
-                    <StatusPill status={r.status} />
+                    <StatusPill status={r.deletedAt ? "deleted" : r.status} />
                   </td>
                   <td>
                     <button
@@ -409,6 +437,15 @@ export function ParkingModule({
             <small>FULL LOT LIST</small>
             <h3>Lots by hostel and unit</h3>
           </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={showDeletedLots}
+              onChange={(event) => setShowDeletedLots(event.target.checked)}
+            />
+            Show deleted lots (
+            {data.parkingLots.filter((l) => l.deletedAt).length})
+          </label>
         </div>
         <div className="table-wrap">
           <table>
@@ -435,20 +472,28 @@ export function ParkingModule({
                     </small>
                   </td>
                   <td>
-                    <StatusPill status={l.status} />
+                    <StatusPill status={l.deletedAt ? "deleted" : l.status} />
                   </td>
                   <td>
-                    {l.status === "available" && (
+                    <div className="button-row">
                       <button
                         className="secondary compact"
-                        onClick={() => {
-                          setReservingLotId(l.id);
-                          setModal("rental");
-                        }}
+                        onClick={() => setLot(l)}
                       >
-                        Reserve / rent this lot
+                        History
                       </button>
-                    )}
+                      {!l.deletedAt && l.status === "available" && (
+                        <button
+                          className="secondary compact"
+                          onClick={() => {
+                            setReservingLotId(l.id);
+                            setModal("rental");
+                          }}
+                        >
+                          Reserve / rent this lot
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -480,6 +525,29 @@ export function ParkingModule({
               </div>
               <button onClick={() => setRental(null)}>×</button>
             </div>
+            {rental.deletedAt && (
+              <section className="drawer-section">
+                <div className="empty-copy">
+                  Deleted {dateLabel(rental.deletedAt)}
+                  {rental.deletedBy ? ` by ${rental.deletedBy}` : ""}. Restore
+                  it to edit or to free up the lot again.
+                </div>
+                <button
+                  className="primary compact"
+                  disabled={busy}
+                  onClick={async () => {
+                    const ok = await save(
+                      { action: "parking-rental-restore", rentalId: rental.id },
+                      "Parking rental restored",
+                    );
+                    if (ok) setRental(null);
+                  }}
+                >
+                  Restore rental
+                </button>
+              </section>
+            )}
+            {!rental.deletedAt && (
             <form
               className="drawer-section"
               onSubmit={async (e) => {
@@ -620,6 +688,29 @@ export function ParkingModule({
                 </label>
               </div>
             </form>
+            )}
+            {!rental.deletedAt && rental.status === "active" && (
+              <section className="drawer-section">
+                <div className="section-title">
+                  <div>
+                    <small>NEW TENANT</small>
+                    <h3>This lot changed hands</h3>
+                  </div>
+                </div>
+                <p className="field-note">
+                  Ends this rental today and starts a new one for the
+                  incoming tenant, so {rental.tenantName}&rsquo;s record
+                  stays on file instead of being overwritten.
+                </p>
+                <button
+                  className="secondary compact"
+                  onClick={() => setModal("replace")}
+                >
+                  Start new rental for this lot
+                </button>
+              </section>
+            )}
+            {!rental.deletedAt && (
             <section className="drawer-section">
               <div className="section-title">
                 <div>
@@ -630,7 +721,8 @@ export function ParkingModule({
               {confirmDelete ? (
                 <div className="button-row">
                   <span className="empty-copy">
-                    Delete permanently? An active rental frees its lot.
+                    Delete this rental? It can be restored later from the
+                    Deleted tab, and an active rental frees its lot.
                   </span>
                   <button
                     className="secondary compact"
@@ -667,6 +759,167 @@ export function ParkingModule({
                 </button>
               )}
             </section>
+            )}
+          </aside>
+        </div>
+      )}
+      {lot && (
+        <div
+          className="drawer-backdrop"
+          onMouseDown={(e) => e.target === e.currentTarget && setLot(null)}
+        >
+          <aside className="unit-drawer student-drawer">
+            <div className="drawer-head">
+              <div>
+                <small>PARKING LOT</small>
+                <h2>{lot.lotNumber}</h2>
+                <p>
+                  {lot.hostelName}
+                  {lot.unitCode ? ` / ${lot.unitCode}` : " · Common lot"}
+                </p>
+              </div>
+              <button onClick={() => setLot(null)}>×</button>
+            </div>
+            <section className="drawer-section">
+              <div className="section-title">
+                <div>
+                  <small>STATUS</small>
+                  <h3>Current state</h3>
+                </div>
+                <StatusPill status={lot.deletedAt ? "deleted" : lot.status} />
+              </div>
+              {lot.deletedAt && (
+                <p className="field-note">
+                  Deleted {dateLabel(lot.deletedAt)}
+                  {lot.deletedBy ? ` by ${lot.deletedBy}` : ""}.
+                </p>
+              )}
+            </section>
+            <section className="drawer-section">
+              <div className="section-title">
+                <div>
+                  <small>RENTAL HISTORY</small>
+                  <h3>Every tenant this lot has had</h3>
+                </div>
+              </div>
+              {(() => {
+                const history = data.parkingRentals
+                  .filter((r) => r.parkingLotId === lot.id)
+                  .sort((a, b) => Number(b.id) - Number(a.id));
+                if (!history.length)
+                  return (
+                    <p className="empty-copy">
+                      No rentals recorded for this lot yet.
+                    </p>
+                  );
+                return (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Tenant</th>
+                          <th>Car</th>
+                          <th>Period</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {history.map((r) => (
+                          <tr
+                            key={r.id}
+                            className="v2-row-clickable"
+                            onClick={() => {
+                              setLot(null);
+                              setRental(r);
+                              setConfirmDelete(false);
+                            }}
+                          >
+                            <td>
+                              <strong>{r.tenantName}</strong>
+                              <small>{titleCase(r.tenantType)}</small>
+                            </td>
+                            <td>
+                              {r.carPlateNumber || "-"}
+                              <small>{r.carModel || "Model not set"}</small>
+                            </td>
+                            <td>
+                              {dateLabel(r.startDate)} –{" "}
+                              {r.endDate ? dateLabel(r.endDate) : "now"}
+                            </td>
+                            <td>
+                              <StatusPill
+                                status={r.deletedAt ? "deleted" : r.status}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </section>
+            <section className="drawer-section">
+              <div className="section-title">
+                <div>
+                  <small>{lot.deletedAt ? "RESTORE" : "REMOVE"}</small>
+                  <h3>
+                    {lot.deletedAt ? "Restore this lot" : "Delete this lot"}
+                  </h3>
+                </div>
+              </div>
+              {lot.deletedAt ? (
+                <button
+                  className="primary compact"
+                  disabled={busy}
+                  onClick={async () => {
+                    const ok = await save(
+                      { action: "parking-lot-restore", lotId: lot.id },
+                      "Parking lot restored",
+                    );
+                    if (ok) setLot(null);
+                  }}
+                >
+                  Restore lot
+                </button>
+              ) : confirmDeleteLot ? (
+                <div className="button-row">
+                  <span className="empty-copy">
+                    Delete this lot? It can be restored later, and a lot
+                    with an active rental can&rsquo;t be deleted.
+                  </span>
+                  <button
+                    className="secondary compact"
+                    onClick={() => setConfirmDeleteLot(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="primary compact"
+                    disabled={busy}
+                    onClick={async () => {
+                      const ok = await save(
+                        { action: "parking-lot-delete", lotId: lot.id },
+                        "Parking lot deleted",
+                      );
+                      if (ok) {
+                        setLot(null);
+                        setConfirmDeleteLot(false);
+                      }
+                    }}
+                  >
+                    Confirm delete
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="secondary compact"
+                  onClick={() => setConfirmDeleteLot(true)}
+                >
+                  Delete lot
+                </button>
+              )}
+            </section>
           </aside>
         </div>
       )}
@@ -697,6 +950,27 @@ export function ParkingModule({
             busy={busy}
             lockedLotId={reservingLotId ?? undefined}
             onDone={() => setModal("")}
+          />
+        </Modal>
+      )}
+      {modal === "replace" && rental && (
+        <Modal
+          title="New tenant for this lot"
+          kicker={rental.lotNumber}
+          description={`Ends ${rental.tenantName}'s rental today and starts a new one — the old rental stays on file, it just moves to "Ended".`}
+          onClose={() => setModal("")}
+          wide
+        >
+          <ParkingRentalForm
+            data={data}
+            save={save}
+            busy={busy}
+            lockedLotId={rental.parkingLotId}
+            replacesRentalId={rental.id}
+            onDone={() => {
+              setModal("");
+              setRental(null);
+            }}
           />
         </Modal>
       )}

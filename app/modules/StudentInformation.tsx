@@ -5,10 +5,12 @@ import { useMemo, useState } from "react";
 import {
   COURSE_LEVELS,
   COURSE_LEVEL_LABELS,
+  AttachmentLink,
   CheckInModal,
   DateField,
   CourseSelect,
   DemographicFields,
+  Lightbox,
   Modal,
   SchoolSelect,
   SearchIcon,
@@ -27,9 +29,9 @@ import {
   roomOptionsFrom,
   titleCase,
   today,
+  useLightbox,
 } from "./shared";
 import type { Data, Row } from "./shared";
-import { BASE_PATH } from "../basePath";
 
 type DirectoryTab =
   | "all"
@@ -629,6 +631,7 @@ function StudentBilling({
   openInvoiceId: string | number | null;
   setOpenInvoiceId: (id: string | number | null) => void;
 }) {
+  const lightbox = useLightbox();
   const invoices = data.invoices.filter(
     (invoice) => String(invoice.studentId) === String(student.id),
   );
@@ -892,14 +895,13 @@ function StudentBilling({
                                 </small>
                               </span>
                               {slips.length ? (
-                                <a
+                                <AttachmentLink
+                                  attachment={slips[0]}
+                                  onOpen={lightbox.open}
                                   className="secondary compact"
-                                  href={`${BASE_PATH}/api/files?id=${slips[0].id}`}
-                                  target="_blank"
-                                  rel="noreferrer"
                                 >
                                   View slip
-                                </a>
+                                </AttachmentLink>
                               ) : (
                                 <span className="muted">No slip</span>
                               )}
@@ -1002,6 +1004,7 @@ function StudentBilling({
       <p className="field-note">
         Read-only. Recording and verifying payments happens in Finance.
       </p>
+      <Lightbox attachment={lightbox.attachment} onClose={lightbox.close} />
     </section>
   );
 }

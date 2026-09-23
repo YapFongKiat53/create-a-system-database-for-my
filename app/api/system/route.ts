@@ -921,6 +921,8 @@ async function loadScopedModules(
               lotNumber: parkingLots.lotNumber,
               status: parkingLots.status,
               notes: parkingLots.notes,
+              deletedAt: parkingLots.deletedAt,
+              deletedBy: parkingLots.deletedBy,
             })
             .from(parkingLots)
             .innerJoin(
@@ -951,6 +953,8 @@ async function loadScopedModules(
               paymentStatus: parkingRentals.paymentStatus,
               status: parkingRentals.status,
               notes: parkingRentals.notes,
+              deletedAt: parkingRentals.deletedAt,
+              deletedBy: parkingRentals.deletedBy,
               lotNumber: parkingLots.lotNumber,
               hostelName: hostelProperties.name,
             })
@@ -2578,6 +2582,8 @@ export async function GET(request: Request) {
           lotNumber: parkingLots.lotNumber,
           status: parkingLots.status,
           notes: parkingLots.notes,
+          deletedAt: parkingLots.deletedAt,
+          deletedBy: parkingLots.deletedBy,
         })
         .from(parkingLots)
         .innerJoin(
@@ -2608,6 +2614,8 @@ export async function GET(request: Request) {
           paymentStatus: parkingRentals.paymentStatus,
           status: parkingRentals.status,
           notes: parkingRentals.notes,
+          deletedAt: parkingRentals.deletedAt,
+          deletedBy: parkingRentals.deletedBy,
           lotNumber: parkingLots.lotNumber,
           hostelName: hostelProperties.name,
         })
@@ -6309,6 +6317,8 @@ export async function POST(request: Request) {
           .where(eq(parkingRentals.id, rentalId))
       )[0];
       if (!existing) throw new Error("Parking rental not found");
+      if (existing.deletedAt)
+        throw new Error("This rental was deleted — restore it first");
       const status = asText(body.status, existing.status || "active");
       await db
         .update(parkingRentals)
@@ -6336,6 +6346,103 @@ export async function POST(request: Request) {
           .update(parkingLots)
           .set({ status: status === "active" ? "rented" : "available" })
           .where(eq(parkingLots.id, existing.parkingLotId));
+    } else if (action === "parking-rental-replace") {
+      // A lot changing hands: instead of editing the current renter's row
+      // in place (which would overwrite their name, car plate and dates
+      // with the new tenant's, destroying any record of who was there
+      // before), this ends the current rental and inserts a fresh one —
+      // so the lot's rental history stays a real, append-only trail.
+      const previousRentalId = asNumber(body.previousRentalId);
+      if (!previousRentalId) throw new Error("The rental being replaced is required");
+      const previous = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(eq(parkingRentals.id, previousRentalId))
+      )[0];
+      if (!previous) throw new Error("Parking rental not found");
+      if (previous.deletedAt)
+        throw new Error("This rental was deleted — restore it first");
+      // Only the lot's current tenant can be "replaced" — ending an
+      // already-ended rental and inserting a new active one would leave
+      // the lot with two active rentals at once if the real current tenant
+      // is a different, still-active row.
+      if (previous.status !== "active")
+        throw new Error(
+          "This rental has already ended — open the lot's current active rental to replace its tenant",
+        );
+      const tenantType = asText(body.tenantType, "in-house");
+      let tenantName = asText(body.tenantName);
+      let contactNumber = asText(body.contactNumber);
+      let unitNumber = asText(body.unitNumber);
+      if (tenantType === "in-house" && body.studentId) {
+        const linked = (
+          await db
+            .select({
+              fullName: studentProfiles.fullName,
+              contactNumber: studentProfiles.contactNumber,
+              unitCode: hostelUnits.unitCode,
+            })
+            .from(studentProfiles)
+            .leftJoin(
+              accommodationAssignments,
+              and(
+                eq(accommodationAssignments.studentId, studentProfiles.id),
+                eq(accommodationAssignments.status, "active"),
+              ),
+            )
+            .leftJoin(
+              bedSpaces,
+              eq(accommodationAssignments.bedSpaceId, bedSpaces.id),
+            )
+            .leftJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
+            .leftJoin(hostelUnits, eq(hostelRooms.unitId, hostelUnits.id))
+            .where(eq(studentProfiles.id, asNumber(body.studentId)))
+        )[0];
+        if (linked) {
+          tenantName = linked.fullName;
+          contactNumber = linked.contactNumber;
+          unitNumber = linked.unitCode || "";
+        }
+      }
+      if (!tenantName || !body.startDate)
+        throw new Error("Tenant name and start date are required");
+      const today = nowIso().slice(0, 10);
+      await db
+        .update(parkingRentals)
+        .set({
+          status: "ended",
+          endDate: previous.endDate || today,
+        })
+        .where(eq(parkingRentals.id, previousRentalId));
+      await db.insert(parkingRentals).values({
+        parkingLotId: previous.parkingLotId,
+        studentId: asNullableNumber(body.studentId),
+        tenantType,
+        tenantName,
+        contactNumber,
+        unitNumber,
+        carPlateNumber: asText(body.carPlateNumber),
+        carModel: asText(body.carModel),
+        monthlyRental: parseMoney(body.monthlyRental, "Parking monthly rent"),
+        depositAmount: parseMoney(body.depositAmount, "Parking deposit"),
+        startDate: asText(body.startDate),
+        endDate: asNullableText(body.endDate),
+        paidUntil: asNullableText(body.paidUntil),
+        billingFrequency: asText(body.billingFrequency, "monthly"),
+        packageMonths: Math.max(1, asNumber(body.packageMonths, 1)),
+        nextDueDate: asNullableText(body.nextDueDate),
+        paymentStatus:
+          tenantType === "in-house"
+            ? "included-in-student-bill"
+            : asText(body.paymentStatus, "due"),
+        status: "active",
+        notes: asText(body.notes),
+      });
+      await db
+        .update(parkingLots)
+        .set({ status: "rented" })
+        .where(eq(parkingLots.id, previous.parkingLotId));
     } else if (action === "parking-rental-delete") {
       const rentalId = asNumber(body.rentalId);
       if (!rentalId) throw new Error("Rental is required");
@@ -6345,12 +6452,53 @@ export async function POST(request: Request) {
           .from(parkingRentals)
           .where(eq(parkingRentals.id, rentalId))
       )[0];
-      await db.delete(parkingRentals).where(eq(parkingRentals.id, rentalId));
-      if (rental?.parkingLotId && rental.status === "active")
+      if (!rental) throw new Error("Parking rental not found");
+      await db
+        .update(parkingRentals)
+        .set({ deletedAt: nowIso(), deletedBy: currentUser.displayName })
+        .where(eq(parkingRentals.id, rentalId));
+      if (rental.parkingLotId && rental.status === "active")
         await db
           .update(parkingLots)
           .set({ status: "available" })
           .where(eq(parkingLots.id, rental.parkingLotId));
+    } else if (action === "parking-rental-restore") {
+      const rentalId = asNumber(body.rentalId);
+      if (!rentalId) throw new Error("Rental is required");
+      await db
+        .update(parkingRentals)
+        .set({ deletedAt: null, deletedBy: "" })
+        .where(eq(parkingRentals.id, rentalId));
+    } else if (action === "parking-lot-delete") {
+      const lotId = asNumber(body.lotId);
+      if (!lotId) throw new Error("Parking lot is required");
+      const activeRental = (
+        await db
+          .select()
+          .from(parkingRentals)
+          .where(
+            and(
+              eq(parkingRentals.parkingLotId, lotId),
+              eq(parkingRentals.status, "active"),
+              isNull(parkingRentals.deletedAt),
+            ),
+          )
+      )[0];
+      if (activeRental)
+        throw new Error(
+          "This lot still has an active rental — end or delete the rental first",
+        );
+      await db
+        .update(parkingLots)
+        .set({ deletedAt: nowIso(), deletedBy: currentUser.displayName })
+        .where(eq(parkingLots.id, lotId));
+    } else if (action === "parking-lot-restore") {
+      const lotId = asNumber(body.lotId);
+      if (!lotId) throw new Error("Parking lot is required");
+      await db
+        .update(parkingLots)
+        .set({ deletedAt: null, deletedBy: "" })
+        .where(eq(parkingLots.id, lotId));
     } else if (action === "turnover-schedule") {
       // For rooms that were already empty before turnover tickets existed —
       // nothing was raised for them, so maintenance needs a way to put the

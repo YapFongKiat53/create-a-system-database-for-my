@@ -4,7 +4,7 @@ import { useSystem } from "../../SystemContext";
 import { UnitsModule } from "../../modules/UnitInformation";
 
 export default function UnitsPage() {
-  const { data, save, busy } = useSystem();
+  const { data, save, busy, load } = useSystem();
   if (!data) return null;
-  return <UnitsModule data={data} save={save} busy={busy} />;
+  return <UnitsModule data={data} save={save} busy={busy} load={load} />;
 }

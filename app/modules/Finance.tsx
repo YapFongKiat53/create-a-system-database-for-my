@@ -4,9 +4,11 @@
 import { useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  AttachmentLink,
   DateField,
   Empty,
   FileField,
+  Lightbox,
   Modal,
   MonthField,
   SearchIcon,
@@ -20,6 +22,7 @@ import {
   renameAttachment,
   titleCase,
   uploadAttachment,
+  useLightbox,
 } from "./shared";
 import type { Data, Row } from "./shared";
 import { BASE_PATH } from "../basePath";
@@ -170,6 +173,7 @@ export function FinanceModule({
   suspicious: string;
 }) {
   const [modal, setModal] = useState("");
+  const lightbox = useLightbox();
   const latest = data.billingCycles[0];
   const latestCycleInvoiceCount = latest
     ? data.invoices.filter((invoice: Row) => invoice.cycleId === latest.id)
@@ -1188,15 +1192,39 @@ export function FinanceModule({
                           }}
                         >
                           {slips.map((attachment) => (
-                            <a
+                            <div
                               key={attachment.id}
-                              className="secondary compact"
-                              href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                              target="_blank"
-                              rel="noreferrer"
+                              style={{ display: "flex", alignItems: "center", gap: "4px" }}
                             >
-                              View slip
-                            </a>
+                              <AttachmentLink
+                                attachment={attachment}
+                                onOpen={lightbox.open}
+                                className="secondary compact"
+                              >
+                                View slip
+                              </AttachmentLink>
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                style={{ color: "#b91c1c" }}
+                                disabled={busy}
+                                onClick={async () => {
+                                  if (
+                                    !window.confirm(
+                                      "Delete this payment slip? This cannot be undone.",
+                                    )
+                                  )
+                                    return;
+                                  await fetch(
+                                    `${BASE_PATH}/api/files?id=${attachment.id}`,
+                                    { method: "DELETE" },
+                                  );
+                                  await load(["attachments"]);
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           ))}
                         </div>
                       ) : (
@@ -1335,15 +1363,39 @@ export function FinanceModule({
                     <h4 className="deposit-section-label">Payment slips</h4>
                     <div className="button-row">
                       {slips.map((attachment) => (
-                        <a
+                        <span
                           key={attachment.id}
-                          className="secondary compact"
-                          href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                          target="_blank"
-                          rel="noreferrer"
+                          style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                         >
-                          View slip
-                        </a>
+                          <AttachmentLink
+                            attachment={attachment}
+                            onOpen={lightbox.open}
+                            className="secondary compact"
+                          >
+                            View slip
+                          </AttachmentLink>
+                          <button
+                            type="button"
+                            className="secondary compact"
+                            style={{ color: "#b91c1c" }}
+                            disabled={busy}
+                            onClick={async () => {
+                              if (
+                                !window.confirm(
+                                  "Delete this payment slip? This cannot be undone.",
+                                )
+                              )
+                                return;
+                              await fetch(
+                                `${BASE_PATH}/api/files?id=${attachment.id}`,
+                                { method: "DELETE" },
+                              );
+                              await load(["attachments"]);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </span>
                       ))}
                     </div>
                   </>
@@ -2773,13 +2825,12 @@ export function FinanceModule({
                                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
                                   <path d="M14 2v6h6" />
                                 </svg>
-                                <a
-                                  href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <AttachmentLink
+                                  attachment={attachment}
+                                  onOpen={lightbox.open}
                                 >
                                   {attachment.fileName || "View payment slip"}
-                                </a>
+                                </AttachmentLink>
                                 <button
                                   type="button"
                                   className="secondary compact"
@@ -2799,6 +2850,27 @@ export function FinanceModule({
                                   }}
                                 >
                                   Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  style={{ color: "#b91c1c" }}
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    if (
+                                      !window.confirm(
+                                        "Delete this payment slip? This cannot be undone.",
+                                      )
+                                    )
+                                      return;
+                                    await fetch(
+                                      `${BASE_PATH}/api/files?id=${attachment.id}`,
+                                      { method: "DELETE" },
+                                    );
+                                    await load(["attachments"]);
+                                  }}
+                                >
+                                  Delete
                                 </button>
                               </div>
                             ))}
@@ -3097,6 +3169,7 @@ export function FinanceModule({
             </Modal>
           );
         })()}
+      <Lightbox attachment={lightbox.attachment} onClose={lightbox.close} />
     </div>
   );
 }

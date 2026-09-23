@@ -183,6 +183,13 @@
       "when": 1789952409008,
       "tag": "0025_short_angel",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789977016787,
+      "tag": "0026_neat_rattler",
+      "breakpoints": true
     }
   ]
 }

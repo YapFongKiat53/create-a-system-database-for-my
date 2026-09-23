@@ -4,12 +4,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ATTACHMENT_ACCEPT,
+  AttachmentLink,
   CheckInModal,
   CourseSelect,
   DateField,
   DEPOSIT_MONTHS,
   Empty,
   FileField,
+  Lightbox,
   MALAYSIAN_STATES,
   RESERVATION_BREAKDOWN_CHARGE_TYPES,
   Modal,
@@ -38,6 +40,7 @@ import {
   titleCase,
   today,
   uploadAttachment,
+  useLightbox,
 } from "./shared";
 import type { Data, HostelTab, Row } from "./shared";
 import { BASE_PATH } from "../basePath";
@@ -3510,6 +3513,7 @@ function ReservationManageDetails({
   onEditReservation: () => void;
   onDone: () => void;
 }) {
+  const lightbox = useLightbox();
   const isConverted = r.status === "converted";
   const isCancelled = r.status === "cancelled";
   const totalPayable = Number(r.totalPayable || 0);
@@ -3705,14 +3709,13 @@ function ReservationManageDetails({
                     )
                     .map((attachment: Row) => (
                       <span key={attachment.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <a
-                          href={`${BASE_PATH}/api/files?id=${attachment.id}`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <AttachmentLink
+                          attachment={attachment}
+                          onOpen={lightbox.open}
                           style={{ fontSize: '12px', color: '#008861', fontWeight: 600, whiteSpace: 'nowrap' }}
                         >
                           {attachment.fileName || "View payment slip"}
-                        </a>
+                        </AttachmentLink>
                         <button
                           type="button"
                           className="reservation-btn reservation-btn-secondary"
@@ -3730,6 +3733,27 @@ function ReservationManageDetails({
                           }}
                         >
                           Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="reservation-btn reservation-btn-secondary"
+                          style={{ padding: '1px 6px', fontSize: '11px', minHeight: 'unset', borderRadius: '4px', color: '#b91c1c' }}
+                          disabled={busy}
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                "Delete this payment slip? This cannot be undone.",
+                              )
+                            )
+                              return;
+                            await fetch(
+                              `${BASE_PATH}/api/files?id=${attachment.id}`,
+                              { method: "DELETE" },
+                            );
+                            await load();
+                          }}
+                        >
+                          Delete
                         </button>
                       </span>
                     ))}
@@ -4040,6 +4064,7 @@ function ReservationManageDetails({
           </button>
         </div>
       </div>
+      <Lightbox attachment={lightbox.attachment} onClose={lightbox.close} />
     </div>
   );
 }

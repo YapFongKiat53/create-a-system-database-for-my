@@ -436,6 +436,8 @@ export const parkingLots = pgTable(
     lotNumber: text("lot_number").notNull(),
     status: text("status").notNull().default("available"),
     notes: text("notes").notNull().default(""),
+    deletedAt: text("deleted_at"),
+    deletedBy: text("deleted_by").notNull().default(""),
   },
   (table) => [
     uniqueIndex("parking_lot_unique").on(table.hostelId, table.lotNumber),
@@ -467,6 +469,8 @@ export const parkingRentals = pgTable("parking_rentals", {
   paymentStatus: text("payment_status").notNull().default("not-due"),
   status: text("status").notNull().default("active"),
   notes: text("notes").notNull().default(""),
+  deletedAt: text("deleted_at"),
+  deletedBy: text("deleted_by").notNull().default(""),
 });
 
 export const schools = pgTable("schools", {
