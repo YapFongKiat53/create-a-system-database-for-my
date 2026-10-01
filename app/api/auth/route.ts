@@ -3,13 +3,15 @@ import { getDb } from "../../../db";
 import {
   SESSION_COOKIE,
   createSession,
+  consumePasswordSetupToken,
   destroySession,
   getSessionUser,
+  hashPassword,
   readSessionCookie,
   sessionCookieHeader,
   verifyPassword,
 } from "../../../db/auth";
-import { appRoles, appUsers } from "../../../db/schema";
+import { appRoles, appUsers, userSessions } from "../../../db/schema";
 import { BASE_PATH } from "../../basePath";
 
 /** Where a role lands after signing in. */
@@ -98,6 +100,54 @@ async function handleAuth(request: Request) {
         "set-cookie": `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
       },
     });
+  }
+
+  // Unauthenticated by design: the emailed one-time token is the credential.
+  if (action === "set-password-with-token") {
+    const token = String(body.token || "");
+    const password = String(body.password || "");
+    // Length is checked before the token is consumed so a too-short password
+    // doesn't burn the link.
+    if (password.length < 8)
+      return Response.json(
+        { error: "Password must be at least 8 characters" },
+        { status: 400 },
+      );
+    const userId = await consumePasswordSetupToken(token);
+    if (!userId)
+      return Response.json(
+        { error: "This link is invalid or has expired" },
+        { status: 400 },
+      );
+    await getDb()
+      .update(appUsers)
+      .set({ passwordHash: await hashPassword(password) })
+      .where(eq(appUsers.id, userId));
+    const row = (
+      await getDb()
+        .select({ roleKey: appRoles.roleKey })
+        .from(appUsers)
+        .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+        .where(eq(appUsers.id, userId))
+    )[0];
+    // Same as the staff "Set password" action: older sessions signed in with
+    // the previous credentials shouldn't survive a password change.
+    await getDb().delete(userSessions).where(eq(userSessions.userId, userId));
+    const { token: sessionToken } = await createSession(userId);
+    await getDb()
+      .update(appUsers)
+      .set({ lastLoginAt: new Date().toISOString() })
+      .where(eq(appUsers.id, userId));
+    return new Response(
+      JSON.stringify({ ok: true, landing: landingFor(row.roleKey) }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "set-cookie": sessionCookieHeader(sessionToken, request),
+        },
+      },
+    );
   }
 
   if (action !== "login")

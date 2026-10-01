@@ -38,6 +38,8 @@ session, a static chunk served 200 at 28 KB.
 - Have the three secrets to hand: `DATABASE_URL`, `SUPABASE_URL`,
   `SUPABASE_SERVICE_ROLE_KEY`. They are in your local `.env.local` /
   `.dev.vars`, both of which are correctly git-ignored and must stay that way.
+  You will also need your deployed URL and a Resend API key / sender address
+  (`APP_URL`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`) for resident setup emails.
 
 ---
 
@@ -55,7 +57,7 @@ session, a static chunk served 200 at 28 KB.
 **2. Render → New → Blueprint**, pick the repo. Render reads `render.yaml`
 and proposes one web service named `hostel-operations`.
 
-**3. It will prompt for three values** (they are marked `sync: false`, which
+**3. It will prompt for six values** (they are marked `sync: false`, which
 means "ask, never store in the repo"):
 
 | Variable | Where it comes from |
@@ -63,6 +65,13 @@ means "ask, never store in the repo"):
 | `DATABASE_URL` | Supabase → Project Settings → Database → **Connection pooling** string, not the direct one. It must be the Supavisor pooler; the app sets `prepare: false` specifically for it |
 | `SUPABASE_URL` | Supabase → Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | Same page. This is a **service-role** key — full read/write, no row-level security. It belongs only in the server environment |
+| `APP_URL` | The public origin of the deployed app, e.g. `https://hostel-operations.onrender.com` (no trailing slash). Used to build the link in the resident password-setup email |
+| `RESEND_API_KEY` | Resend dashboard → API Keys. Used to send the resident password-setup email. Server environment only |
+| `RESEND_FROM_EMAIL` | The verified sender address in Resend, e.g. `Hostel <noreply@yourdomain.com>` |
+
+If `RESEND_API_KEY` or `RESEND_FROM_EMAIL` is missing the app still runs:
+creating a resident login succeeds but reports that the setup email failed,
+and "Resend setup email" returns an "Email is not configured" error.
 
 **4. Apply.** First build takes a few minutes (`npm ci` plus `next build`).
 

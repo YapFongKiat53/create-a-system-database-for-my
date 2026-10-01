@@ -27,6 +27,14 @@ export function DashboardModule({
   data: Data;
   onOpenModule: (view: string) => void;
 }) {
+  // The server empties invoice data for roles without finance access, so an
+  // Outstanding figure for them would read as "everything is paid".
+  const canViewFinance = Boolean(
+    data.currentUser?.permissions?.some(
+      (permission: Row) =>
+        permission.moduleKey === "finance" && permission.canView,
+    ),
+  );
   const stats = useMemo(() => {
     const beds = data.bedSpaces.length;
     const occupied = data.bedSpaces.filter(
@@ -99,7 +107,9 @@ export function DashboardModule({
 
   const notices = useMemo(
     () =>
-      [...data.announcements].sort((left, right) => {
+      data.announcements
+        .filter((row) => row.status === "published")
+        .sort((left, right) => {
         if (Boolean(right.pinned) !== Boolean(left.pinned))
           return right.pinned ? 1 : -1;
         return String(right.publishAt || right.createdAt || "").localeCompare(
@@ -210,6 +220,7 @@ export function DashboardModule({
           <strong>{stats.awaitingCheckIn}</strong>
           <span>Paid, room held, not arrived</span>
         </article>
+        {canViewFinance && (
         <article className="dash-stat">
           <div className="dash-stat-head">
             <small>OUTSTANDING</small>
@@ -225,6 +236,7 @@ export function DashboardModule({
             unpaid bills
           </span>
         </article>
+        )}
       </section>
 
       <section className="dash-row-a">
@@ -372,6 +384,7 @@ export function DashboardModule({
           </div>
         </article>
 
+        {canViewFinance && (
         <article className="dash-card">
           <div className="dash-card-head">
             <h3>Outstanding by hostel</h3>
@@ -395,6 +408,7 @@ export function DashboardModule({
             )}
           </div>
         </article>
+        )}
 
         <article className="dash-card">
           <div className="dash-card-head">

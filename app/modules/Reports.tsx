@@ -30,6 +30,14 @@ export function ReportsModule({
     (sum, t) => sum + Number(t.actualCost || 0),
     0,
   );
+  // Invoice data is emptied server-side for roles without finance access, so
+  // the outstanding report would otherwise read as "nothing owed".
+  const canViewFinance = Boolean(
+    data.currentUser?.permissions?.some(
+      (permission: Row) =>
+        permission.moduleKey === "finance" && permission.canView,
+    ),
+  );
   const outstanding = data.invoices.reduce(
     (sum, i) => sum + Number(i.totalAmount) - Number(i.amountPaid),
     0,
@@ -81,8 +89,10 @@ export function ReportsModule({
     {
       key: "outstanding",
       name: "Outstanding payment",
-      value: money(outstanding, true),
-      note: `Across ${data.invoices.filter((i) => i.status !== "paid").length} unpaid / partial bills`,
+      value: canViewFinance ? money(outstanding, true) : "No access",
+      note: canViewFinance
+        ? `Across ${data.invoices.filter((i) => i.status !== "paid").length} unpaid / partial bills`
+        : "Needs billing access",
     },
     {
       key: "costing",
@@ -138,7 +148,9 @@ export function ReportsModule({
     if (index === 4) return data.parkingRentals;
     if (index === 5) return data.students;
     if (index === 6)
-      return data.invoices
+      return !canViewFinance
+        ? []
+        : data.invoices
         .filter((invoice) => invoice.status !== "paid")
         .map((invoice) => ({
           ...invoice,

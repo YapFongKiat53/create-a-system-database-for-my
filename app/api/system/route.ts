@@ -25,17 +25,23 @@ import {
   SuspiciousAmountError,
 } from "./money";
 import {
+  createPasswordSetupToken,
   getSessionUser,
   hashPassword,
   permissionsForRole,
+  revokePasswordSetupTokens,
 } from "../../../db/auth";
+import { BASE_PATH } from "../../basePath";
+import { sendEmail } from "../email";
 import {
   checkExpiringLeases,
   getNotificationSummary,
+  listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   notifyRole,
   notifyRoleWithApproval,
+  notifyStudent,
   notifyUser,
 } from "./notifications";
 import {
@@ -64,6 +70,7 @@ import {
   races,
   religions,
   reservationCharges,
+  reservationGroupTenants,
   reservationPayments,
   reservations,
   schools,
@@ -205,6 +212,23 @@ function asText(value: unknown, fallback = "") {
     ? fallback
     : String(value).trim();
 }
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+function appBaseUrl() {
+  const base = asText(process.env.APP_URL).replace(/\/+$/, "");
+  // A relative link is useless inside an email, so fail before a token is issued.
+  if (!base) throw new Error("APP_URL is not configured");
+  return base;
+}
+function passwordSetupUrl(base: string, token: string) {
+  return `${base}${BASE_PATH}/set-password?token=${encodeURIComponent(token)}`;
+}
 function asNullableText(value: unknown) {
   const result = asText(value);
   return result || null;
@@ -241,6 +265,78 @@ function todayInKL() {
     day: "2-digit",
     timeZone: "Asia/Kuala_Lumpur",
   }).format(new Date());
+}
+
+/**
+ * Whether one of a tenant's own units is in an announcement's block. The staff
+ * picker offers block names ("D1", "NB", "Atria") that are unit-code prefixes
+ * for some hostels ("D1-0614", "NB-12-03") but not others (Atria units are
+ * plain "1201"). So: match the prefix case-insensitively, and a unit with no
+ * dash in its code has no block to compare, so a block notice for its hostel
+ * reaches it rather than silently reaching nobody.
+ */
+function unitInBlock(unitCode: unknown, blockCode: string) {
+  const code = String(unitCode || "").toUpperCase();
+  const block = blockCode.trim().toUpperCase();
+  if (!block) return false;
+  if (!code.includes("-")) return true;
+  return code === block || code.startsWith(`${block}-`);
+}
+
+/**
+ * Whether a tenant may see an announcement: it must be published, already
+ * live (publishAt not in the future), not expired, and actually addressed to
+ * them — audience "all" always, "hostel" by hostelId, "block" by hostelId +
+ * block of one of their own units, "unit" by one of their own unit ids.
+ * Dates are compared at day granularity against today's date in KL, the same
+ * convention todayInKL() serves everywhere else in this file.
+ */
+function tenantCanSeeAnnouncement(
+  announcement: {
+    audienceType: string;
+    hostelId: number | null;
+    blockCode: string;
+    unitId: number | null;
+    status: string;
+    publishAt: string;
+    expiresAt: string | null;
+  },
+  today: string,
+  own: {
+    hostelIds: Set<number>;
+    unitIds: Set<number>;
+    units: { hostelId: number | null; unitCode: string }[];
+  },
+) {
+  if (announcement.status !== "published") return false;
+  if (String(announcement.publishAt || "").slice(0, 10) > today) return false;
+  if (
+    announcement.expiresAt &&
+    String(announcement.expiresAt).slice(0, 10) < today
+  )
+    return false;
+  switch (announcement.audienceType) {
+    case "all":
+      return true;
+    case "hostel":
+      return (
+        announcement.hostelId != null &&
+        own.hostelIds.has(announcement.hostelId)
+      );
+    case "block":
+      return (
+        announcement.hostelId != null &&
+        own.units.some(
+          (unit) =>
+            unit.hostelId === announcement.hostelId &&
+            unitInBlock(unit.unitCode, announcement.blockCode),
+        )
+      );
+    case "unit":
+      return announcement.unitId != null && own.unitIds.has(announcement.unitId);
+    default:
+      return false;
+  }
 }
 
 // seedAdministration/seedInventory/seedKnownRoomFeatures/seedStudentAssignments
@@ -323,6 +419,13 @@ function selectRawBeds(db: ReturnType<typeof getDb>) {
       assignmentCheckInDate: accommodationAssignments.checkInDate,
       agreementEndDate: accommodationAssignments.agreementEndDate,
       assignmentRental: accommodationAssignments.monthlyRental,
+      // "active" is a real tenant; "pending-occupant" is a whole-unit
+      // booking's bed with nobody named yet — the client tells the two
+      // apart by this field (an active tenant's occupant* fields below are
+      // populated via studentId, a pending-occupant's are all null since
+      // studentId itself is null).
+      assignmentStatus: accommodationAssignments.status,
+      sourceReservationId: accommodationAssignments.sourceReservationId,
     })
     .from(bedSpaces)
     .innerJoin(hostelRooms, eq(bedSpaces.roomId, hostelRooms.id))
@@ -335,7 +438,10 @@ function selectRawBeds(db: ReturnType<typeof getDb>) {
       accommodationAssignments,
       and(
         eq(accommodationAssignments.bedSpaceId, bedSpaces.id),
-        eq(accommodationAssignments.status, "active"),
+        inArray(accommodationAssignments.status, [
+          "active",
+          "pending-occupant",
+        ]),
       ),
     )
     .leftJoin(
@@ -821,6 +927,8 @@ const SCOPED_MODULE_KEYS = [
   // The bell's 60s poll — just the current user's own unread count and
   // recent list, never the full ~30-query load.
   "notifications",
+  // The Notifications page's longer history of the current user's own rows.
+  "notifications-all",
 ] as const;
 type ScopedModuleKey = (typeof SCOPED_MODULE_KEYS)[number];
 
@@ -903,6 +1011,18 @@ async function loadScopedModules(
     tasks.push(
       (async () => {
         result.notifications = await getNotificationSummary(db, currentUserId);
+      })(),
+    );
+  }
+
+  if (scopes.has("notifications-all")) {
+    tasks.push(
+      (async () => {
+        result.notificationHistory = await listNotifications(
+          db,
+          currentUserId,
+          200,
+        );
       })(),
     );
   }
@@ -1210,8 +1330,41 @@ async function loadScopedModules(
   return result;
 }
 
+// The only /api/system actions the student (tenant) portal calls:
+// StudentMaintenance (ticket-create, ticket-message), StudentBilling
+// (billing-payment) and student/layout (notification-mark-read /
+// notification-mark-all-read).
+const TENANT_ALLOWED_ACTIONS = new Set([
+  "ticket-create",
+  "ticket-message",
+  "billing-payment",
+  "notification-mark-read",
+  "notification-mark-all-read",
+]);
+
+// A bed qualifies for a whole-unit booking targeting `moveInDate` if it's
+// vacant, or its current tenancy is contractually due to end on or before
+// that date (whether the tenant has actually checked out is a separate,
+// non-blocking concern the caller surfaces as a warning, not a rejection).
+function bedQualifiesForWholeUnit(
+  bed: { status: string; agreementEndDate: string | null },
+  moveInDate: string,
+) {
+  return (
+    bed.status === "vacant" ||
+    (bed.status === "occupied" &&
+      Boolean(bed.agreementEndDate) &&
+      bed.agreementEndDate! <= moveInDate)
+  );
+}
+
 function moduleForAction(action: string) {
   if (action === "reservation-finance-review") return "finance";
+  // Reservation payment corrections are made from the sales screens.
+  if (/^payment-(update|delete)$/.test(action)) return "hostels-sales";
+  // The property form lives on the Rooms & reservations page, whose own nav
+  // permission is "hostels".
+  if (/^hostel-(create|update)$/.test(action)) return "hostels";
   if (
     /^(reservation|bulk-room-price|promotion-end|system-setting-update)/.test(
       action,
@@ -1221,21 +1374,119 @@ function moduleForAction(action: string) {
   if (/^bed-/.test(action)) return "units-general";
   if (/^(unit-|access-card|room-|service-)/.test(action))
     return action === "unit-owner" ? "units-owner" : "units-general";
-  // Check-in changes a tenancy's state and its room's status, so it is
-  // gated like the other tenant actions. The remaining assignment-* actions
-  // are follow-up flags raised from the sales screens and stay ungated.
+  // Check-in and clearing a return date both change a tenancy, so they are
+  // gated like the other tenant actions.
   if (
-    /^(student-|school-|course-|race-|religion-|assignment-check-in)/.test(
+    /^(student-|school-|course-|race-|religion-|assignment-(check-in|clear-return-date)|whole-unit-claim)/.test(
       action,
     )
   )
     return "students";
   if (/^parking-/.test(action)) return "parking";
-  if (/^(ticket-|meter-|general-cost)/.test(action)) return "maintenance";
+  if (/^(ticket-|meter-|general-cost|turnover-)/.test(action))
+    return "maintenance";
   if (/^billing-/.test(action)) return "finance";
   if (/^announcement/.test(action)) return "announcements";
   if (/^(user-|role-|reminder-)/.test(action)) return "users";
   return "";
+}
+
+// GET hands every non-tenant the same payload, so the nav-level permission
+// alone never kept anything private: a technician could read every invoice,
+// owner bank detail and role matrix by calling the endpoint directly. This
+// empties the three sensitive groups for roles without the matching canView.
+// Tenants have their own row-level filtering and never pass through here.
+function redactReadPayload<T extends Record<string, unknown>>(
+  payload: T,
+  currentUser: { permissions: { moduleKey: string; canView: boolean }[] },
+): T {
+  const canView = (moduleKey: string) =>
+    currentUser.permissions.some(
+      (row) => row.moduleKey === moduleKey && row.canView,
+    );
+  const out: Record<string, unknown> = { ...payload };
+  // Personal details are blanked field by field rather than dropping the
+  // rows, because other screens (ticket lists, dashboards) still need the
+  // name, room and status of the same people.
+  const blank = (rows: unknown, fields: readonly string[]) =>
+    Array.isArray(rows)
+      ? rows.map((row: Record<string, unknown>) => {
+          const copy = { ...row };
+          for (const field of fields)
+            if (field in copy) copy[field] = field === "dateOfBirth" ? null : "";
+          return copy;
+        })
+      : rows;
+  const PERSON_PII = [
+    "identityNo",
+    "contactNumber",
+    "email",
+    "dateOfBirth",
+    "nationality",
+    "nationalityOther",
+    "hometown",
+    "race",
+    "raceOther",
+    "religion",
+    "religionOther",
+  ] as const;
+  // Tenant details are only read by the Tenants screen.
+  if (!canView("students")) {
+    for (const key of ["students", "roommates", "pastTenancies"])
+      if (key in out) out[key] = blank(out[key], PERSON_PII);
+  }
+  // Booking details (applicant IC, phone, email) are only read by the sales
+  // booking form.
+  if (!canView("hostels-sales") && "reservations" in out)
+    out.reservations = blank(out.reservations, [...PERSON_PII, "companyEmail"]);
+  if (!canView("students") && !canView("hostels-occupancy") && "bedSpaces" in out)
+    out.bedSpaces = blank(out.bedSpaces, [
+      "occupantNationality",
+      "occupantHometown",
+      "occupantRace",
+    ]);
+  if (!canView("parking") && !canView("students") && "parkingRentals" in out)
+    out.parkingRentals = blank(out.parkingRentals, [
+      "contactNumber",
+      "carPlateNumber",
+    ]);
+  if (!canView("units-general") && !canView("reports") && "services" in out)
+    out.services = blank(out.services, ["accountHolderName", "accountReference"]);
+  if (!canView("units-owner") && "owners" in out) out.owners = [];
+  if (!canView("finance")) {
+    for (const key of [
+      "invoices",
+      "billingCycles",
+      "billingAdjustments",
+      "depositAdjustments",
+    ])
+      if (key in out) out[key] = [];
+  }
+  if (!canView("users")) {
+    if ("rolePermissions" in out) out.rolePermissions = [];
+    if ("reminderTemplates" in out) out.reminderTemplates = [];
+    if (Array.isArray(out.users)) {
+      // The Tenants screen shows a tenant's own login (email, last login), so
+      // those rows stay for anyone who can see tenants. Staff accounts shrink
+      // to what the assignee dropdowns need: no email, no login history.
+      const seeTenants = canView("students");
+      out.users = (out.users as Record<string, unknown>[])
+        .filter((user) => user.roleKey !== "tenant" || seeTenants)
+        .map((user) =>
+          user.roleKey === "tenant"
+            ? user
+            : {
+                id: user.id,
+                displayName: user.displayName,
+                roleId: user.roleId,
+                roleKey: user.roleKey,
+                roleName: user.roleName,
+                status: user.status,
+              },
+        );
+    }
+  }
+  return out as T;
 }
 
 const permissionModules = [
@@ -1533,69 +1784,26 @@ async function resolveCurrentUser(
   request: Request,
   db: ReturnType<typeof getDb>,
 ) {
-  // A signed-in session always wins over the platform SSO headers.
+  // This used to also trust an `oai-authenticated-user-email` header as a
+  // fallback when there was no session cookie — inherited from the
+  // original vinext/OpenAI-Apps starter template, meant for a deployment
+  // sitting behind an OpenAI workspace proxy that sets and verifies that
+  // header itself. This app deploys directly on Render/cPanel with no such
+  // proxy in front of it (see docs/deploy-render.md), so nothing strips or
+  // verifies the header before it reaches this handler — any caller could
+  // set it themselves and be signed in as any real user (including
+  // auto-provisioning a brand-new account) with no password at all. Removed
+  // entirely; a session cookie is the only way to authenticate now. If this
+  // app is ever actually deployed behind a proxy that owns and verifies
+  // this header, that trust boundary needs to be re-established deliberately
+  // (e.g. verifying the proxy's own signature/shared secret), not silently
+  // restored.
   const sessionUser = await getSessionUser(request, db);
-  if (sessionUser)
-    return {
-      ...sessionUser,
-      permissions: await permissionsForRole(sessionUser.roleId, db),
-    };
-  const headerEmail = request.headers.get("oai-authenticated-user-email");
-  if (!headerEmail) return null;
-  const email = asText(headerEmail).toLowerCase();
-  const encodedName = request.headers.get("oai-authenticated-user-full-name");
-  let displayName =
-    email === "local-admin@hostelpro.internal" ? "Irena" : email;
-  if (encodedName)
-    try {
-      displayName = decodeURIComponent(encodedName);
-    } catch {
-      /* fall back to email */
-    }
-  let user = (
-    await db
-      .select({
-        id: appUsers.id,
-        email: appUsers.email,
-        displayName: appUsers.displayName,
-        status: appUsers.status,
-        studentId: appUsers.studentId,
-        roleId: appRoles.id,
-        roleKey: appRoles.roleKey,
-        roleName: appRoles.name,
-      })
-      .from(appUsers)
-      .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
-      .where(eq(appUsers.email, email))
-  )[0];
-  if (!user) {
-    const count = (
-      await db.select({ value: sql<number>`count(*)` }).from(appUsers)
-    )[0];
-    const roleKey = Number(count?.value || 0) === 0 ? "director" : "tenant";
-    const role = (
-      await db.select().from(appRoles).where(eq(appRoles.roleKey, roleKey))
-    )[0];
-    if (role) {
-      await db.insert(appUsers).values({ email, displayName, roleId: role.id });
-      user = {
-        id: 0,
-        email,
-        displayName,
-        status: "active",
-        studentId: null,
-        roleId: role.id,
-        roleKey: role.roleKey,
-        roleName: role.name,
-      };
-    }
-  }
-  if (!user) return null;
-  const permissions = await db
-    .select()
-    .from(rolePermissions)
-    .where(eq(rolePermissions.roleId, user.roleId));
-  return { ...user, permissions };
+  if (!sessionUser) return null;
+  return {
+    ...sessionUser,
+    permissions: await permissionsForRole(sessionUser.roleId, db),
+  };
 }
 
 async function seedInventory(db: ReturnType<typeof getDb>) {
@@ -1810,6 +2018,48 @@ async function replaceReservationCharges(
     )
   )[0];
   return Number(totalRow?.total || 0);
+}
+
+// Mirrors replaceReservationCharges immediately above: delete-then-insert,
+// called unconditionally from reservation/reservation-update (a no-op for
+// an individual booking, which never sends body.groupTenants). Only a
+// filled slot (a non-blank full name) is ever stored — see the design
+// spec's Decisions section for why a blank slot must not create a row.
+async function replaceReservationGroupTenants(
+  db: ReturnType<typeof getDb>,
+  reservationId: number,
+  raw: unknown,
+) {
+  const entries = Array.isArray(raw) ? raw : [];
+  await db.execute(
+    sql`DELETE FROM reservation_group_tenants WHERE reservation_id = ${reservationId}`,
+  );
+  const filled = entries
+    .map((entry, index) => {
+      const row = (entry && typeof entry === "object" ? entry : {}) as Record<
+        string,
+        unknown
+      >;
+      return {
+        slotIndex: index,
+        fullName: asText(row.fullName),
+        identityNo: asText(row.identityNo),
+        contactNumber: asText(row.contactNumber),
+        gender: asText(row.gender, "unspecified"),
+        isStudent: boolValue(row.isStudent),
+        isPayer: boolValue(row.isPayer),
+      };
+    })
+    .filter((row) => row.fullName);
+  if (!filled.length) return;
+  await runBatches(db, filled, (row, tx) =>
+    tx.execute(sql`
+      INSERT INTO reservation_group_tenants
+        (reservation_id, slot_index, full_name, identity_no, contact_number, gender, is_student, is_payer)
+      VALUES
+        (${reservationId}, ${row.slotIndex}, ${row.fullName}, ${row.identityNo}, ${row.contactNumber}, ${row.gender}, ${row.isStudent}, ${row.isPayer})
+    `),
+  );
 }
 
 
@@ -2083,16 +2333,24 @@ async function syncMoveInInvoice(
   reservationId: number,
   actorName: string,
 ) {
+  const reservation = (
+    await db.select().from(reservations).where(eq(reservations.id, reservationId))
+  )[0];
+  if (!reservation) return;
+  // A whole-unit booking has no single "the tenancy this reservation
+  // became" — it can have several active occupants, claimed at different
+  // times, none of whom is "the" payer for a one-off move-in invoice. Every
+  // caller of this function already only cares about the individual-booking
+  // case; skip entirely rather than attaching (and, on every later claim or
+  // room change, RE-attaching) this invoice to whichever occupant happens
+  // to have the highest assignment id at that moment.
+  if (reservation.reservationType === "group") return;
   const assignment = (
     await db.execute<{ id: number; student_id: number }>(
       sql`SELECT id, student_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active' ORDER BY id DESC LIMIT 1`,
     )
   )[0];
   if (!assignment) return;
-  const reservation = (
-    await db.select().from(reservations).where(eq(reservations.id, reservationId))
-  )[0];
-  if (!reservation) return;
 
   const charges = await db
     .select()
@@ -2333,7 +2591,7 @@ export async function GET(request: Request) {
           scopes,
           currentUser.id,
         );
-        return Response.json(scopedResult);
+        return Response.json(redactReadPayload(scopedResult, currentUser));
       }
     }
     const db = getDb();
@@ -2347,6 +2605,7 @@ export async function GET(request: Request) {
       reservationRows,
       paymentRows,
       chargeRows,
+      groupTenantRows,
       pendingReturnRows,
       studentRows,
       rateRows,
@@ -2452,6 +2711,14 @@ export async function GET(request: Request) {
         .from(reservationPayments)
         .orderBy(desc(reservationPayments.id)),
       db.select().from(reservationCharges).orderBy(asc(reservationCharges.id)),
+      // Only ever non-empty while a whole-unit booking is still "reserved"
+      // (confirming the unit deletes these rows) — the reservation edit
+      // form uses this to re-show an already-typed, not-yet-confirmed
+      // tenant list instead of starting blank every time it reopens.
+      db
+        .select()
+        .from(reservationGroupTenants)
+        .orderBy(asc(reservationGroupTenants.slotIndex)),
       db
         .select({
           id: accommodationAssignments.id,
@@ -2850,6 +3117,11 @@ export async function GET(request: Request) {
         (row) => row.reservationId === reservation.id,
       ),
       charges: chargeRows.filter((row) => row.reservationId === reservation.id),
+      // Sorted by slotIndex already (the query's own ORDER BY) — the edit
+      // form re-hydrates its slot list straight from this array's order.
+      groupTenants: groupTenantRows.filter(
+        (row) => row.reservationId === reservation.id,
+      ),
       assignmentId:
         pendingReturnByReservation.get(reservation.id)?.assignmentId || null,
       expectedReturnDate:
@@ -2884,6 +3156,10 @@ export async function GET(request: Request) {
       owners,
       reservations: reservationList,
       students: studentRows,
+      // Only ever populated for a tenant session (see the tenant-scoping
+      // branch below); the staff-facing payload has no concept of "own
+      // room", so this stays empty the way parkingLots etc. do.
+      roommates: [] as { studentId: number; fullName: string }[],
       studentRateChanges: rateRows,
       pastTenancies: pastTenancyRows.map((row) => ({
         id: Number(row.id),
@@ -3008,15 +3284,94 @@ export async function GET(request: Request) {
       },
     };
     if (currentUser?.roleKey === "tenant") {
+      const tenantToday = todayInKL();
+      // A tenant account with no linked student profile owns nothing. Without
+      // this guard every "== studentId" filter below compares null to null
+      // and matches every studentless row (vacant beds, turnover tickets...).
+      // Announcements and notifications stay meaningful (site-wide notices
+      // and their own notifications); everything student-, room-, ticket-,
+      // money- or staff-derived is emptied.
+      if (currentUser.studentId == null) {
+        return Response.json({
+          ...responseData,
+          hostels: [],
+          units: [],
+          bedSpaces: [],
+          accessCards: [],
+          owners: [],
+          reservations: [],
+          students: [],
+          roommates: [],
+          services: [],
+          parkingLots: [],
+          parkingRentals: [],
+          tickets: [],
+          ticketMessages: [],
+          meterReadings: [],
+          meterMonths: [],
+          overdueMeterRooms: [],
+          depositAdjustments: [],
+          pastTenancies: [],
+          invoices: [],
+          attachments: [],
+          studentRateChanges: [],
+          billingCycles: [],
+          salesPeople: [],
+          importProgress: { assignments: 0, expected: 0 },
+          generalCosts: [],
+          billingAdjustments: [],
+          roles: [],
+          users: [],
+          rolePermissions: [],
+          reminderTemplates: [],
+          announcements: announcementRows.filter((announcement) =>
+            tenantCanSeeAnnouncement(announcement, tenantToday, {
+              hostelIds: new Set(),
+              unitIds: new Set(),
+              units: [],
+            }),
+          ),
+          notifications: notificationSummary,
+        });
+      }
       const ownStudents = studentRows.filter(
         (student) => student.id === currentUser.studentId,
       );
+      // Other students sharing the tenant's own room — name only, never the
+      // full profile (IC number, contact, etc.) another occupant has no
+      // business seeing about a roommate. `beds` here is the full,
+      // unfiltered bed list already loaded earlier in this handler for the
+      // staff-facing payload.
+      const ownRoomIds = new Set(
+        beds
+          .filter((bed) => bed.occupantId === currentUser.studentId)
+          .map((bed) => bed.roomId),
+      );
+      const roommateStudentIds = new Set(
+        beds
+          .filter(
+            (bed) =>
+              ownRoomIds.has(bed.roomId) &&
+              bed.occupantId &&
+              bed.occupantId !== currentUser.studentId,
+          )
+          .map((bed) => bed.occupantId),
+      );
+      const roommates = studentRows
+        .filter((student) => roommateStudentIds.has(student.id))
+        .map((student) => ({ studentId: student.id, fullName: student.fullName }));
       const ownUnitIds = new Set(
         ownStudents.map((student) => student.unitId).filter(Boolean),
       );
       const ownHostelIds = new Set(
         ownStudents.map((student) => student.hostelId).filter(Boolean),
       );
+      const ownUnitRefs = responseData.units
+        .filter((unit) => ownUnitIds.has(unit.id))
+        .map((unit) => ({
+          hostelId: unit.hostelId as number | null,
+          unitCode: String(unit.unitCode || ""),
+        }));
       const ownTicketIds = new Set(
         ticketRows
           .filter((ticket) => ticket.studentId === currentUser.studentId)
@@ -3064,6 +3419,7 @@ export async function GET(request: Request) {
         owners: [],
         reservations: [],
         students: ownStudents,
+        roommates,
         services: responseData.services.filter((service) =>
           ownUnitIds.has(service.unitId),
         ),
@@ -3082,6 +3438,19 @@ export async function GET(request: Request) {
           ),
         ),
         meterReadings: [],
+        // studentRateChanges rows carry other students' names, codes and
+        // rooms, so keep only those on this tenant's own assignment(s).
+        studentRateChanges: responseData.studentRateChanges.filter((change) =>
+          ownStudents.some(
+            (student) =>
+              student.assignmentId != null &&
+              student.assignmentId === change.assignmentId,
+          ),
+        ),
+        // salesPeople is a staff roster and importProgress an internal admin
+        // metric; a tenant has no use for either.
+        salesPeople: [],
+        importProgress: { assignments: 0, expected: 0 },
         billingCycles: cycleRows,
         // A tenant sees only their own deposit movements, never the house's
         // ledger — the same rule every other row here follows.
@@ -3094,10 +3463,19 @@ export async function GET(request: Request) {
         invoices: responseData.invoices.filter((invoice) =>
           ownInvoiceIds.has(invoice.id),
         ),
-        announcements: announcementRows.filter(
-          (announcement) =>
-            !announcement.hostelId || ownHostelIds.has(announcement.hostelId),
+        announcements: announcementRows.filter((announcement) =>
+          tenantCanSeeAnnouncement(announcement, tenantToday, {
+            hostelIds: ownHostelIds as Set<number>,
+            unitIds: ownUnitIds as Set<number>,
+            units: ownUnitRefs,
+          }),
         ),
+        // This three-way ownership rule (ticket / ticket-update /
+        // payment-proof) is intentionally duplicated in
+        // app/api/files/route.ts's `tenantOwnsContext`, which enforces the
+        // same rule per-attachment (via a direct query rather than filtering
+        // a preloaded array) for GET/POST/PATCH/DELETE on a single file. If
+        // this rule changes here, mirror the change there too.
         attachments: attachmentRows.filter(
           (attachment) =>
             (attachment.contextType === "ticket" &&
@@ -3114,10 +3492,17 @@ export async function GET(request: Request) {
         rolePermissions: [],
         reminderTemplates: [],
         overdueMeterRooms: [],
-        notifications: { unreadCount: 0, recent: [] },
+        // notificationSummary is already scoped to currentUser.id by
+        // getNotificationSummary — the same value the staff-facing
+        // responseData carries at `notifications` above. This used to be
+        // hardcoded back to empty here (predating tenant notifications
+        // entirely), which silently discarded real unread rows for every
+        // tenant session — the portal's unread tab dots could never light
+        // up no matter what the frontend did. Pass the real value through.
+        notifications: notificationSummary,
       });
     }
-    return Response.json(responseData);
+    return Response.json(redactReadPayload(responseData, currentUser));
   } catch (error) {
     return Response.json(
       {
@@ -4475,6 +4860,13 @@ export async function POST(request: Request) {
     const currentUser = await resolveCurrentUser(request, db);
     if (!currentUser || currentUser.status !== "active")
       throw new Error("Your user account is not active");
+    // Tenants only ever reach this endpoint from the student portal, so they
+    // get an explicit allow-list rather than the role-permission matrix (which
+    // grants the tenant role maintenance edit/create rows that would otherwise
+    // open meter-rates, general-cost, ticket-category-save and more). Checked
+    // before any handler runs; anything not listed is refused outright.
+    if (currentUser.roleKey === "tenant" && !TENANT_ALLOWED_ACTIONS.has(action))
+      throw new Error("Your role does not allow this action");
     const moduleKey = moduleForAction(action);
     if (moduleKey) {
       const permission = currentUser.permissions.find(
@@ -5077,6 +5469,17 @@ export async function POST(request: Request) {
         religionOther: asText(body.religionOther),
         targetMoveInDate: asText(body.targetMoveInDate),
         provisionalBedSpaceId: asNullableNumber(body.provisionalBedSpaceId),
+        // Whole-unit bookings only — null for an individual booking, exactly
+        // as the client only ever sends it when reservationType is "group".
+        wholeUnitMonthlyRent: asNullableNumber(body.wholeUnitMonthlyRent),
+        // Agency/Company whole-unit bookings only — blank string for every
+        // other booking, exactly as the client only ever sends these when
+        // representativeType is "company" (or the legacy "institute").
+        organisationName: asText(body.organisationName),
+        companyRegistrationNo: asText(body.companyRegistrationNo),
+        organisationAddress: asText(body.organisationAddress),
+        companyEmail: asText(body.companyEmail),
+        utilityBilledTo: asText(body.utilityBilledTo, "tenant"),
         notes: asText(body.notes),
       };
       let reservationId = asNumber(body.reservationId);
@@ -5106,6 +5509,7 @@ export async function POST(request: Request) {
         reservationId,
         body.chargeBreakdown,
       );
+      await replaceReservationGroupTenants(db, reservationId, body.groupTenants);
       // Creating or editing a reservation never records money — that only
       // happens by ticking charges in Manage — so amountPaid is simply
       // whatever payments already exist, recomputed just below.
@@ -5130,7 +5534,14 @@ export async function POST(request: Request) {
       // the live student/assignment record. The reverse never happens —
       // day-to-day edits in Student Information (phone number, room
       // change, ...) do not rewrite this historical booking record.
-      if (action === "reservation-update") {
+      // Group bookings never run this sync: a whole-unit reservation can
+      // carry several active occupants, "the linked assignment" is not a
+      // well-defined single row, and the company representative's own
+      // details (values.studentName etc.) have no business overwriting any
+      // one of those tenants' profiles. See reservation-confirm-unit and
+      // whole-unit-claim above for how a group booking's own occupants are
+      // actually managed.
+      if (action === "reservation-update" && values.reservationType !== "group") {
         const linkedAssignment = (
           await db.execute<{ id: number; student_id: number; bed_space_id: number }>(
             sql`SELECT id, student_id, bed_space_id FROM accommodation_assignments WHERE source_reservation_id = ${reservationId} AND status = 'active'`,
@@ -5352,26 +5763,33 @@ export async function POST(request: Request) {
       // that behind — the room stayed 'reserved' forever with nothing left
       // pointing at it, because source_reservation_id is a plain column with
       // no cascade. Everything the conversion made is undone here too.
-      const tenancy = (
-        await db.execute<{
-          id: number;
-          student_id: number;
-          bed_space_id: number;
-          checked_in_at: string | null;
-        }>(sql`
-          SELECT id, student_id, bed_space_id, checked_in_at
-          FROM accommodation_assignments
-          WHERE source_reservation_id = ${reservationId}
-        `)
-      )[0];
+      //
+      // A whole-unit booking has one assignment per bed in its unit (see
+      // reservation-confirm-unit above), some possibly still
+      // 'pending-occupant' (nobody claimed, so student_id is null) and some
+      // 'active' (claimed). Every one of them is handled here, not just the
+      // first — an earlier version of this branch only ever looked at one
+      // row and left every other bed in the unit stuck 'reserved' forever.
+      const tenancies = await db.execute<{
+        id: number;
+        student_id: number | null;
+        bed_space_id: number;
+        status: string;
+        checked_in_at: string | null;
+      }>(sql`
+        SELECT id, student_id, bed_space_id, status, checked_in_at
+        FROM accommodation_assignments
+        WHERE source_reservation_id = ${reservationId}
+      `);
 
-      if (tenancy) {
+      for (const tenancy of tenancies) {
         // Past this point the record stops being a booking and becomes a
         // resident's history, which a delete must not quietly erase.
         if (tenancy.checked_in_at)
           throw new Error(
             "This student has already checked in — move them out instead of deleting the booking",
           );
+        if (!tenancy.student_id) continue; // pending-occupant: nobody to owe money or be billed
         const settled = (
           await db.execute<{ paid: number; payments: number }>(sql`
             SELECT COALESCE(SUM(i.amount_paid), 0) paid,
@@ -5397,19 +5815,21 @@ export async function POST(request: Request) {
       }
 
       await db.transaction(async (tx) => {
-        if (tenancy) {
-          const invoiceIds = (
-            await tx.execute<{ id: number }>(
-              sql`SELECT id FROM billing_invoices WHERE student_id = ${tenancy.student_id}`,
-            )
-          ).map((row) => Number(row.id));
-          if (invoiceIds.length) {
-            await tx.execute(
-              sql`DELETE FROM billing_items WHERE invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
-            );
-            await tx.execute(
-              sql`DELETE FROM billing_invoices WHERE id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
-            );
+        for (const tenancy of tenancies) {
+          if (tenancy.student_id) {
+            const invoiceIds = (
+              await tx.execute<{ id: number }>(
+                sql`SELECT id FROM billing_invoices WHERE student_id = ${tenancy.student_id}`,
+              )
+            ).map((row) => Number(row.id));
+            if (invoiceIds.length) {
+              await tx.execute(
+                sql`DELETE FROM billing_items WHERE invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
+              );
+              await tx.execute(
+                sql`DELETE FROM billing_invoices WHERE id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})`,
+              );
+            }
           }
           await tx.execute(
             sql`DELETE FROM deposit_adjustments WHERE assignment_id = ${tenancy.id}`,
@@ -5417,22 +5837,33 @@ export async function POST(request: Request) {
           await tx.execute(
             sql`DELETE FROM student_rate_changes WHERE assignment_id = ${tenancy.id}`,
           );
-          await tx.execute(
-            sql`DELETE FROM accommodation_assignments WHERE source_reservation_id = ${reservationId}`,
-          );
-          // The room goes back on sale. 'vacant' rather than whatever it was
-          // before: a booking is the only thing that had been holding it.
-          await tx.execute(
-            sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${nowIso()} WHERE id = ${tenancy.bed_space_id}`,
-          );
+          // The room goes back on sale — but only if this row is still the
+          // one actually holding it. A room-change or a check-out leaves the
+          // old assignment behind (status 'moved'/'ended') with this same
+          // source_reservation_id still on it; resetting the bed for one of
+          // those would evict whoever the room was let to since.
+          if (tenancy.status === "active" || tenancy.status === "pending-occupant")
+            await tx.execute(
+              sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${nowIso()} WHERE id = ${tenancy.bed_space_id}`,
+            );
+        }
+        // Assignments go before the student_profiles cleanup below: its
+        // NOT EXISTS check needs this reservation's own assignment rows
+        // already gone, or it would see the row it's about to delete
+        // anyway and wrongly conclude the student still has a tenancy.
+        await tx.execute(
+          sql`DELETE FROM accommodation_assignments WHERE source_reservation_id = ${reservationId}`,
+        );
+        for (const tenancy of tenancies) {
           // Only a profile this conversion created goes with it — one that
           // existed beforehand, or that has any other tenancy, stays.
-          await tx.execute(sql`
-            DELETE FROM student_profiles
-            WHERE id = ${tenancy.student_id}
-              AND source_key = ${`reservation:${reservationId}`}
-              AND NOT EXISTS (SELECT 1 FROM accommodation_assignments a WHERE a.student_id = ${tenancy.student_id})
-          `);
+          if (tenancy.student_id)
+            await tx.execute(sql`
+              DELETE FROM student_profiles
+              WHERE id = ${tenancy.student_id}
+                AND source_key = ${`reservation:${reservationId}`}
+                AND NOT EXISTS (SELECT 1 FROM accommodation_assignments a WHERE a.student_id = ${tenancy.student_id})
+            `);
         }
         // Charges first: reservation_charges.payment_id points AT a payment,
         // so removing the payments first violates that key and the whole
@@ -5443,6 +5874,9 @@ export async function POST(request: Request) {
         );
         await tx.execute(
           sql`DELETE FROM reservation_payments WHERE reservation_id = ${reservationId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM reservation_group_tenants WHERE reservation_id = ${reservationId}`,
         );
         await tx.execute(
           sql`DELETE FROM reservations WHERE id = ${reservationId}`,
@@ -5463,24 +5897,40 @@ export async function POST(request: Request) {
       // for a booking that no longer exists. Unlike delete, the reservation
       // and its payment history stay: that is the whole point of cancelling
       // rather than deleting.
-      const converted = (
-        await db.execute<{
-          id: number;
-          student_id: number;
-          bed_space_id: number;
-          checked_in_at: string | null;
-        }>(sql`
-          SELECT id, student_id, bed_space_id, checked_in_at
-          FROM accommodation_assignments
-          WHERE source_reservation_id = ${reservationId} AND status = 'active'
-        `)
-      )[0];
-      if (converted?.checked_in_at)
+      // A whole-unit booking has one assignment per bed, some 'active'
+      // (claimed) and some still 'pending-occupant' (nobody named). Both
+      // need releasing here — the original version of this query only
+      // looked for 'active' rows, so cancelling an unclaimed whole-unit
+      // booking silently left every one of its beds 'reserved' forever.
+      const tenanciesToCancel = await db.execute<{
+        id: number;
+        student_id: number | null;
+        bed_space_id: number;
+        status: string;
+        checked_in_at: string | null;
+      }>(sql`
+        SELECT id, student_id, bed_space_id, status, checked_in_at
+        FROM accommodation_assignments
+        WHERE source_reservation_id = ${reservationId}
+          AND status IN ('active', 'pending-occupant')
+      `);
+      if (tenanciesToCancel.some((row) => row.checked_in_at))
         throw new Error(
           "This student has already checked in — move them out instead of cancelling the booking",
         );
       await db.transaction(async (tx) => {
-        if (converted) {
+        for (const converted of tenanciesToCancel) {
+          if (converted.status === "pending-occupant") {
+            // Nobody was ever named — nothing to end or mark moved-out,
+            // just remove the placeholder and free the bed.
+            await tx.execute(
+              sql`DELETE FROM accommodation_assignments WHERE id = ${converted.id}`,
+            );
+            await tx.execute(
+              sql`UPDATE bed_spaces SET status = 'vacant', updated_at = ${nowIso()} WHERE id = ${converted.bed_space_id}`,
+            );
+            continue;
+          }
           await tx.execute(sql`
             UPDATE accommodation_assignments
             SET status = 'ended', check_out_date = COALESCE(check_out_date, ${todayInKL()})
@@ -5511,11 +5961,11 @@ export async function POST(request: Request) {
           link: "/hostels?tab=reservations",
         });
     } else if (action === "reservation-confirm-unit") {
-      // Only group bookings still need a step of their own. A group takes a
-      // whole unit and creates no tenancy — the individual names arrive
-      // later — so there is nothing for a payment to promote. Individual
-      // bookings no longer have this action at all: recording their payment
-      // is what creates the tenancy (see promoteReservationToTenancy).
+      // A group takes a whole unit: converting it now actually holds every
+      // room in that unit (one placeholder assignment per bed, all beds
+      // marked reserved) rather than only flipping the reservation's own
+      // status. The individual occupant names arrive later, one room at a
+      // time, via the whole-unit-claim action below.
       const reservationId = asNumber(body.reservationId);
       const reservation = (
         await db
@@ -5528,15 +5978,192 @@ export async function POST(request: Request) {
         throw new Error(
           "Only a group booking confirms a unit. An individual booking becomes a tenancy when its payment is recorded.",
         );
-      if (!body.unitId) throw new Error("Select the confirmed unit / house");
-      await db
-        .update(reservations)
-        .set({
-          preferredUnitId: asNumber(body.unitId),
-          status: "converted",
-          convertedAt: nowIso(),
-        })
-        .where(eq(reservations.id, reservationId));
+      const unitId = asNumber(body.unitId);
+      if (!unitId) throw new Error("Select the confirmed unit / house");
+      const unitHasRooms = (
+        await db
+          .select({ id: hostelRooms.id })
+          .from(hostelRooms)
+          .where(eq(hostelRooms.unitId, unitId))
+          .limit(1)
+      ).length;
+      if (!unitHasRooms) throw new Error("This unit has no rooms");
+      const now = nowIso();
+      const resolvedRent = asNullableNumber(
+        body.wholeUnitMonthlyRent ?? reservation.wholeUnitMonthlyRent,
+      );
+      // Every transaction elsewhere in this file uses tx.execute(sql`...`)
+      // rather than the ORM builder methods on tx — matched here rather than
+      // introducing a new style.
+      //
+      // The whole qualification check runs INSIDE this transaction, under a
+      // row lock on the unit's beds (FOR UPDATE), and the reservation itself
+      // is claimed with a conditional UPDATE. A plain SELECT-then-write
+      // outside a transaction let two concurrent confirms (same reservation,
+      // or two different reservations landing on overlapping beds) both pass
+      // validation and both write — the lock and the conditional claim close
+      // that window: a second concurrent caller either blocks behind this
+      // one and then sees a bed/reservation state that no longer qualifies,
+      // or is rejected outright by the conditional UPDATE below.
+      await db.transaction(async (tx) => {
+        const claimed = await tx.execute<{ id: number }>(sql`
+          UPDATE reservations
+          SET preferred_unit_id = ${unitId}, status = 'converted',
+              converted_at = ${now}, whole_unit_monthly_rent = ${resolvedRent}
+          WHERE id = ${reservationId} AND status = 'reserved'
+          RETURNING id
+        `);
+        if (!claimed.length)
+          throw new Error("This reservation has already been converted");
+        const lockedBeds = await tx.execute<{
+          id: number;
+          status: string;
+          legacy_code: string;
+        }>(sql`
+          SELECT b.id, b.status, b.legacy_code
+          FROM bed_spaces b
+          JOIN hostel_rooms r ON r.id = b.room_id
+          WHERE r.unit_id = ${unitId}
+          ORDER BY b.id
+          FOR UPDATE OF b
+        `);
+        if (!lockedBeds.length) throw new Error("This unit has no rooms");
+        const bedIds = lockedBeds.map((bed) => Number(bed.id));
+        // One row per bed: the latest end date among its active tenancies
+        // (a stray un-ended older row must never win over the current one),
+        // and — regardless of end date — whether ANY active or still-pending
+        // assignment exists at all. A bed_spaces row and its assignment are
+        // updated by separate statements elsewhere in this file (e.g.
+        // promoteReservationToTenancy), so a moment can exist where a bed
+        // reads 'vacant' while an assignment on it has already been
+        // inserted; anyHold catches that instead of trusting bed.status
+        // alone.
+        const assignmentRows = await tx.execute<{
+          bed_space_id: number;
+          agreement_end_date: string | null;
+        }>(sql`
+          SELECT bed_space_id, MAX(agreement_end_date) AS agreement_end_date
+          FROM accommodation_assignments
+          WHERE bed_space_id IN (${sql.join(bedIds.map((id) => sql`${id}`), sql`, `)})
+            AND status IN ('active', 'pending-occupant')
+          GROUP BY bed_space_id
+        `);
+        const endDateByBed = new Map(
+          assignmentRows.map((row) => [
+            Number(row.bed_space_id),
+            row.agreement_end_date,
+          ]),
+        );
+        const anyHold = new Set(assignmentRows.map((row) => Number(row.bed_space_id)));
+        // A "vacant" bed can still be someone else's open booking — vacant
+        // only means nobody has moved in, not that it's free to reserve.
+        // Excluded the same way the individual picker already excludes
+        // these via reservedBedIds in HostelInformation.tsx.
+        const heldByOtherReservation = new Set(
+          (
+            await tx.execute<{ bed_id: number | null }>(sql`
+              SELECT unnest(ARRAY[provisional_bed_space_id, assigned_bed_space_id]) AS bed_id
+              FROM reservations
+              WHERE status = 'reserved' AND id != ${reservationId}
+            `)
+          )
+            .map((row) => (row.bed_id === null ? null : Number(row.bed_id)))
+            .filter((id): id is number => id !== null),
+        );
+        const disqualified = lockedBeds.filter((bed) => {
+          const id = Number(bed.id);
+          if (heldByOtherReservation.has(id)) return true;
+          // A bed reading 'vacant' with an assignment already sitting on it
+          // is a genuine inconsistency (see the comment above anyHold) —
+          // never treat that as available just because bed.status hasn't
+          // caught up yet.
+          if (bed.status === "vacant" && anyHold.has(id)) return true;
+          return !bedQualifiesForWholeUnit(
+            {
+              status: bed.status,
+              agreementEndDate: endDateByBed.get(id) ?? null,
+            },
+            reservation.targetMoveInDate,
+          );
+        });
+        if (disqualified.length)
+          throw new Error(
+            `${disqualified[0].legacy_code || "A room"} in this unit is no longer available for this move-in date — refresh and pick again`,
+          );
+        // Slots the reservation form's up-front tenant list saved, if any.
+        // Only filled slots are ever stored, so slot_index can have gaps —
+        // looked up by that value, never by array position.
+        const tenantSlots = await tx.execute<{
+          slot_index: number;
+          full_name: string;
+          identity_no: string;
+          contact_number: string;
+          gender: string;
+          is_student: boolean;
+          is_payer: boolean;
+        }>(sql`
+          SELECT slot_index, full_name, identity_no, contact_number, gender, is_student, is_payer
+          FROM reservation_group_tenants
+          WHERE reservation_id = ${reservationId}
+          ORDER BY slot_index
+        `);
+        const tenantBySlot = new Map(
+          tenantSlots.map((row) => [Number(row.slot_index), row]),
+        );
+        // Same guard whole-unit-claim already has: any filled slot always
+        // resolves to exactly one payer below (explicit, or the first
+        // filled one by default) — without this, confirming with tenant
+        // slots but no rent set would silently create that payer at
+        // NULL/0, the same "nobody actually pays" footgun the claim
+        // action already rejects.
+        if (tenantSlots.length && !((resolvedRent ?? 0) > 0))
+          throw new Error(
+            "Set the whole-unit rent on this booking before confirming it with tenants filled in",
+          );
+        const anyPayerMarked = tenantSlots.some((row) => row.is_payer);
+        let payerAssigned = false;
+        for (const [i, bed] of lockedBeds.entries()) {
+          const slot = tenantBySlot.get(i);
+          if (!slot) {
+            await tx.execute(sql`
+              INSERT INTO accommodation_assignments
+                (source_key, student_id, bed_space_id, monthly_rental, status, check_in_date, agreement_start_date, source_reservation_id)
+              VALUES
+                (${`whole-unit:${reservationId}:${bed.id}`}, NULL, ${bed.id}, 0, 'pending-occupant', ${reservation.targetMoveInDate}, ${reservation.targetMoveInDate}, ${reservationId})
+            `);
+            await tx.execute(
+              sql`UPDATE bed_spaces SET status = 'reserved', updated_at = ${now} WHERE id = ${bed.id}`,
+            );
+            continue;
+          }
+          const isPayer =
+            slot.is_payer || (!anyPayerMarked && !payerAssigned);
+          if (isPayer) payerAssigned = true;
+          const studentInsert = await tx.execute<{ id: number }>(sql`
+            INSERT INTO student_profiles
+              (source_key, full_name, identity_no, contact_number, gender, is_student, status)
+            VALUES
+              (${`whole-unit-tenant:${reservationId}:${bed.id}`}, ${slot.full_name}, ${slot.identity_no}, ${slot.contact_number}, ${slot.gender}, ${slot.is_student}, 'active')
+            RETURNING id
+          `);
+          const newStudentId = Number(studentInsert[0].id);
+          await tx.execute(sql`
+            INSERT INTO accommodation_assignments
+              (source_key, student_id, bed_space_id, monthly_rental, status, check_in_date, agreement_start_date, source_reservation_id)
+            VALUES
+              (${`whole-unit:${reservationId}:${bed.id}`}, ${newStudentId}, ${bed.id}, ${isPayer ? resolvedRent : 0}, 'active', ${reservation.targetMoveInDate}, ${reservation.targetMoveInDate}, ${reservationId})
+          `);
+          await tx.execute(
+            sql`UPDATE bed_spaces SET status = 'reserved', updated_at = ${now} WHERE id = ${bed.id}`,
+          );
+        }
+        // These rows are now real tenants (or were dropped for having no
+        // matching room) — leaving the draft behind would be a second,
+        // increasingly stale copy of the same information.
+        await tx.execute(
+          sql`DELETE FROM reservation_group_tenants WHERE reservation_id = ${reservationId}`,
+        );
+      });
       await notifyRole(db, "sales", {
         type: "reservation-changed",
         title: `Reservation ${reservation.referenceNo} — room confirmed`,
@@ -5979,6 +6606,98 @@ export async function POST(request: Request) {
           sql`UPDATE bed_spaces SET status='occupied', updated_at=${now} WHERE id=${bedId}`,
         );
       });
+    } else if (action === "whole-unit-claim") {
+      // Turns one bed of a whole-unit booking from "pending-occupant" into a
+      // real tenant — either a brand-new student profile or an existing one
+      // — without creating a second assignment for the same bed.
+      //
+      // Everything runs inside one transaction, all via tx.execute(sql`...`)
+      // (this file's exclusive style for transactions — never tx.update()/
+      // tx.insert()). The final UPDATE is a conditional claim —
+      // `WHERE status = 'pending-occupant'` — rather than a plain SELECT
+      // followed by a separate UPDATE: that closes the same race Task 4 had
+      // to close for reservation-confirm-unit, where two concurrent claims
+      // of the same bed could otherwise both pass a status check before
+      // either had written. If the claim loses that race, the whole
+      // transaction (including any newly-inserted student profile) rolls
+      // back, so no orphan rows survive a losing claim.
+      const assignmentId = asNumber(body.assignmentId);
+      if (!assignmentId) throw new Error("Room is required");
+      const isPayer = boolValue(body.isPayer);
+      let studentId = asNullableNumber(body.studentId);
+      const newStudentFullName = studentId ? null : asText(body.fullName);
+      if (!studentId && !newStudentFullName)
+        throw new Error("Full name is required for a new student");
+      await db.transaction(async (tx) => {
+        const assignmentRows = await tx.execute<{
+          id: number;
+          status: string;
+          source_reservation_id: number | null;
+        }>(sql`
+          SELECT id, status, source_reservation_id
+          FROM accommodation_assignments
+          WHERE id = ${assignmentId}
+        `);
+        const assignment = assignmentRows[0];
+        if (!assignment) throw new Error("Assignment not found");
+        if (assignment.status !== "pending-occupant")
+          throw new Error("This room has already been claimed");
+        if (studentId) {
+          const alreadyLinked = await tx.execute<{ id: number }>(sql`
+            SELECT id FROM accommodation_assignments
+            WHERE student_id = ${studentId}
+              AND status IN ('active', 'pending-occupant')
+          `);
+          if (alreadyLinked.length)
+            throw new Error(
+              "This student already has a room — pick a different student or move them first",
+            );
+        } else {
+          const inserted = await tx.execute<{ id: number }>(sql`
+            INSERT INTO student_profiles
+              (source_key, full_name, identity_no, contact_number, email, gender, nationality, is_student, status)
+            VALUES
+              (${`whole-unit-claim:${assignmentId}:${Date.now()}`}, ${newStudentFullName}, ${asText(body.identityNo)}, ${asText(body.contactNumber)}, ${asText(body.email)}, ${asText(body.gender, "unspecified")}, ${asText(body.nationality)}, ${
+                body.isStudent === undefined ? true : boolValue(body.isStudent)
+              }, 'active')
+            RETURNING id
+          `);
+          studentId = Number(inserted[0].id);
+        }
+        const sourceReservationId = assignment.source_reservation_id
+          ? Number(assignment.source_reservation_id)
+          : null;
+        const reservationRows = sourceReservationId
+          ? await tx.execute<{ whole_unit_monthly_rent: number | null }>(sql`
+              SELECT whole_unit_monthly_rent FROM reservations
+              WHERE id = ${sourceReservationId}
+            `)
+          : [];
+        const payerRent = reservationRows[0]?.whole_unit_monthly_rent ?? 0;
+        // Without this, a payer claimed while the booking's rent is unset
+        // silently zeroes whoever paid before (if anyone) and leaves every
+        // room, including this one, at RM0 — nobody billed for the unit.
+        if (isPayer && payerRent <= 0)
+          throw new Error(
+            "Set the whole-unit rent on this booking before claiming a payer",
+          );
+        if (isPayer && sourceReservationId) {
+          await tx.execute(sql`
+            UPDATE accommodation_assignments SET monthly_rental = 0
+            WHERE source_reservation_id = ${sourceReservationId}
+              AND status = 'active'
+          `);
+        }
+        const claimed = await tx.execute<{ id: number }>(sql`
+          UPDATE accommodation_assignments
+          SET student_id = ${studentId}, status = 'active',
+              monthly_rental = ${isPayer ? payerRent : 0}
+          WHERE id = ${assignmentId} AND status = 'pending-occupant'
+          RETURNING id
+        `);
+        if (!claimed.length)
+          throw new Error("This room has already been claimed");
+      });
     } else if (action === "student-move-out") {
       const studentId = asNumber(body.studentId);
       if (!studentId) throw new Error("Student is required");
@@ -6174,6 +6893,34 @@ export async function POST(request: Request) {
           .where(eq(accommodationAssignments.id, oldAssignmentId))
       )[0];
       if (!old) throw new Error("Current assignment not found");
+      // The reservation link normally follows any move (an individual
+      // booking's invoice keeps tracking the student wherever they go, even
+      // to a different unit entirely). A WHOLE-UNIT booking is the one
+      // exception: that link also means "one of this unit's held rooms", so
+      // carrying it across a unit boundary would leave a former occupant's
+      // new, unrelated room still counted as part of the old booking — its
+      // rent zeroed by a later payer claim there, and listed in that
+      // booking's Manage-drawer room list. Drop the link only in that case.
+      let newSourceReservationId = old.sourceReservationId;
+      if (old.sourceReservationId) {
+        const sourceReservation = (
+          await db
+            .select({ reservationType: reservations.reservationType })
+            .from(reservations)
+            .where(eq(reservations.id, old.sourceReservationId))
+        )[0];
+        if (sourceReservation?.reservationType === "group") {
+          const sameUnit = (
+            await db.execute<{ same_unit: boolean }>(sql`
+              SELECT (r_old.unit_id = r_new.unit_id) AS same_unit
+              FROM bed_spaces b_old JOIN hostel_rooms r_old ON r_old.id = b_old.room_id,
+                   bed_spaces b_new JOIN hostel_rooms r_new ON r_new.id = b_new.room_id
+              WHERE b_old.id = ${old.bedSpaceId} AND b_new.id = ${bedId}
+            `)
+          )[0]?.same_unit;
+          if (!sameUnit) newSourceReservationId = null;
+        }
+      }
       const key = `move:${studentId}:${Date.now()}`;
       const changeNow = nowIso();
       // A move does not itself constitute arriving. Someone who has already
@@ -6192,7 +6939,7 @@ export async function POST(request: Request) {
         );
         await tx.execute(sql`
           INSERT INTO accommodation_assignments (source_key, student_id, bed_space_id, monthly_rental, security_deposit, access_card_deposit, salesperson, check_in_date, agreement_start_date, agreement_end_date, check_in_meter, remarks, status, source_reservation_id, checked_in_at)
-          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active', ${old.sourceReservationId}, ${old.checkedInAt})
+          VALUES (${key}, ${studentId}, ${bedId}, ${asNullableNumber(body.monthlyRental)}, ${asNullableNumber(body.securityDeposit)}, ${asNullableNumber(body.accessCardDeposit)}, ${asText(body.salesperson)}, ${asText(body.effectiveDate)}, ${asText(body.effectiveDate)}, ${asNullableText(body.leaseEndDate)}, ${asNullableNumber(body.checkInMeter)}, ${asText(body.reason)}, 'active', ${newSourceReservationId}, ${old.checkedInAt})
         `);
         await tx.execute(
           sql`UPDATE bed_spaces SET status=${alreadyArrived ? "occupied" : "reserved"}, updated_at=${changeNow} WHERE id=${bedId}`,
@@ -6226,10 +6973,11 @@ export async function POST(request: Request) {
       // The move-in invoice was attached to the assignment that just retired.
       // Hand it to the replacement so Finance keeps tracking this tenancy —
       // and so the invoice reports the room the student now lives in.
-      if (old.sourceReservationId)
+      // (No-ops for a group reservation regardless — see syncMoveInInvoice.)
+      if (newSourceReservationId)
         await syncMoveInInvoice(
           db,
-          Number(old.sourceReservationId),
+          Number(newSourceReservationId),
           currentUser.displayName,
         );
     } else if (action === "parking-lot") {
@@ -6547,40 +7295,80 @@ export async function POST(request: Request) {
             );
         }
       }
+      const isTenant = currentUser.roleKey === "tenant";
+      // A tenant's ticket is bound to their own tenancy: student, hostel, unit
+      // and room come from their active assignment, never from the request.
+      let tenantLocation:
+        | { hostelId: number; unitId: number; roomId: number }
+        | undefined;
+      if (isTenant) {
+        const own = (
+          await db.execute<{
+            hostel_id: number;
+            unit_id: number;
+            room_id: number;
+          }>(sql`
+            SELECT hu.hostel_id, hu.id AS unit_id, hr.id AS room_id
+            FROM accommodation_assignments aa
+            JOIN bed_spaces bs ON bs.id = aa.bed_space_id
+            JOIN hostel_rooms hr ON hr.id = bs.room_id
+            JOIN hostel_units hu ON hu.id = hr.unit_id
+            WHERE aa.student_id = ${currentUser.studentId} AND aa.status = 'active'
+            ORDER BY aa.id DESC
+            LIMIT 1
+          `)
+        )[0];
+        if (!own)
+          throw new Error("You have no active room to report an issue for");
+        tenantLocation = {
+          hostelId: Number(own.hostel_id),
+          unitId: Number(own.unit_id),
+          roomId: Number(own.room_id),
+        };
+      }
       if (
-        !body.hostelId ||
-        !body.unitId ||
+        (!isTenant && (!body.hostelId || !body.unitId)) ||
         !asText(body.category) ||
         !asText(body.subcategory)
       )
         throw new Error("Hostel, unit, category and subcategory are required");
-      const ticketPriority = asText(body.priority, "average");
+      const requestedPriority = asText(body.priority, "average");
+      const ticketPriority =
+        isTenant && !["low", "average", "high"].includes(requestedPriority)
+          ? "average"
+          : requestedPriority;
       const inserted = await db
         .insert(maintenanceTickets)
         .values({
           ticketNo: `MT-${Date.now().toString().slice(-8)}`,
-          studentId:
-            currentUser.roleKey === "tenant"
-              ? currentUser.studentId
-              : asNullableNumber(body.studentId),
-          hostelId: asNumber(body.hostelId),
-          unitId: asNumber(body.unitId),
-          roomId: asNullableNumber(body.roomId),
+          studentId: isTenant
+            ? currentUser.studentId
+            : asNullableNumber(body.studentId),
+          hostelId: tenantLocation
+            ? tenantLocation.hostelId
+            : asNumber(body.hostelId),
+          unitId: tenantLocation ? tenantLocation.unitId : asNumber(body.unitId),
+          roomId: tenantLocation
+            ? tenantLocation.roomId
+            : asNullableNumber(body.roomId),
           category: asText(body.category),
           subcategory: asText(body.subcategory),
           subject: asText(body.subcategory),
           description: asText(body.description),
           priority: ticketPriority,
           status: "submitted",
-          submittedByType:
-            currentUser.roleKey === "tenant" ? "student" : "staff",
-          assignedTo: asText(body.assignedTo),
-          costResponsibility: asText(body.costResponsibility, "management"),
-          estimatedCost: asNullableNumber(body.estimatedCost),
+          submittedByType: isTenant ? "student" : "staff",
+          // Assignment and all cost/charge fields are staff-only: a tenant's
+          // request always starts unassigned, management-borne and unpriced.
+          assignedTo: isTenant ? "" : asText(body.assignedTo),
+          costResponsibility: isTenant
+            ? "management"
+            : asText(body.costResponsibility, "management"),
+          estimatedCost: isTenant ? null : asNullableNumber(body.estimatedCost),
           // Fixed-price requests (the door-unlocking fee) arrive already
           // priced; everything else is costed later from the ticket drawer.
-          actualCost: asNullableNumber(body.actualCost),
-          studentCharge: asNullableNumber(body.studentCharge),
+          actualCost: isTenant ? null : asNullableNumber(body.actualCost),
+          studentCharge: isTenant ? null : asNullableNumber(body.studentCharge),
         })
         .returning({ id: maintenanceTickets.id });
       createdId = inserted[0].id;
@@ -6670,7 +7458,11 @@ export async function POST(request: Request) {
       if (!ticketId) throw new Error("Ticket is required");
       const priorTicket = (
         await db
-          .select({ assignedTo: maintenanceTickets.assignedTo, ticketNo: maintenanceTickets.ticketNo })
+          .select({
+            assignedTo: maintenanceTickets.assignedTo,
+            ticketNo: maintenanceTickets.ticketNo,
+            studentId: maintenanceTickets.studentId,
+          })
           .from(maintenanceTickets)
           .where(eq(maintenanceTickets.id, ticketId))
       )[0];
@@ -6681,7 +7473,13 @@ export async function POST(request: Request) {
             .from(maintenanceTickets)
             .where(eq(maintenanceTickets.id, ticketId))
         )[0];
-        if (!ownTicket || ownTicket.studentId !== currentUser.studentId)
+        // A tenant with no linked student must never match a studentless
+        // ticket just because both sides are null.
+        if (
+          !ownTicket ||
+          currentUser.studentId == null ||
+          ownTicket.studentId !== currentUser.studentId
+        )
           throw new Error("You can only update your own ticket");
         if (!asText(body.message))
           throw new Error("Enter a message before posting the update");
@@ -6774,6 +7572,13 @@ export async function POST(request: Request) {
           title: `New message on ${priorTicket.ticketNo}`,
           body: message,
           link: `/maintenance?ticket=${ticketId}`,
+        });
+      if (currentUser.roleKey !== "tenant" && priorTicket?.studentId)
+        await notifyStudent(db, priorTicket.studentId, {
+          type: "ticket-reply",
+          title: `New reply on ${priorTicket.ticketNo}`,
+          body: message,
+          link: "/student/maintenance",
         });
       const newAssignedTo = changes.assignedTo as string | undefined;
       if (
@@ -7216,10 +8021,27 @@ export async function POST(request: Request) {
       });
     } else if (action === "billing-post") {
       if (!body.cycleId) throw new Error("Billing cycle is required");
+      const cycleId = asNumber(body.cycleId);
+      const cycle = (
+        await db.select().from(billingCycles).where(eq(billingCycles.id, cycleId))
+      )[0];
+      if (!cycle) throw new Error("Billing cycle not found");
       await db
         .update(billingCycles)
         .set({ status: "posted", postedAt: nowIso() })
-        .where(eq(billingCycles.id, asNumber(body.cycleId)));
+        .where(eq(billingCycles.id, cycleId));
+      const cycleInvoices = await db
+        .select({ studentId: billingInvoices.studentId })
+        .from(billingInvoices)
+        .where(eq(billingInvoices.cycleId, cycleId));
+      for (const invoice of cycleInvoices) {
+        if (!invoice.studentId) continue;
+        await notifyStudent(db, invoice.studentId, {
+          type: "invoice-posted",
+          title: `${cycle.periodLabel} bill is ready`,
+          link: "/student/billing",
+        });
+      }
     } else if (action === "billing-payment") {
       if (!body.invoiceId) throw new Error("Invoice is required");
       const invoiceId = asNumber(body.invoiceId);
@@ -7236,6 +8058,35 @@ export async function POST(request: Request) {
         `)
       )[0];
       if (!target) throw new Error("Invoice not found");
+      // A tenant may only pay their own invoice, and never one whose cycle is
+      // still a draft. Answer "Invoice not found" either way so a guessed ID
+      // is not confirmed to exist.
+      if (currentUser.roleKey === "tenant") {
+        const owned = (
+          await db
+            .select({
+              studentId: billingInvoices.studentId,
+              cycleId: billingInvoices.cycleId,
+            })
+            .from(billingInvoices)
+            .where(eq(billingInvoices.id, invoiceId))
+        )[0];
+        if (
+          !owned ||
+          currentUser.studentId == null ||
+          owned.studentId !== currentUser.studentId
+        )
+          throw new Error("Invoice not found");
+        if (owned.cycleId) {
+          const cycle = (
+            await db
+              .select({ status: billingCycles.status })
+              .from(billingCycles)
+              .where(eq(billingCycles.id, owned.cycleId))
+          )[0];
+          if (cycle?.status === "draft") throw new Error("Invoice not found");
+        }
+      }
       // An extra zero on a receipt marks the invoice paid and leaves the
       // difference belonging to nobody. Paying several months at once is
       // legitimate, so this asks rather than refuses.
@@ -7311,6 +8162,12 @@ export async function POST(request: Request) {
           status: invoice && paid >= invoice.totalAmount ? "paid" : "partial",
         })
         .where(eq(billingInvoices.id, payment.invoiceId));
+      if (invoice?.studentId)
+        await notifyStudent(db, invoice.studentId, {
+          type: "payment-verified",
+          title: `Payment on ${invoice.invoiceNo} confirmed`,
+          link: "/student/billing",
+        });
     } else if (action === "billing-item-adjust") {
       const itemId = asNumber(body.itemId);
       const item = (
@@ -7565,6 +8422,51 @@ export async function POST(request: Request) {
         expiresAt: asNullableText(body.expiresAt),
         createdBy: currentUser.displayName,
       });
+    } else if (action === "announcement-update") {
+      const announcementId = asNumber(body.announcementId);
+      if (!announcementId) throw new Error("Announcement is required");
+      if (!asText(body.title) || !asText(body.body))
+        throw new Error("Announcement title and message are required");
+      const status = asText(body.status, "published");
+      if (!["published", "draft", "archived"].includes(status))
+        throw new Error("Unknown announcement status");
+      const existing = (
+        await db
+          .select({ publishAt: announcements.publishAt })
+          .from(announcements)
+          .where(eq(announcements.id, announcementId))
+      )[0];
+      if (!existing) throw new Error("Announcement not found");
+      await db
+        .update(announcements)
+        .set({
+          title: asText(body.title),
+          body: asText(body.body),
+          audienceType: asText(body.audienceType, "all"),
+          hostelId: asNullableNumber(body.hostelId),
+          blockCode: asText(body.blockCode),
+          unitId: asNullableNumber(body.unitId),
+          priority: asText(body.priority, "normal"),
+          status,
+          pinned: boolValue(body.pinned),
+          publishAt: asNullableText(body.publishAt) || existing.publishAt,
+          expiresAt: asNullableText(body.expiresAt),
+        })
+        .where(eq(announcements.id, announcementId));
+    } else if (action === "announcement-status") {
+      // Taking a notice down (archived) or putting it back (published) —
+      // tenants only ever see published ones, so this is the whole switch.
+      const announcementId = asNumber(body.announcementId);
+      if (!announcementId) throw new Error("Announcement is required");
+      const status = asText(body.status);
+      if (!["published", "draft", "archived"].includes(status))
+        throw new Error("Unknown announcement status");
+      const updated = await db
+        .update(announcements)
+        .set({ status })
+        .where(eq(announcements.id, announcementId))
+        .returning({ id: announcements.id });
+      if (!updated.length) throw new Error("Announcement not found");
     } else if (action === "announcement-pin") {
       const announcementId = asNumber(body.announcementId);
       if (!announcementId) throw new Error("Announcement is required");
@@ -7593,12 +8495,80 @@ export async function POST(request: Request) {
         studentId: linkedStudentId,
         status: asText(body.status, "active"),
       };
-      if (body.userId)
+      // Resolved independently of the linked-student lookup above, which only
+      // runs when a student is picked: a tenant login can also be created by
+      // choosing the Tenant role directly.
+      const isNewTenant =
+        !body.userId &&
+        (
+          await db
+            .select({ id: appRoles.id })
+            .from(appRoles)
+            .where(
+              and(eq(appRoles.id, roleId), eq(appRoles.roleKey, "tenant")),
+            )
+        ).length > 0;
+      let insertedId: number | undefined;
+      if (body.userId) {
         await db
           .update(appUsers)
           .set(values)
           .where(eq(appUsers.id, asNumber(body.userId)));
-      else await db.insert(appUsers).values(values);
+        // An emailed link was issued for the old email/role/status; editing
+        // the account cancels it (staff can resend to the corrected address).
+        await revokePasswordSetupTokens(asNumber(body.userId));
+      } else
+        insertedId = (
+          await db
+            .insert(appUsers)
+            .values(values)
+            .returning({ id: appUsers.id })
+        )[0]?.id;
+      if (isNewTenant && insertedId) {
+        // Awaited on purpose: this runtime kills fire-and-forget work once the
+        // response flushes. A failure must not undo the account itself.
+        try {
+          const base = appBaseUrl();
+          const token = await createPasswordSetupToken(insertedId);
+          const setupUrl = passwordSetupUrl(base, token);
+          await sendEmail(
+            values.email,
+            "Set up your resident portal login",
+            `<p>Hi ${escapeHtml(values.displayName)},</p><p>Your hostel resident account is ready. Set your password to sign in:</p><p><a href="${escapeHtml(setupUrl)}">${escapeHtml(setupUrl)}</a></p><p>This link expires in 24 hours.</p>`,
+          );
+        } catch (error) {
+          noticeForClient = `Account created, but the setup email failed to send (${error instanceof Error ? error.message : "unknown error"}). Use "Resend setup email".`;
+        }
+      }
+    } else if (action === "user-resend-setup-email") {
+      // Explicit guard: a tenant session must never be able to trigger this,
+      // whatever the permission rows say.
+      if (currentUser.roleKey === "tenant")
+        throw new Error("Your role does not allow this action");
+      const targetId = asNumber(body.userId);
+      if (!targetId) throw new Error("User is required");
+      const target = (
+        await db
+          .select({
+            email: appUsers.email,
+            displayName: appUsers.displayName,
+            roleKey: appRoles.roleKey,
+          })
+          .from(appUsers)
+          .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+          .where(eq(appUsers.id, targetId))
+      )[0];
+      if (!target) throw new Error("User not found");
+      if (target.roleKey !== "tenant")
+        throw new Error("Setup emails can only be sent to resident accounts");
+      const base = appBaseUrl();
+      const token = await createPasswordSetupToken(targetId);
+      const setupUrl = passwordSetupUrl(base, token);
+      await sendEmail(
+        target.email,
+        "Set up your resident portal login",
+        `<p>Hi ${escapeHtml(target.displayName)},</p><p>Set your password to sign in:</p><p><a href="${escapeHtml(setupUrl)}">${escapeHtml(setupUrl)}</a></p><p>This link expires in 24 hours.</p>`,
+      );
     } else if (action === "user-set-password") {
       const targetId = asNumber(body.userId);
       const password = String(body.password || "");
@@ -7611,6 +8581,8 @@ export async function POST(request: Request) {
         .where(eq(appUsers.id, targetId));
       // Force a fresh sign-in everywhere with the old password.
       await db.delete(userSessions).where(eq(userSessions.userId, targetId));
+      // A manually chosen password supersedes any emailed setup link.
+      await revokePasswordSetupTokens(targetId);
     } else if (action === "notification-mark-read") {
       const notificationId = asNumber(body.notificationId);
       if (!notificationId) throw new Error("Notification is required");

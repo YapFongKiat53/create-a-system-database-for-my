@@ -42,12 +42,22 @@ services:
       - key: HOSTNAME
         value: "0.0.0.0"
       # sync: false means "prompt me for this in the dashboard, never store
-      # it in the repo". All three are secrets.
+      # it in the repo". The three below are secrets; the email settings
+      # follow after them.
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Resident password-setup emails. APP_URL is the public origin the
+      # emailed link points at (no trailing slash); the two Resend values
+      # are the API key and the verified sender address.
+      - key: APP_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
         sync: false
       # Deliberately absent: CPANEL_BASE_PATH. It exists only because cPanel
       # serves the app under /system without stripping the prefix. On Render

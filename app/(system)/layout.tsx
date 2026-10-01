@@ -250,6 +250,15 @@ function Chrome({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    // The Notifications page marks things read on its own; this keeps the
+    // bell's badge in step with it straight away.
+    const refresh = () => loadNotifications();
+    window.addEventListener("notifications-changed", refresh);
+    return () => window.removeEventListener("notifications-changed", refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const markNotificationRead = async (notificationId: number) => {
     await fetch(`${BASE_PATH}/api/system`, {
       method: "POST",
@@ -281,14 +290,21 @@ function Chrome({ children }: { children: ReactNode }) {
           permission.moduleKey === item.permission && permission.canView,
       ),
   );
-  const current =
-    navigation.find((item) => item.href === pathname) || navigation[0];
+  // /notifications is open to every signed-in role but is not a sidebar
+  // item, so it has to be let through the guard below by name.
+  const onNotificationsPage = pathname === "/notifications";
+  const current = onNotificationsPage
+    ? { label: "Notifications", note: "Everything sent to you" }
+    : navigation.find((item) => item.href === pathname) || navigation[0];
 
   // Bounce off a page the current role can no longer see (permission
   // changed, stale bookmark, direct URL entry) once we know who's signed in.
   useEffect(() => {
     if (!data) return;
-    if (!navigation.some((item) => item.href === pathname)) {
+    if (
+      !onNotificationsPage &&
+      !navigation.some((item) => item.href === pathname)
+    ) {
       router.replace(navigation[0]?.href || "/dashboard");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -464,7 +480,7 @@ function Chrome({ children }: { children: ReactNode }) {
                     </Link>
                   ))}
                   <Link
-                    href={`${BASE_PATH}/notifications`}
+                    href="/notifications"
                     className="notif-view-all"
                     onClick={() => setNotifOpen(false)}
                   >

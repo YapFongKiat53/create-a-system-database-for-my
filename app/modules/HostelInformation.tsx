@@ -179,6 +179,7 @@ function OccupantPopover({
   popoverRef,
   onClose,
   onEdit,
+  onClaim,
 }: {
   bed: Row;
   chipState: RoomState;
@@ -189,6 +190,7 @@ function OccupantPopover({
   // ReservationForm the Reservations tab's own "Edit reservation" button
   // does, rather than duplicating a second edit surface here.
   onEdit?: () => void;
+  onClaim?: () => void;
 }) {
   const isReserved = chipState === "awaiting-check-in";
   return (
@@ -248,6 +250,21 @@ function OccupantPopover({
             </div>
           )}
         </dl>
+      ) : bed.assignmentStatus === "pending-occupant" ? (
+        <>
+          <p className="occupant-popover-empty">
+            Part of a whole-unit booking — not yet claimed.
+          </p>
+          {onClaim && (
+            <button
+              type="button"
+              className="secondary compact occupant-popover-edit"
+              onClick={onClaim}
+            >
+              Claim this room
+            </button>
+          )}
+        </>
       ) : (
         <p className="occupant-popover-empty">
           No student profile is linked to this tenancy.
@@ -547,14 +564,41 @@ export function HostelModule({
   );
   const tenancyFor = (reservation: Row) =>
     tenancyByReservation.get(String(reservation.id)) || null;
+  // A whole-unit booking can have several claimed occupants at once, each on
+  // their own check-in schedule — tenancyFor only ever returns one of them
+  // (whichever is last in data.students), so it cannot answer "is this
+  // booking awaiting/checked in" on its own for a group. These two look at
+  // every claimed occupant instead. A room nobody has claimed yet doesn't
+  // count either way — that's a "no name yet" concern the Manage drawer's
+  // room list already shows, not a check-in concern.
+  const groupOccupants = (reservation: Row) =>
+    data.students.filter(
+      (student: Row) => student.sourceReservationId === reservation.id,
+    );
   const isAwaitingCheckIn = (reservation: Row) => {
+    if (reservation.reservationType === "group")
+      return groupOccupants(reservation).some(
+        (student: Row) =>
+          student.bedStatus === "reserved" && !student.checkedInAt,
+      );
     const tenancy = tenancyFor(reservation);
     return Boolean(
       tenancy && tenancy.bedStatus === "reserved" && !tenancy.checkedInAt,
     );
   };
-  const isCheckedIn = (reservation: Row) =>
-    Boolean(tenancyFor(reservation)?.checkedInAt);
+  const isCheckedIn = (reservation: Row) => {
+    if (reservation.reservationType === "group") {
+      const occupants = groupOccupants(reservation);
+      // Nobody claimed yet is "not checked in", not vacuously true — an
+      // empty array's .every() returns true, which would otherwise mark an
+      // entirely-unclaimed booking as checked in.
+      return (
+        occupants.length > 0 &&
+        occupants.every((student: Row) => student.checkedInAt)
+      );
+    }
+    return Boolean(tenancyFor(reservation)?.checkedInAt);
+  };
   // "Reserved" means one thing to staff: a booking that is still waiting for
   // its student to walk in. Whether the system has already turned it into a
   // tenancy underneath (status `converted`, which a payment now does on its
@@ -893,8 +937,18 @@ export function HostelModule({
         if (bedId) map.set(String(bedId), row);
       }
     }
+    // A whole-unit booking's beds aren't referenced by the reservation's own
+    // bed-pointer fields (it holds a whole unit, not one bed) — link them
+    // via the placeholder assignment's sourceReservationId instead.
+    const byId = new Map(data.reservations.map((row) => [row.id, row]));
+    for (const bed of data.bedSpaces) {
+      if (bed.assignmentStatus !== "pending-occupant" || !bed.sourceReservationId)
+        continue;
+      const row = byId.get(bed.sourceReservationId);
+      if (row) map.set(String(bed.id), row);
+    }
     return map;
-  }, [data.reservations]);
+  }, [data.reservations, data.bedSpaces]);
 
   const [blockedNotice, setBlockedNotice] = useState("");
   const showBlockedNotice = (bed: Row) => {
@@ -911,6 +965,7 @@ export function HostelModule({
   const [occupantPopoverBedId, setOccupantPopoverBedId] = useState<
     number | null
   >(null);
+  const [claimBed, setClaimBed] = useState<Row | null>(null);
   const occupantPopoverRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (occupantPopoverBedId === null) return;
@@ -929,30 +984,6 @@ export function HostelModule({
     <>
       <div className="sales-overview">
 
-        <section className="directory-header">
-          <div>
-            <h1>Hostel Directory</h1>
-            <p>All properties and their unit overview at a glance.</p>
-          </div>
-          <div className="directory-header-actions">
-            {canUseSales && (
-              <button className="primary" onClick={() => openReservation()}>
-                + New reservation
-              </button>
-            )}
-            {canUseSales && (
-              <button
-                className="primary"
-                onClick={() => {
-                  setEditingHostel(null);
-                  setHostelModalOpen(true);
-                }}
-              >
-                + Add property
-              </button>
-            )}
-          </div>
-        </section>
 
         <section className="metrics-container">
           <Metric
@@ -976,16 +1007,17 @@ export function HostelModule({
           <Metric
             label="OVERALL OCCUPANCY"
             value={`${unitOccupancyRate}%`}
-            note={`${totals.vacant} beds vacant now${
-              totals.awaitingCheckIn
+            note={`${totals.vacant} beds vacant now${totals.awaitingCheckIn
                 ? ` · ${totals.awaitingCheckIn} awaiting check-in`
                 : ""
-            }`}
+              }`}
             tone="coral"
           />
         </section>
 
       </div>
+
+
       <section className="workspace panel hostel-workspace">
         <div className="workspace-tabs sticky-tabs">
           {canUseSales && (
@@ -1029,6 +1061,26 @@ export function HostelModule({
         </div>
         {currentHostelTab === "availability" && (
           <>
+            <section className="directory-header margin-top-12">
+              <div className="directory-header-actions">
+                {canUseSales && (
+                  <button className="primary" onClick={() => openReservation()}>
+                    + New reservation
+                  </button>
+                )}
+                {canUseSales && (
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      setEditingHostel(null);
+                      setHostelModalOpen(true);
+                    }}
+                  >
+                    + Add property
+                  </button>
+                )}
+              </div>
+            </section>
             {blockedNotice && (
               <div className="notice-banner blocked">{blockedNotice}</div>
             )}
@@ -1200,88 +1252,88 @@ export function HostelModule({
                     <tbody>
                       {unitsInActiveGroup.map(
                         ({ unit, beds: unitBeds, hostelName }) => (
-                        <tr key={unit.id}>
-                          {isAllHostelsAvailability && <td>{hostelName}</td>}
-                          <td>
-                            <strong>{unit.unitCode}</strong>
-                            <small>
-                              {unitBeds.length} room
-                              {unitBeds.length === 1 ? "" : "s"}
-                            </small>
-                          </td>
-                          <td>{genderLabel(unit.gender)}</td>
-                          <td>
-                            <div className="room-chip-row">
-                              {unitBeds.map((bed) => {
-                                const chipState = roomStatus(bed);
-                                const available =
-                                  chipState === "available" ||
-                                  chipState === "preparing";
-                                const dueSoon = chipState === "ending-soon";
-                                // The three states that actually have someone
-                                // attached — a live tenancy backs all three,
-                                // just at a different stage (reserved hasn't
-                                // arrived, ending-soon is occupied same as
-                                // occupied itself). Blocked rooms never do.
-                                const hasOccupant =
-                                  chipState === "occupied" ||
-                                  chipState === "ending-soon" ||
-                                  chipState === "awaiting-check-in";
-                                const pending = turnoverPendingFor(bed);
-                                return (
-                                  <span
-                                    key={bed.id}
-                                    style={{
-                                      position: "relative",
-                                      display: "inline-block",
-                                    }}
-                                  >
-                                    <button
-                                      type="button"
-                                      className={`room-chip ${chipState}`}
-                                      title={
-                                        dueSoon
-                                          ? `${ROOM_STATE_LABELS[chipState]} — tenancy ends within 2 weeks. Can be pre-reserved.`
-                                          : chipState === "preparing"
-                                            ? `${ROOM_STATE_LABELS[chipState]} — empty, but ${pending
+                          <tr key={unit.id}>
+                            {isAllHostelsAvailability && <td>{hostelName}</td>}
+                            <td>
+                              <strong>{unit.unitCode}</strong>
+                              <small>
+                                {unitBeds.length} room
+                                {unitBeds.length === 1 ? "" : "s"}
+                              </small>
+                            </td>
+                            <td>{genderLabel(unit.gender)}</td>
+                            <td>
+                              <div className="room-chip-row">
+                                {unitBeds.map((bed) => {
+                                  const chipState = roomStatus(bed);
+                                  const available =
+                                    chipState === "available" ||
+                                    chipState === "preparing";
+                                  const dueSoon = chipState === "ending-soon";
+                                  // The three states that actually have someone
+                                  // attached — a live tenancy backs all three,
+                                  // just at a different stage (reserved hasn't
+                                  // arrived, ending-soon is occupied same as
+                                  // occupied itself). Blocked rooms never do.
+                                  const hasOccupant =
+                                    chipState === "occupied" ||
+                                    chipState === "ending-soon" ||
+                                    chipState === "awaiting-check-in";
+                                  const pending = turnoverPendingFor(bed);
+                                  return (
+                                    <span
+                                      key={bed.id}
+                                      style={{
+                                        position: "relative",
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        className={`room-chip ${chipState}`}
+                                        title={
+                                          dueSoon
+                                            ? `${ROOM_STATE_LABELS[chipState]} — tenancy ends within 2 weeks. Can be pre-reserved.`
+                                            : chipState === "preparing"
+                                              ? `${ROOM_STATE_LABELS[chipState]} — empty, but ${pending
                                                 .map((stage) =>
                                                   stage === "inspection"
                                                     ? "inspection"
                                                     : "cleaning",
                                                 )
                                                 .join(" and ")} still open. Can be booked for a later date.`
-                                            : chipState === "awaiting-check-in"
-                                              ? `${ROOM_STATE_LABELS[chipState]} — paid for, the student has not arrived yet. Click for details.`
-                                              : hasOccupant
-                                                ? `${ROOM_STATE_LABELS[chipState]} — click for who's staying here.`
-                                                : ROOM_STATE_LABELS[chipState]
-                                      }
-                                      onClick={() => {
-                                        if (available || dueSoon) {
-                                          openReservation(bed);
-                                        } else if (hasOccupant) {
-                                          setOccupantPopoverBedId((current) =>
-                                            current === bed.id ? null : bed.id,
-                                          );
-                                        } else {
-                                          showBlockedNotice(bed);
+                                              : chipState === "awaiting-check-in"
+                                                ? `${ROOM_STATE_LABELS[chipState]} — paid for, the student has not arrived yet. Click for details.`
+                                                : hasOccupant
+                                                  ? `${ROOM_STATE_LABELS[chipState]} — click for who's staying here.`
+                                                  : ROOM_STATE_LABELS[chipState]
                                         }
-                                      }}
-                                    >
-                                      {bed.legacyCode || `Room ${bed.roomLabel}`}
-                                    </button>
-                                    {occupantPopoverBedId === bed.id && (
-                                      <OccupantPopover
-                                        bed={bed}
-                                        chipState={chipState}
-                                        popoverRef={occupantPopoverRef}
-                                        onClose={() =>
-                                          setOccupantPopoverBedId(null)
-                                        }
-                                        onEdit={
-                                          chipState === "awaiting-check-in" &&
-                                          reservationByBedId.has(String(bed.id))
-                                            ? () => {
+                                        onClick={() => {
+                                          if (available || dueSoon) {
+                                            openReservation(bed);
+                                          } else if (hasOccupant) {
+                                            setOccupantPopoverBedId((current) =>
+                                              current === bed.id ? null : bed.id,
+                                            );
+                                          } else {
+                                            showBlockedNotice(bed);
+                                          }
+                                        }}
+                                      >
+                                        {bed.legacyCode || `Room ${bed.roomLabel}`}
+                                      </button>
+                                      {occupantPopoverBedId === bed.id && (
+                                        <OccupantPopover
+                                          bed={bed}
+                                          chipState={chipState}
+                                          popoverRef={occupantPopoverRef}
+                                          onClose={() =>
+                                            setOccupantPopoverBedId(null)
+                                          }
+                                          onEdit={
+                                            chipState === "awaiting-check-in" &&
+                                              reservationByBedId.has(String(bed.id))
+                                              ? () => {
                                                 setOccupantPopoverBedId(null);
                                                 openReservation(
                                                   bed,
@@ -1290,17 +1342,26 @@ export function HostelModule({
                                                   )!,
                                                 );
                                               }
-                                            : undefined
-                                        }
-                                      />
-                                    )}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                              : undefined
+                                          }
+                                          onClaim={
+                                            bed.assignmentStatus ===
+                                              "pending-occupant"
+                                              ? () => {
+                                                setOccupantPopoverBedId(null);
+                                                setClaimBed(bed);
+                                              }
+                                              : undefined
+                                          }
+                                        />
+                                      )}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
                       {!unitsInActiveGroup.length && (
                         <tr>
                           <td colSpan={isAllHostelsAvailability ? 4 : 3}>
@@ -1324,82 +1385,6 @@ export function HostelModule({
         )}
         {currentHostelTab === "reservations" && (
           <section className="reservation-page">
-            {/* Page heading */}
-            <header className="reservation-hero">
-              <div className="reservation-hero-copy">
-                <div className="reservation-eyebrow-row">
-                  <span className="reservation-eyebrow">INDIVIDUAL & GROUP</span>
-
-                  <span className="reservation-result-count">
-                    {filteredReservations.length}{" "}
-                    {filteredReservations.length === 1
-                      ? "reservation"
-                      : "reservations"}
-                  </span>
-                </div>
-
-                <h3>Bookings from enquiry to arrival</h3>
-
-                <p>
-                  Edit reservation details, record multiple payments, check a
-                  student in on the day they arrive, or cancel an enquiry.
-                </p>
-              </div>
-
-              <div className="reservation-hero-side">
-                <div className="reservation-illustration" aria-hidden="true">
-                  <div className="illustration-calendar">
-                    <div className="illustration-calendar-hooks">
-                      <i />
-                      <i />
-                      <i />
-                    </div>
-
-                    <div className="illustration-calendar-grid">
-                      {Array.from({ length: 12 }).map((_, index) => (
-                        <i key={index} />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="illustration-checklist">
-                    <div className="illustration-clip" />
-
-                    <div>
-                      <span>✓</span>
-                      <i />
-                    </div>
-
-                    <div>
-                      <span>✓</span>
-                      <i />
-                    </div>
-
-                    <div>
-                      <span>✓</span>
-                      <i />
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="reservation-btn reservation-btn-primary"
-                  onClick={() => openReservation()}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                    className="reservation-button-icon"
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-
-                  New reservation
-                </button>
-              </div>
-            </header>
-
             <div className="workspace-tabs">
               <button
                 type="button"
@@ -1773,78 +1758,129 @@ export function HostelModule({
                             </p>
                           ) : null)}
 
+                        {/* The group equivalent: several claimed occupants,
+                            each on their own schedule, so this counts rather
+                            than naming one. A room nobody has claimed yet
+                            isn't counted either way — Manage's room list
+                            already covers "no name yet" as its own state. */}
+                        {r.status === "converted" &&
+                          r.reservationType === "group" &&
+                          (() => {
+                            const occupants = groupOccupants(r);
+                            if (!occupants.length) return null;
+                            const checkedInCount = occupants.filter(
+                              (occupant: Row) => occupant.checkedInAt,
+                            ).length;
+                            return checkedInCount < occupants.length ? (
+                              <p className="reservation-checkin-note awaiting">
+                                {checkedInCount} of {occupants.length} claimed
+                                room{occupants.length > 1 ? "s" : ""} checked in
+                              </p>
+                            ) : (
+                              <p className="reservation-checkin-note done">
+                                All {occupants.length} claimed room
+                                {occupants.length > 1 ? "s" : ""} checked in
+                              </p>
+                            );
+                          })()}
+
                         {(r.status === "reserved" ||
                           r.status === "converted") && (
-                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                            {/* Only a group still confirms anything by hand:
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                              {/* Only a group still confirms anything by hand:
                                 it holds a unit rather than a bed, so there is
                                 no tenancy for a payment to create. An
                                 individual booking becomes a tenancy the
                                 moment its payment is recorded — the step that
                                 used to live here. */}
-                            {r.status === "reserved" &&
-                              r.reservationType === "group" && (
-                                <button
-                                  type="button"
-                                  className="reservation-btn reservation-btn-convert"
-                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                                  disabled={busy}
-                                  onClick={() => setConvertReservation(r)}
-                                >
-                                  Confirm unit
-                                </button>
-                              )}
-                            {/* Paid, but nobody picked a room, so there is
+                              {r.status === "reserved" &&
+                                r.reservationType === "group" && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-convert"
+                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => setConvertReservation(r)}
+                                  >
+                                    Confirm unit
+                                  </button>
+                                )}
+                              {/* Paid, but nobody picked a room, so there is
                                 nothing to promote it into. Says which step is
                                 missing instead of leaving the card inert. */}
-                            {r.status === "reserved" &&
-                              r.reservationType !== "group" &&
-                              commitsInventory(r) &&
-                              !r.provisionalBedSpaceId && (
-                                <p className="reservation-needs-room">
-                                  Paid, but no room chosen — edit this booking
-                                  and pick one to complete it.
-                                </p>
-                              )}
+                              {r.status === "reserved" &&
+                                r.reservationType !== "group" &&
+                                commitsInventory(r) &&
+                                !r.provisionalBedSpaceId && (
+                                  <p className="reservation-needs-room">
+                                    Paid, but no room chosen — edit this booking
+                                    and pick one to complete it.
+                                  </p>
+                                )}
 
-                            {/* The arrival is the next thing to do on this
-                                booking, so it leads over Change room. */}
-                            {isAwaitingCheckIn(r) && (
+                              {/* The arrival is the next thing to do on this
+                                booking, so it leads over Change room.
+                                Excluded for a group booking: tenancyFor
+                                picks one arbitrary claimed occupant out of
+                                what can be several, so this button (and the
+                                status note above it) would act on the wrong
+                                person. A group booking's own Manage drawer
+                                has a correct, per-room Check in instead. */}
+                              {r.reservationType !== "group" &&
+                                isAwaitingCheckIn(r) && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-convert"
+                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => setCheckInTenancy(tenancyFor(r))}
+                                  >
+                                    Check in
+                                  </button>
+                                )}
+                              {/* The group version of the button above: one or
+                                more claimed rooms are awaiting arrival, but
+                                which one to check in isn't a single choice
+                                the way it is for an individual booking, so
+                                this opens Manage's per-room list instead of
+                                a check-in form directly. */}
+                              {r.reservationType === "group" &&
+                                isAwaitingCheckIn(r) && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-convert"
+                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => setManageReservation(r)}
+                                  >
+                                    Check in
+                                  </button>
+                                )}
+
+                              {r.status === "converted" &&
+                                r.reservationType !== "group" && (
+                                  <button
+                                    type="button"
+                                    className="reservation-btn reservation-btn-secondary"
+                                    style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
+                                    disabled={busy}
+                                    onClick={() => setChangeRoomReservation(r)}
+                                  >
+                                    Change room
+                                  </button>
+                                )}
+
                               <button
                                 type="button"
-                                className="reservation-btn reservation-btn-convert"
+                                className="reservation-btn reservation-btn-secondary"
                                 style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
                                 disabled={busy}
-                                onClick={() => setCheckInTenancy(tenancyFor(r))}
+                                onClick={() => setManageReservation(r)}
                               >
-                                Check in
+                                Manage
                               </button>
-                            )}
-
-                            {r.status === "converted" &&
-                              r.reservationType !== "group" && (
-                                <button
-                                  type="button"
-                                  className="reservation-btn reservation-btn-secondary"
-                                  style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                                  disabled={busy}
-                                  onClick={() => setChangeRoomReservation(r)}
-                                >
-                                  Change room
-                                </button>
-                              )}
-
-                            <button
-                              type="button"
-                              className="reservation-btn reservation-btn-secondary"
-                              style={{ flex: 1, padding: '6px 4px', fontSize: '11px', justifyContent: 'center' }}
-                              disabled={busy}
-                              onClick={() => setManageReservation(r)}
-                            >
-                              Manage
-                            </button>
-                          </div>
-                        )}
+                            </div>
+                          )}
                       </article>
                     );
                   })}
@@ -2651,7 +2687,7 @@ export function HostelModule({
         <Modal
           title="Confirm the unit"
           kicker="GROUP BOOKING"
-          description="Confirm the whole unit this group takes. Tenant names can be added later in Student Information."
+          description="Confirm the whole unit this group takes. Rooms with tenant details already filled in are claimed automatically; the rest can be filled in later from Manage."
           onClose={() => setConvertReservation(null)}
         >
           <ConvertAssignmentForm
@@ -2660,6 +2696,23 @@ export function HostelModule({
             busy={busy}
             convertReservation={convertReservation}
             onDone={() => setConvertReservation(null)}
+          />
+        </Modal>
+      )}
+      {claimBed && (
+        <Modal
+          title={claimBed.legacyCode || `Room ${claimBed.roomLabel}`}
+          kicker="WHOLE-UNIT BOOKING"
+          description="Name who is actually staying in this room."
+          onClose={() => setClaimBed(null)}
+        >
+          <ClaimRoomForm
+            data={data}
+            save={save}
+            busy={busy}
+            bed={claimBed}
+            reservation={reservationByBedId.get(String(claimBed.id))}
+            onDone={() => setClaimBed(null)}
           />
         </Modal>
       )}
@@ -2706,6 +2759,14 @@ export function HostelModule({
             onEditReservation={() => {
               setManageReservation(null);
               openReservation(null, manageReservation);
+            }}
+            onClaimBed={(bed) => {
+              setManageReservation(null);
+              setClaimBed(bed);
+            }}
+            onCheckIn={(tenancy) => {
+              setManageReservation(null);
+              setCheckInTenancy(tenancy);
             }}
             onDone={() => setManageReservation(null)}
           />
@@ -2777,9 +2838,9 @@ function ConvertAssignmentForm({
   // room this reservation already holds — the room stays the default.
   const reservedBedAvailable = Boolean(
     reservedBed &&
-      (reservedBed.status === "vacant" ||
-        (reservedBed.availableFrom &&
-          reservedBed.availableFrom <= convertReservation.targetMoveInDate)),
+    (reservedBed.status === "vacant" ||
+      (reservedBed.availableFrom &&
+        reservedBed.availableFrom <= convertReservation.targetMoveInDate)),
   );
   const reservedUnit = data.units.find(
     (unit) => unit.id === convertReservation.preferredUnitId,
@@ -3056,6 +3117,179 @@ function ConvertAssignmentForm({
   );
 }
 
+// A whole-unit booking's room starts as a placeholder (Task 4/5 in the
+// implementation plan) — this names who's actually staying in it. Kept
+// deliberately smaller than the full Student Information "add student"
+// form: full name plus the handful of fields staff realistically have on
+// hand when someone moves in; anything else is filled in later from
+// Student Information the normal way.
+function ClaimRoomForm({
+  data,
+  save,
+  busy,
+  bed,
+  reservation,
+  onDone,
+}: {
+  data: Data;
+  save: any;
+  busy: boolean;
+  bed: Row;
+  reservation: Row | undefined;
+  onDone: () => void;
+}) {
+  const [mode, setMode] = useState<"new" | "existing">("new");
+  // Only the first claim in this booking defaults to payer — every later
+  // one defaults unchecked, since claiming as payer zeroes whoever paid
+  // before. Read from data.bedSpaces (not just this one bed) so it sees the
+  // OTHER rooms in the same booking, keyed by the shared sourceReservationId.
+  const hasExistingPayer = data.bedSpaces.some(
+    (other: Row) =>
+      other.sourceReservationId === bed.sourceReservationId &&
+      other.assignmentStatus === "active" &&
+      Number(other.assignmentRental || 0) > 0,
+  );
+  const [isPayer, setIsPayer] = useState(!hasExistingPayer);
+  const [gender, setGender] = useState("unspecified");
+  const [isStudent, setIsStudent] = useState(true);
+  const rentIsSet = Number(reservation?.wholeUnitMonthlyRent || 0) > 0;
+  const existingStudentOptions = data.students
+    // data.students has no `status` field (that was a mistaken guess — the
+    // real field is `profileStatus`, and it isn't what matters here anyway).
+    // What actually decides whether someone can be claimed into this room is
+    // whether they already have an active tenancy: `assignmentId` is only
+    // populated by the active-assignment join in selectStudents, matching
+    // exactly what the server's own "already linked" check in
+    // whole-unit-claim rejects.
+    .filter((student: Row) => !student.assignmentId)
+    .map((student: Row) => ({
+      value: student.id,
+      label: `${student.fullName}${student.studentCode ? ` (${student.studentCode})` : ""}`,
+    }));
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const ok = await save(
+          {
+            action: "whole-unit-claim",
+            assignmentId: bed.assignmentId,
+            isPayer,
+            // Sent explicitly (not through formValues) and only when
+            // claiming a NEW profile — an unchecked checkbox is simply
+            // absent from FormData and a checked one sends the string
+            // "on", neither of which boolValue on the server expects;
+            // linking an EXISTING student must never overwrite their real
+            // gender/student status with these fields' form defaults.
+            ...(mode === "new" ? { gender, isStudent } : {}),
+            ...formValues(e),
+          },
+          "Room claimed",
+        );
+        if (ok) onDone();
+      }}
+    >
+      <div className="wide" style={{ display: "flex", gap: "12px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <input
+            type="radio"
+            checked={mode === "new"}
+            onChange={() => setMode("new")}
+          />
+          New student
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <input
+            type="radio"
+            checked={mode === "existing"}
+            onChange={() => setMode("existing")}
+          />
+          Existing student
+        </label>
+      </div>
+      {mode === "existing" ? (
+        <label className="wide">
+          Student
+          <SearchSelect
+            name="studentId"
+            options={existingStudentOptions}
+            required
+          />
+        </label>
+      ) : (
+        <>
+          <label className="wide">
+            Full name
+            <input name="fullName" required placeholder="e.g. John Doe" />
+          </label>
+          <label>
+            IC / Passport
+            <input name="identityNo" />
+          </label>
+          <label>
+            Phone number
+            <input name="contactNumber" />
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" />
+          </label>
+          <label>
+            Gender
+            <select value={gender} onChange={(event) => setGender(event.target.value)}>
+              <option value="unspecified">Not set</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="checkbox"
+              checked={isStudent}
+              onChange={(event) => setIsStudent(event.target.checked)}
+            />
+            Student
+          </label>
+        </>
+      )}
+      <label
+        className="wide"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          opacity: rentIsSet ? 1 : 0.6,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={isPayer && rentIsSet}
+          disabled={!rentIsSet}
+          onChange={(event) => setIsPayer(event.target.checked)}
+        />
+        This person pays the full unit rent
+        {rentIsSet ? ` (${money(reservation!.wholeUnitMonthlyRent)}/month)` : ""}
+      </label>
+      {!rentIsSet && (
+        <p className="occupant-popover-empty wide">
+          No rent is set on this booking yet — edit the reservation to set
+          one before claiming a payer. Claiming now leaves everyone,
+          including this room, at RM0.
+        </p>
+      )}
+      <div className="form-actions wide">
+        <button type="button" className="secondary" onClick={onDone}>
+          Cancel
+        </button>
+        <button className="primary" disabled={busy}>
+          Claim room
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // A fresh instance mounts every time the "Change room" modal opens (the
 // caller only renders it while changeRoomReservation is set). Monthly
 // rental / access card deposit auto-fill from the newly picked room's own
@@ -3110,9 +3344,9 @@ function ChangeRoomForm({
   const today = new Date().toISOString().slice(0, 10);
   const effectiveRate = (bed: Row) =>
     bed.promotionRate !== null &&
-    bed.promotionRate !== undefined &&
-    (!bed.promotionStartDate || bed.promotionStartDate <= today) &&
-    (!bed.promotionEndDate || bed.promotionEndDate >= today)
+      bed.promotionRate !== undefined &&
+      (!bed.promotionStartDate || bed.promotionStartDate <= today) &&
+      (!bed.promotionEndDate || bed.promotionEndDate >= today)
       ? bed.promotionRate
       : bed.currentRental;
   const charges: Row[] = reservation.charges || [];
@@ -3503,6 +3737,8 @@ function ReservationManageDetails({
   load,
   reservation: r,
   onEditReservation,
+  onClaimBed,
+  onCheckIn,
   onDone,
 }: {
   data: Data;
@@ -3511,6 +3747,8 @@ function ReservationManageDetails({
   load: (modules?: string[]) => Promise<void>;
   reservation: Row;
   onEditReservation: () => void;
+  onClaimBed: (bed: Row) => void;
+  onCheckIn: (tenancy: Row) => void;
   onDone: () => void;
 }) {
   const lightbox = useLightbox();
@@ -3601,6 +3839,68 @@ function ReservationManageDetails({
           <span style={{ fontSize: '13px' }}>{commitmentDescription}</span>
         </div>
       </div>
+
+      {/* Whole-unit claim progress. Filling in a room here is optional —
+          confirming the unit never required it, and it isn't required here
+          either. Looks up the matching data.students row for a claimed bed
+          (by assignmentId) rather than trusting bed fields directly: beds
+          carry no checkedInAt at all, and reusing the exact row
+          CheckInModal already expects avoids reshaping it by hand. */}
+      {r.reservationType === "group" && isConverted && (
+        <div className="reservation-preferences" style={{ flexDirection: "column", gap: "6px" }}>
+          <strong style={{ fontSize: "13px" }}>Rooms in this unit</strong>
+          {data.bedSpaces
+            .filter((bed: Row) => bed.sourceReservationId === r.id)
+            .map((bed: Row) => {
+              const claimedStudent =
+                bed.assignmentStatus === "active"
+                  ? data.students.find(
+                    (student: Row) => student.assignmentId === bed.assignmentId,
+                  )
+                  : null;
+              return (
+                <div
+                  key={bed.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                  }}
+                >
+                  <span>
+                    {bed.legacyCode || `Room ${bed.roomLabel}`}
+                    {claimedStudent
+                      ? ` · ${claimedStudent.fullName}${Number(bed.assignmentRental || 0) > 0 ? " · payer" : ""
+                      }${claimedStudent.checkedInAt ? " · checked in" : ""}`
+                      : " · Pending"}
+                  </span>
+                  {bed.assignmentStatus === "pending-occupant" && (
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      disabled={busy}
+                      onClick={() => onClaimBed(bed)}
+                    >
+                      Fill in student
+                    </button>
+                  )}
+                  {claimedStudent && !claimedStudent.checkedInAt && (
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      disabled={busy}
+                      onClick={() => onCheckIn(claimedStudent)}
+                    >
+                      Check in
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
 
       {/* Payment summary */}
       <div
@@ -3863,9 +4163,9 @@ function ReservationManageDetails({
                     result.id,
                     data.currentUser?.displayName,
                     proofLabel ||
-                      (chargeLabelsSelected.length
-                        ? `${chargeLabelsSelected.join(" + ")} — ${r.studentName}`
-                        : undefined),
+                    (chargeLabelsSelected.length
+                      ? `${chargeLabelsSelected.join(" + ")} — ${r.studentName}`
+                      : undefined),
                   );
                   if (uploaded.id && result.linkedPaymentId) {
                     await linkAttachment(
@@ -4144,6 +4444,65 @@ function ReservationEditor({
       editingReservation?.provisionalBedSpaceId || reservationBed?.id || "",
     ),
   );
+  const [wholeUnitRent, setWholeUnitRent] = useState<number | "">(
+    editingReservation?.wholeUnitMonthlyRent ?? "",
+  );
+  const [representativeType, setRepresentativeType] = useState(
+    editingReservation?.representativeType || "person",
+  );
+  // A booking made before this plan can be 'institute' — no longer an
+  // offered choice, but still shown as the company-style form (and left
+  // untouched in the database) unless the user explicitly changes the
+  // dropdown. See the design spec's Decisions section.
+  const isCompanyBooking =
+    representativeType === "company" || representativeType === "institute";
+
+  type GroupTenantSlot = {
+    fullName: string;
+    identityNo: string;
+    contactNumber: string;
+    gender: string;
+    isStudent: boolean;
+    isPayer: boolean;
+  };
+  const blankGroupTenantSlot = (): GroupTenantSlot => ({
+    fullName: "",
+    identityNo: "",
+    contactNumber: "",
+    gender: "unspecified",
+    isStudent: true,
+    isPayer: false,
+  });
+  // Hydrated from the reservation's own already-saved slots when editing
+  // (Task 2 was extended, after it shipped, to attach `groupTenants` to
+  // every reservation the GET payload returns — same pattern as the
+  // existing `charges` array). Without this, opening an existing whole-unit
+  // booking to fix an unrelated field and saving would submit an EMPTY
+  // groupTenants array, and Task 2's "replace with whatever was submitted"
+  // semantics would silently delete every already-typed tenant.
+  const [groupTenants, setGroupTenants] = useState<GroupTenantSlot[]>(() => {
+    const saved: Row[] = editingReservation?.groupTenants || [];
+    if (!saved.length) return [];
+    const bySlot = new Map(saved.map((row) => [Number(row.slotIndex), row]));
+    const maxIndex = Math.max(...saved.map((row) => Number(row.slotIndex)));
+    return Array.from({ length: maxIndex + 1 }, (_, i) => {
+      const row = bySlot.get(i);
+      return row
+        ? {
+          fullName: row.fullName || "",
+          identityNo: row.identityNo || "",
+          contactNumber: row.contactNumber || "",
+          gender: row.gender || "unspecified",
+          isStudent: Boolean(row.isStudent),
+          isPayer: Boolean(row.isPayer),
+        }
+        : blankGroupTenantSlot();
+    });
+  });
+  const updateGroupTenant = (index: number, patch: Partial<GroupTenantSlot>) =>
+    setGroupTenants((current) =>
+      current.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)),
+    );
 
   // Standard first-payment pricing for hostels with fixed rates (Damai,
   // Nadayu) — derived from hostel + room category + nationality so staff
@@ -4166,14 +4525,14 @@ function ReservationEditor({
   const standardCharges =
     standardRate !== undefined
       ? {
-          "first-month-rental": standardRate,
-          deposit: depositFor(standardRate),
-          "admin-fee":
-            STANDARD_ADMIN_FEE[nationality] || STANDARD_ADMIN_FEE.Malaysian,
-          "access-card-deposit":
-            STANDARD_CARD_PRICE[selectedHostelCode] || 0,
-          "access-card-handling": STANDARD_CARD_HANDLING_FEE,
-        }
+        "first-month-rental": standardRate,
+        deposit: depositFor(standardRate),
+        "admin-fee":
+          STANDARD_ADMIN_FEE[nationality] || STANDARD_ADMIN_FEE.Malaysian,
+        "access-card-deposit":
+          STANDARD_CARD_PRICE[selectedHostelCode] || 0,
+        "access-card-handling": STANDARD_CARD_HANDLING_FEE,
+      }
       : null;
 
   // Only auto-fill for a brand-new reservation — never silently overwrite
@@ -4225,11 +4584,90 @@ function ReservationEditor({
   const blockedBeds = hostelBeds.filter(
     (bed) => !block || blockOf(bed.unitCode) === block,
   );
-  const unitOptions = [
-    ...new Map(
-      blockedBeds.map((bed) => [String(bed.unitId), String(bed.unitCode)]),
-    ).entries(),
-  ].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
+  // Whole-unit picker: a unit qualifies only if EVERY bed in it qualifies —
+  // vacant, or occupied by a tenant contractually due out on or before the
+  // target move-in date. Built from every bed regardless of current status
+  // (hostelBeds/blockedBeds above only keep the already-selectable ones),
+  // so an occupied bed can still be seen and tested, not silently dropped.
+  const allUnitBeds = data.bedSpaces.filter(
+    (bed) =>
+      (!hostelId || String(bed.hostelId) === hostelId) &&
+      (!block || blockOf(bed.unitCode) === block) &&
+      genderFits(bed.gender),
+  );
+  const bedsByUnit = new Map<string, Row[]>();
+  for (const bed of allUnitBeds) {
+    const key = String(bed.unitId);
+    const list = bedsByUnit.get(key);
+    if (list) list.push(bed);
+    else bedsByUnit.set(key, [bed]);
+  }
+  const wholeUnitOptions = [...bedsByUnit.entries()]
+    // isSelectable(bed) alone is correct here — do NOT add a
+    // `bed.status === "vacant" ||` short-circuit in front of it. A vacant
+    // bed can still be provisionally held by another open reservation;
+    // isSelectable's own !reservedBedIds.has(bed.id) check is what excludes
+    // that, and a `vacant ||` in front of it would bypass that check for
+    // every vacant bed, silently reintroducing the double-booking bug this
+    // task exists to close (confirmed by review during Task 4's server-side
+    // equivalent of this same check).
+    .filter(([, beds]) =>
+      beds.every(
+        (bed) =>
+          isSelectable(bed) ||
+          // A bed this same reservation already holds (confirmed earlier,
+          // possibly claimed) is never a conflict for editing THIS booking —
+          // without this, every converted whole-unit reservation's own unit
+          // would drop out of its own edit picker the moment it's confirmed
+          // (every bed sits at 'reserved'/'occupied' by then), making the
+          // required field impossible to submit.
+          (editingReservation &&
+            bed.sourceReservationId === editingReservation.id),
+      ),
+    )
+    .map(([id, beds]) => {
+      const rooms = roomOptionsFrom(beds, () => true);
+      return {
+        id,
+        code: beds[0].unitCode,
+        // A bed only qualifies here because its tenancy has ENDED by the
+        // move-in date — it may still show "occupied" if nobody has
+        // formally checked that tenant out yet. Worth a heads-up, not a
+        // block.
+        warnings: beds
+          .filter((bed) => bed.status === "occupied")
+          .map(
+            (bed) =>
+              `${bed.legacyCode || `Room ${bed.roomLabel}`} — current tenant's agreement ends ${dateLabel(bed.agreementEndDate)}, not yet checked out`,
+          ),
+        suggestedRent: rooms.reduce((sum, room) => sum + (room.rate ?? 0), 0),
+        missingRate: rooms.some((room) => room.rate === null),
+        roomCount: rooms.length,
+      };
+    })
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+  // The groupTenants state above sizes itself to the saved data's own
+  // extent, which can be shorter than the unit's actual room count
+  // (trailing rooms nobody filled in aren't stored at all). This one-time
+  // effect brings it up to the unit's real room count on mount, exactly
+  // like the select's own onChange does on every later change —
+  // deliberately empty deps: it exists only to correct the initial size
+  // once, not to re-run on every render (wholeUnitOptions is recomputed
+  // fresh every render) or every unitId change (the onChange handler
+  // already covers that).
+  useEffect(() => {
+    if (kind !== "group" || !editingReservation) return;
+    const option = wholeUnitOptions.find((opt) => opt.id === unitId);
+    if (!option) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGroupTenants((current) =>
+      Array.from(
+        { length: option.roomCount },
+        (_, i) => current[i] ?? blankGroupTenantSlot(),
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const categories = [
     ...new Set(blockedBeds.map((bed) => String(bed.roomLabel))),
   ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -4283,6 +4721,7 @@ function ReservationEditor({
             // never reaches FormData — so the full date tracked in state
             // (rounded to the 1st) is what actually goes out here.
             targetMoveInDate: date,
+            ...(kind === "group" ? { groupTenants } : {}),
           },
           editingReservation ? "Reservation updated" : "Reservation created",
         );
@@ -4377,14 +4816,16 @@ function ReservationEditor({
             <option value="female">Female student</option>
           </select>
         </label>
-        <label>
-          Date of birth
-          <DateField
-            name="dateOfBirth"
-            type="date"
-            defaultValue={editingReservation?.dateOfBirth || ""}
-          />
-        </label>
+        {!(kind === "group" && isCompanyBooking) && (
+          <label>
+            Date of birth
+            <DateField
+              name="dateOfBirth"
+              type="date"
+              defaultValue={editingReservation?.dateOfBirth || ""}
+            />
+          </label>
+        )}
         <label>
           Phone number
           <input
@@ -4517,14 +4958,30 @@ function ReservationEditor({
         {kind === "group" && (
           <>
             <label>
-              Representative type
+              Booking type
               <select
                 name="representativeType"
-                defaultValue={editingReservation?.representativeType || "person"}
+                value={representativeType}
+                onChange={(event) => setRepresentativeType(event.target.value)}
               >
-                <option value="person">Person</option>
-                <option value="company">Company</option>
-                <option value="institute">Institute</option>
+                <option value="person">Individual</option>
+                <option value="company">Agency or Company</option>
+                {/* Not offered as a choice for a new/changed booking, but a
+                    native <select> whose value matches no listed <option>
+                    silently falls back to selecting the first one ("person")
+                    — and a plain FormData submit would then send that
+                    fallback, silently rewriting a legacy 'institute' row to
+                    'person' on any save that doesn't touch this dropdown.
+                    This hidden option keeps 'institute' selectable (so the
+                    closed select correctly shows "Agency or Company" and
+                    submits 'institute' unchanged) without listing it when
+                    the dropdown is opened. See the design spec's Decisions
+                    section. */}
+                {representativeType === "institute" && (
+                  <option value="institute" hidden>
+                    Agency or Company
+                  </option>
+                )}
               </select>
             </label>
             <label>
@@ -4537,6 +4994,43 @@ function ReservationEditor({
                 defaultValue={editingReservation?.groupSize || 1}
               />
             </label>
+            {isCompanyBooking && (
+              <>
+                <label>
+                  Organisation name
+                  <input
+                    name="organisationName"
+                    placeholder="e.g. Acme Sdn Bhd"
+                    defaultValue={editingReservation?.organisationName || ""}
+                  />
+                </label>
+                <label>
+                  Company registration number
+                  <input
+                    name="companyRegistrationNo"
+                    placeholder="e.g. 202301012345"
+                    defaultValue={editingReservation?.companyRegistrationNo || ""}
+                  />
+                </label>
+                <label className="wide">
+                  Organisation address
+                  <input
+                    name="organisationAddress"
+                    placeholder="e.g. 12 Jalan Ampang, Kuala Lumpur"
+                    defaultValue={editingReservation?.organisationAddress || ""}
+                  />
+                </label>
+                <label>
+                  Company email
+                  <input
+                    name="companyEmail"
+                    type="email"
+                    placeholder="e.g. admin@acme.com"
+                    defaultValue={editingReservation?.companyEmail || ""}
+                  />
+                </label>
+              </>
+            )}
           </>
         )}
         <div className="form-actions wide">
@@ -4627,28 +5121,184 @@ function ReservationEditor({
           </label>
         )}
         {kind === "group" ? (
-          <label className="wide">
-            Unit / house to reserve
-            <select
-              name="preferredUnitId"
-              required
-              value={unitId}
-              disabled={!hostelId}
-              onChange={(event) => setUnitId(event.target.value)}
-            >
-              <option value="">
-                {hostelId ? "Select a unit" : "Select a hostel first"}
-              </option>
-              {unitOptions.map(([id, code]) => (
-                <option key={id} value={id}>
-                  {code}
+          <>
+            <label className="wide">
+              Unit / house to reserve
+              <select
+                name="preferredUnitId"
+                required
+                value={unitId}
+                disabled={!hostelId}
+                onChange={(event) => {
+                  setUnitId(event.target.value);
+                  const option = wholeUnitOptions.find(
+                    (opt) => opt.id === event.target.value,
+                  );
+                  setWholeUnitRent(option ? option.suggestedRent : "");
+                  // Keep already-typed slots when the count doesn't shrink;
+                  // pad with blanks or truncate otherwise. Every field stays
+                  // optional either way — see the tenant-slot block below.
+                  const roomCount = option?.roomCount ?? 0;
+                  setGroupTenants((current) =>
+                    Array.from(
+                      { length: roomCount },
+                      (_, i) => current[i] ?? blankGroupTenantSlot(),
+                    ),
+                  );
+                }}
+              >
+                <option value="">
+                  {hostelId
+                    ? wholeUnitOptions.length
+                      ? "Select a unit"
+                      : "No unit is fully available for this move-in date"
+                    : "Select a hostel first"}
                 </option>
-              ))}
-            </select>
-            <small className="field-note">
-              The whole unit is reserved for this group.
-            </small>
-          </label>
+                {wholeUnitOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.code}
+                  </option>
+                ))}
+              </select>
+              <small className="field-note">
+                Only units where every room is vacant, or free by the move-in
+                date, are shown.
+              </small>
+            </label>
+            {(() => {
+              const selected = wholeUnitOptions.find(
+                (opt) => opt.id === unitId,
+              );
+              return selected?.warnings.length ? (
+                <div
+                  className="wide"
+                  style={{
+                    background: "#fef3c7",
+                    border: "1px solid #fde68a",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    color: "#92400e",
+                  }}
+                >
+                  {selected.warnings.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+              ) : null;
+            })()}
+            <label>
+              Monthly rent for the whole unit
+              <input
+                name="wholeUnitMonthlyRent"
+                type="number"
+                min="0"
+                value={wholeUnitRent}
+                onChange={(event) =>
+                  setWholeUnitRent(
+                    event.target.value === "" ? "" : Number(event.target.value),
+                  )
+                }
+              />
+              <small className="field-note">
+                {wholeUnitOptions.find((opt) => opt.id === unitId)?.missingRate
+                  ? "One or more rooms in this unit has no rate set — check before confirming. "
+                  : ""}
+                Defaults to the sum of the unit&apos;s room rates; edit for a
+                negotiated price.
+              </small>
+            </label>
+            <label>
+              Utilities (TNB & Air Selangor) billed to
+              <select
+                name="utilityBilledTo"
+                defaultValue={editingReservation?.utilityBilledTo || "tenant"}
+              >
+                <option value="tenant">Tenant</option>
+                <option value="company">Company</option>
+              </select>
+              <small className="field-note">
+                A record for staff only — does not change how electricity is
+                actually billed.
+              </small>
+            </label>
+            {groupTenants.length > 0 && (
+              <div
+                className="wide"
+                style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              >
+                <strong style={{ fontSize: "13px" }}>
+                  Tenants (optional — fill in as many as you already know)
+                </strong>
+                {groupTenants.map((slot, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1fr 1fr 1fr auto auto",
+                      gap: "6px",
+                      alignItems: "center",
+                    }}
+                  >
+                    <input
+                      placeholder={`Room ${index + 1} — full name`}
+                      value={slot.fullName}
+                      onChange={(event) =>
+                        updateGroupTenant(index, { fullName: event.target.value })
+                      }
+                    />
+                    <input
+                      placeholder="IC"
+                      value={slot.identityNo}
+                      onChange={(event) =>
+                        updateGroupTenant(index, { identityNo: event.target.value })
+                      }
+                    />
+                    <input
+                      placeholder="Contact"
+                      value={slot.contactNumber}
+                      onChange={(event) =>
+                        updateGroupTenant(index, { contactNumber: event.target.value })
+                      }
+                    />
+                    <select
+                      value={slot.gender}
+                      onChange={(event) =>
+                        updateGroupTenant(index, { gender: event.target.value })
+                      }
+                    >
+                      <option value="unspecified">Gender</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                    </select>
+                    <label style={{ fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <input
+                        type="checkbox"
+                        checked={slot.isStudent}
+                        onChange={(event) =>
+                          updateGroupTenant(index, { isStudent: event.target.checked })
+                        }
+                      />
+                      Student
+                    </label>
+                    <label style={{ fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <input
+                        type="radio"
+                        name="groupTenantPayer"
+                        checked={slot.isPayer}
+                        onChange={() =>
+                          setGroupTenants((current) =>
+                            current.map((s, i) => ({ ...s, isPayer: i === index })),
+                          )
+                        }
+                      />
+                      Payer
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         ) : (
           <>
             <label>

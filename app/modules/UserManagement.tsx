@@ -157,6 +157,23 @@ export function UserManagementModule({
                           >
                             Set password
                           </button>
+                          {user.roleKey === "tenant" && !user.lastLoginAt && (
+                            <button
+                              className="secondary compact"
+                              disabled={busy}
+                              onClick={() =>
+                                save(
+                                  {
+                                    action: "user-resend-setup-email",
+                                    userId: user.id,
+                                  },
+                                  "Setup email sent",
+                                )
+                              }
+                            >
+                              Resend setup email
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

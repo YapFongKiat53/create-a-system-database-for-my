@@ -23,9 +23,28 @@ export function AnnouncementsModule({
   busy: boolean;
 }) {
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
   const [announcementHostel, setAnnouncementHostel] = useState("");
   const [announcementBlock, setAnnouncementBlock] = useState("");
   const [announcementUnit, setAnnouncementUnit] = useState("");
+  const openCreate = () => {
+    setEditing(null);
+    setAnnouncementHostel("");
+    setAnnouncementBlock("");
+    setAnnouncementUnit("");
+    setModal(true);
+  };
+  const openEdit = (announcement: Row) => {
+    setEditing(announcement);
+    setAnnouncementHostel(String(announcement.hostelId ?? ""));
+    setAnnouncementBlock(String(announcement.blockCode || ""));
+    setAnnouncementUnit(String(announcement.unitId ?? ""));
+    setModal(true);
+  };
+  const closeModal = () => {
+    setModal(false);
+    setEditing(null);
+  };
   const selectedAnnouncementHostel = data.hostels.find(
     (hostel) => String(hostel.id) === announcementHostel,
   );
@@ -52,7 +71,7 @@ export function AnnouncementsModule({
           (permission: Row) =>
             permission.moduleKey === "announcements" && permission.canCreate,
         ) && (
-          <button className="primary" onClick={() => setModal(true)}>
+          <button className="primary" onClick={openCreate}>
             + New announcement
           </button>
         )}
@@ -93,25 +112,66 @@ export function AnnouncementsModule({
                 </b>
                 {a.expiresAt && <> · Expires {dateLabel(a.expiresAt)}</>}
                 {canPin && (
-                  <button
-                    type="button"
-                    className="link-button pin-toggle"
-                    disabled={busy}
-                    onClick={() =>
-                      save(
-                        {
-                          action: "announcement-pin",
-                          announcementId: a.id,
-                          pinned: !a.pinned,
-                        },
-                        a.pinned
-                          ? "Announcement unpinned"
-                          : "Announcement pinned to top",
-                      )
-                    }
-                  >
-                    {a.pinned ? "Unpin" : "Pin to top"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="link-button pin-toggle"
+                      disabled={busy}
+                      onClick={() => openEdit(a)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button pin-toggle"
+                      disabled={busy}
+                      onClick={() =>
+                        save(
+                          {
+                            action: "announcement-pin",
+                            announcementId: a.id,
+                            pinned: !a.pinned,
+                          },
+                          a.pinned
+                            ? "Announcement unpinned"
+                            : "Announcement pinned to top",
+                        )
+                      }
+                    >
+                      {a.pinned ? "Unpin" : "Pin to top"}
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button pin-toggle"
+                      disabled={busy}
+                      onClick={() => {
+                        const takingDown = a.status === "published";
+                        if (
+                          takingDown &&
+                          !confirm(
+                            `Take down "${a.title}"? Residents will stop seeing it. You can put it back later.`,
+                          )
+                        )
+                          return;
+                        save(
+                          {
+                            action: "announcement-status",
+                            announcementId: a.id,
+                            status: takingDown ? "archived" : "published",
+                          },
+                          takingDown
+                            ? "Announcement taken down"
+                            : "Announcement published",
+                        );
+                      }}
+                    >
+                      {a.status === "published"
+                        ? "Take down"
+                        : a.status === "draft"
+                          ? "Publish"
+                          : "Put back"}
+                    </button>
+                  </>
                 )}
               </footer>
             </article>
@@ -126,9 +186,9 @@ export function AnnouncementsModule({
       </section>
       {modal && (
         <Modal
-          title="New announcement"
+          title={editing ? "Edit announcement" : "New announcement"}
           kicker="AUDIENCE & PRIORITY"
-          onClose={() => setModal(false)}
+          onClose={closeModal}
           wide
         >
           <form
@@ -143,13 +203,31 @@ export function AnnouncementsModule({
                   : values.hostelId
                     ? "hostel"
                     : "all";
+              // The publish date field only shows minutes, so an untouched
+              // field is sent back as the stored value, not a truncated copy.
+              const publishAt =
+                editing &&
+                (!values.publishAt ||
+                  values.publishAt === String(editing.publishAt).slice(0, 16))
+                  ? editing.publishAt
+                  : values.publishAt;
               const ok = await save(
-                { action: "announcement", audienceType, ...values },
-                values.status === "draft"
-                  ? "Announcement saved as draft"
-                  : "Announcement published",
+                editing
+                  ? {
+                      action: "announcement-update",
+                      announcementId: editing.id,
+                      audienceType,
+                      ...values,
+                      publishAt,
+                    }
+                  : { action: "announcement", audienceType, ...values },
+                editing
+                  ? "Announcement updated"
+                  : values.status === "draft"
+                    ? "Announcement saved as draft"
+                    : "Announcement published",
               );
-              if (ok) setModal(false);
+              if (ok) closeModal();
             }}
           >
             <label>
@@ -221,7 +299,7 @@ export function AnnouncementsModule({
             </label>
             <label>
               Priority
-              <select name="priority">
+              <select name="priority" defaultValue={editing?.priority || "normal"}>
                 <option value="normal">Normal</option>
                 <option value="urgent">Urgent</option>
                 <option value="emergency">Emergency</option>
@@ -229,33 +307,50 @@ export function AnnouncementsModule({
             </label>
             <label>
               Status
-              <select name="status">
+              <select name="status" defaultValue={editing?.status || "published"}>
                 <option value="published">Publish</option>
                 <option value="draft">Save as draft</option>
+                {editing && <option value="archived">Taken down</option>}
               </select>
             </label>
             <label className="checkbox-field">
-              <input name="pinned" type="checkbox" /> Pin announcement
+              <input
+                name="pinned"
+                type="checkbox"
+                defaultChecked={Boolean(editing?.pinned)}
+              />{" "}
+              Pin announcement
             </label>
             <label>
               Publish date
-              <DateTimeField name="publishAt" />
+              <DateTimeField
+                name="publishAt"
+                defaultValue={
+                  editing ? String(editing.publishAt || "").slice(0, 16) : ""
+                }
+              />
             </label>
             <label>
               Expiry date
-              <DateField name="expiresAt" type="date" />
+              <DateField
+                name="expiresAt"
+                type="date"
+                defaultValue={
+                  editing?.expiresAt ? String(editing.expiresAt).slice(0, 10) : ""
+                }
+              />
             </label>
             <label className="wide">
               Title
-              <input name="title" required />
+              <input name="title" required defaultValue={editing?.title || ""} />
             </label>
             <label className="wide">
               Message
-              <textarea name="body" required />
+              <textarea name="body" required defaultValue={editing?.body || ""} />
             </label>
             <div className="form-actions wide">
               <button className="primary" disabled={busy}>
-                Publish announcement
+                {editing ? "Save changes" : "Publish announcement"}
               </button>
             </div>
           </form>

@@ -1,6 +1,12 @@
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import { getDb } from ".";
-import { appRoles, appUsers, rolePermissions, userSessions } from "./schema";
+import {
+  appRoles,
+  appUsers,
+  passwordSetupTokens,
+  rolePermissions,
+  userSessions,
+} from "./schema";
 
 export const SESSION_COOKIE = "hostel_session";
 const SESSION_DAYS = 7;
@@ -93,6 +99,74 @@ export async function destroySession(token: string) {
   await getDb()
     .delete(userSessions)
     .where(eq(userSessions.tokenHash, await sha256(token)));
+}
+
+const SETUP_TOKEN_HOURS = 24;
+
+/** Creates a one-time password-setup token and returns the raw value (stored only as a hash). */
+export async function createPasswordSetupToken(userId: number) {
+  const token = toBase64(crypto.getRandomValues(new Uint8Array(32)));
+  const expiresAt = new Date(
+    Date.now() + SETUP_TOKEN_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+  const db = getDb();
+  // A fresh "resend" invalidates anything still outstanding for this user,
+  // so only the most recently sent link ever works.
+  await db
+    .delete(passwordSetupTokens)
+    .where(eq(passwordSetupTokens.userId, userId));
+  await db
+    .insert(passwordSetupTokens)
+    .values({ tokenHash: await sha256(token), userId, expiresAt });
+  return token;
+}
+
+/**
+ * Claims an unused, unexpired setup token and returns its user id, or null.
+ * The claim is a single conditional UPDATE so two simultaneous requests can't
+ * both win, and the account must still be an active tenant: a link outlives
+ * later edits (role change, suspension), so eligibility is checked here rather
+ * than trusted from when the link was issued.
+ */
+export async function consumePasswordSetupToken(token: string) {
+  if (!token) return null;
+  const db = getDb();
+  const now = new Date().toISOString();
+  const claimed = (
+    await db
+      .update(passwordSetupTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(passwordSetupTokens.tokenHash, await sha256(token)),
+          isNull(passwordSetupTokens.usedAt),
+          gt(passwordSetupTokens.expiresAt, now),
+        ),
+      )
+      .returning({ userId: passwordSetupTokens.userId })
+  )[0];
+  if (!claimed) return null;
+  const eligible = (
+    await db
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .innerJoin(appRoles, eq(appUsers.roleId, appRoles.id))
+      .where(
+        and(
+          eq(appUsers.id, claimed.userId),
+          eq(appUsers.status, "active"),
+          eq(appRoles.roleKey, "tenant"),
+        ),
+      )
+  )[0];
+  return eligible ? claimed.userId : null;
+}
+
+/** Cancels every outstanding setup link for a user (e.g. after their account is edited). */
+export async function revokePasswordSetupTokens(userId: number) {
+  await getDb()
+    .delete(passwordSetupTokens)
+    .where(eq(passwordSetupTokens.userId, userId));
 }
 
 export function readSessionCookie(request: Request) {

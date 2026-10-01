@@ -1439,6 +1439,14 @@ export function StudentsModule({
   }
 
   const tenantRole = data.roles.find((role) => role.roleKey === "tenant");
+  // The server empties invoice data for roles without finance access; without
+  // this the Billing tab would claim a tenant has no bills at all.
+  const canViewFinance = Boolean(
+    data.currentUser?.permissions?.some(
+      (permission: Row) =>
+        permission.moduleKey === "finance" && permission.canView,
+    ),
+  );
   const loginFor = (studentId: number | string) =>
     data.users.find((user) => String(user.studentId) === String(studentId));
   // Agencies aren't a managed list — there is no table of them and most
@@ -2766,6 +2774,27 @@ export function StudentsModule({
                           ? `Last login ${dateLabel(loginFor(student.id)?.lastLoginAt)}`
                           : "Never signed in"}
                       </small>
+                      {!loginFor(student.id)?.lastLoginAt && (
+                        // No .button-row wrapper: its last-button hover is the
+                        // red "delete" style, wrong for a harmless resend.
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          style={{ marginLeft: "auto" }}
+                          disabled={busy}
+                          onClick={() =>
+                            save(
+                              {
+                                action: "user-resend-setup-email",
+                                userId: loginFor(student.id)?.id,
+                              },
+                              "Setup email sent",
+                            )
+                          }
+                        >
+                          Resend setup email
+                        </button>
+                      )}
                     </span>
                   </div>
                 ) : (
@@ -2805,22 +2834,29 @@ export function StudentsModule({
                       </button>
                     </div>
                     <p className="empty-copy wide">
-                      The student signs in with this email through the platform. No
-                      password is stored in this system.
+                      The student signs in with this email. They will receive an
+                      email with a link to set their own password, which you
+                      can resend later.
                     </p>
                   </form>
                 )}
               </section>
             )}
 
-            {drawerRecordsTab === "billing" && (
-              <StudentBilling
-                data={data}
-                student={student}
-                openInvoiceId={openInvoiceId}
-                setOpenInvoiceId={setOpenInvoiceId}
-              />
-            )}
+            {drawerRecordsTab === "billing" &&
+              (canViewFinance ? (
+                <StudentBilling
+                  data={data}
+                  student={student}
+                  openInvoiceId={openInvoiceId}
+                  setOpenInvoiceId={setOpenInvoiceId}
+                />
+              ) : (
+                <p className="empty-copy">
+                  Billing details are only visible to roles with billing
+                  access.
+                </p>
+              ))}
 
             {drawerRecordsTab === "rate" && (
               <StudentRateChanges
@@ -3015,8 +3051,8 @@ export function StudentsModule({
               </div>
               <p className="auto-address-note">
                 Optional — if filled in, a tenant login is created for this
-                email once the profile is saved. No password is stored in
-                this system.
+                email once the profile is saved, and the student is emailed a
+                link to set their own password.
               </p>
             </div>
             <div className="drawer-subsection wide">

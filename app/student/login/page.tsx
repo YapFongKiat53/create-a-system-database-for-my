@@ -2,9 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { BASE_PATH } from "../basePath";
+import { BASE_PATH } from "../../basePath";
 
-export default function LoginPage() {
+export default function StudentLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -71,16 +71,13 @@ export default function LoginPage() {
           <span className="brand-mark">HO</span>
           <div>
             <strong>Hostel Operations</strong>
-            <small>Internal management system</small>
+            <small>Resident portal</small>
           </div>
         </div>
         <h1>Sign in</h1>
         <p className="login-intro">
-          Staff accounts open the management system. Student accounts open the
-          resident portal.
-        </p>
-        <p className="login-intro">
-          Residents: use the <Link href="/student/login">resident sign-in</Link>
+          Sign in to view your bills, submit maintenance requests and read
+          announcements.
         </p>
         {error && <div className="login-error">{error}</div>}
         <form onSubmit={submit}>
@@ -110,7 +107,11 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="login-foot">
-          Forgot your password? Ask an administrator to set a new one for you.
+          Haven&apos;t set your password yet? Use the link in your setup email.
+          Forgot it? Ask the hostel office to send a new one.
+        </p>
+        <p className="login-foot">
+          <Link href="/login">Staff sign in</Link>
         </p>
       </div>
     </div>

@@ -69,6 +69,20 @@ export async function notifyUser(db: Db, userId: number, input: NotifyInput) {
   await notify(db, { ...input, recipientUserIds: [userId] });
 }
 
+// Three of the student-portal notification triggers know a studentId, not
+// a userId — this resolves the tenant's own login account and reuses
+// notifyUser. A student with no linked/active login account (shouldn't
+// happen once the portal is in use, but possible for older data) is
+// silently skipped rather than thrown — a missing notification isn't worth
+// failing the staff action that triggered it.
+export async function notifyStudent(db: Db, studentId: number, input: NotifyInput) {
+  const [user] = await db
+    .select({ id: appUsers.id })
+    .from(appUsers)
+    .where(and(eq(appUsers.studentId, studentId), eq(appUsers.status, "active")));
+  if (user) await notifyUser(db, user.id, input);
+}
+
 export async function getNotificationSummary(db: Db, userId: number) {
   const [unread, recent] = await Promise.all([
     db
@@ -83,6 +97,16 @@ export async function getNotificationSummary(db: Db, userId: number) {
       .limit(15),
   ]);
   return { unreadCount: unread.length, recent };
+}
+
+// The bell only carries the latest 15; the Notifications page shows more.
+export async function listNotifications(db: Db, userId: number, limit = 200) {
+  return db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.recipientUserId, userId))
+    .orderBy(desc(notifications.createdAt), desc(notifications.id))
+    .limit(limit);
 }
 
 export async function markNotificationRead(

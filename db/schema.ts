@@ -164,6 +164,11 @@ export const studentProfiles = pgTable("student_profiles", {
   agency: text("agency").notNull().default(""),
   remarks: text("remarks").notNull().default(""),
   status: text("status").notNull().default("active"),
+  // Not read anywhere outside the whole-unit booking flow yet (the
+  // creation-time tenant list and the per-room claim form) — every
+  // existing row defaults to true, the overwhelming majority case, so
+  // nothing else in the app changes behaviour.
+  isStudent: boolean("is_student").notNull().default(true),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
@@ -172,9 +177,12 @@ export const studentProfiles = pgTable("student_profiles", {
 export const accommodationAssignments = pgTable("accommodation_assignments", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   sourceKey: text("source_key").notNull().unique(),
-  studentId: bigint("student_id", { mode: "number" })
-    .notNull()
-    .references(() => studentProfiles.id),
+  // Null while a whole-unit booking's room is held but nobody has been
+  // named for it yet ("pending-occupant" status below). Every other status
+  // (active, ended, ...) always has a real student.
+  studentId: bigint("student_id", { mode: "number" }).references(
+    () => studentProfiles.id,
+  ),
   bedSpaceId: bigint("bed_space_id", { mode: "number" })
     .notNull()
     .references(() => bedSpaces.id),
@@ -200,6 +208,9 @@ export const accommodationAssignments = pgTable("accommodation_assignments", {
   checkOutMeter: doublePrecision("check_out_meter"),
   sourceReservationId: bigint("source_reservation_id", { mode: "number" }),
   remarks: text("remarks").notNull().default(""),
+  // "pending-occupant" (studentId null): a whole-unit booking has claimed
+  // this bed but nobody has been named yet. See docs/superpowers/specs/
+  // 2026-09-28-whole-unit-reservation-design.md.
   status: text("status").notNull().default("active"),
   // Set once staff mark that the student has applied to renew this
   // tenancy — clears the "ending soon, no renewal" flag on the room even
@@ -270,11 +281,52 @@ export const reservations = pgTable("reservations", {
   financeReviewedAt: text("finance_reviewed_at"),
   status: text("status").notNull().default("reserved"),
   convertedAt: text("converted_at"),
+  // Whole-unit bookings only: the agreed total monthly rent for the whole
+  // unit (defaults to the sum of its rooms' rates, editable by staff for a
+  // negotiated block price). Null for an individual booking.
+  wholeUnitMonthlyRent: doublePrecision("whole_unit_monthly_rent"),
+  // Agency/Company whole-unit bookings only — blank for an individual
+  // booking or an Individual-type group. The existing studentName/
+  // identityNo/contactNumber/email fields stay the company's own contact
+  // person; these four describe the organisation itself.
+  organisationName: text("organisation_name").notNull().default(""),
+  companyRegistrationNo: text("company_registration_no").notNull().default(""),
+  organisationAddress: text("organisation_address").notNull().default(""),
+  companyEmail: text("company_email").notNull().default(""),
+  // "company" | "tenant" — who the TNB/Air Selangor bill goes to. A label
+  // for staff only; it does not change how electricity is actually billed.
+  utilityBilledTo: text("utility_billed_to").notNull().default("tenant"),
   // Soft-cancel: status becomes "cancelled" and this is stamped, but the
   // row (and its payments/charges) stays — unlike reservation-delete, which
   // hard-deletes everything. Kept for accounting history and audit trail.
   cancelledAt: text("cancelled_at"),
   notes: text("notes").notNull().default(""),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
+// The up-front, optional tenant list a whole-unit booking can be created
+// with — see docs/superpowers/specs/2026-09-30-whole-unit-company-tenant-
+// details-design.md. Only ever holds rows for slots staff actually filled
+// in (a blank slot is never inserted at all), and only while the booking is
+// still "reserved" — confirming the unit consumes these rows into real
+// accommodation_assignments/student_profiles rows and deletes them.
+export const reservationGroupTenants = pgTable("reservation_group_tenants", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  reservationId: bigint("reservation_id", { mode: "number" })
+    .notNull()
+    .references(() => reservations.id),
+  // Position among the unit's rooms at the time this was saved (0-based) —
+  // used only to match a slot to a bed when confirming. Can have gaps
+  // (e.g. only slots 0 and 2 filled), since a blank slot is never stored.
+  slotIndex: bigint("slot_index", { mode: "number" }).notNull(),
+  fullName: text("full_name").notNull().default(""),
+  identityNo: text("identity_no").notNull().default(""),
+  contactNumber: text("contact_number").notNull().default(""),
+  gender: text("gender").notNull().default("unspecified"),
+  isStudent: boolean("is_student").notNull().default(true),
+  isPayer: boolean("is_payer").notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),
@@ -835,6 +887,19 @@ export const userSessions = pgTable("user_sessions", {
     .notNull()
     .references(() => appUsers.id),
   expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(CURRENT_TIMESTAMP)::text`),
+});
+
+export const passwordSetupTokens = pgTable("password_setup_tokens", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  userId: bigint("user_id", { mode: "number" })
+    .notNull()
+    .references(() => appUsers.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)::text`),

@@ -4,6 +4,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, InputHTMLAttributes, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BASE_PATH } from "../basePath";
 
 export type Row = Record<string, any>;
@@ -16,6 +18,7 @@ export type Data = {
   services: Row[];
   reservations: Row[];
   students: Row[];
+  roommates: { studentId: number; fullName: string }[];
   studentRateChanges: Row[];
   depositAdjustments: Row[];
   pastTenancies: Row[];
@@ -892,10 +895,12 @@ export function AttachmentGrid({
   attachments,
   onDeleted,
   compact = false,
+  canDelete = () => true,
 }: {
   attachments: Row[];
   onDeleted: () => void;
   compact?: boolean;
+  canDelete?: (attachment: Row) => boolean;
 }) {
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
   const lightbox = useLightbox();
@@ -957,14 +962,16 @@ export function AttachmentGrid({
                 />
               )}
             </button>
-            <button
-              type="button"
-              className="secondary compact attachment-delete"
-              disabled={deletingId === attachment.id}
-              onClick={() => handleDelete(attachment.id)}
-            >
-              Delete
-            </button>
+            {canDelete(attachment) && (
+              <button
+                type="button"
+                className="secondary compact attachment-delete"
+                disabled={deletingId === attachment.id}
+                onClick={() => handleDelete(attachment.id)}
+              >
+                Delete
+              </button>
+            )}
           </figure>
         ))}
       </div>
@@ -976,14 +983,16 @@ export function AttachmentGrid({
       {documents.map((attachment) => (
         <figure key={attachment.id} className="attachment-thumb">
           <DocumentTile attachment={attachment} />
-          <button
-            type="button"
-            className="secondary compact attachment-delete"
-            disabled={deletingId === attachment.id}
-            onClick={() => handleDelete(attachment.id)}
-          >
-            Delete
-          </button>
+          {canDelete(attachment) && (
+            <button
+              type="button"
+              className="secondary compact attachment-delete"
+              disabled={deletingId === attachment.id}
+              onClick={() => handleDelete(attachment.id)}
+            >
+              Delete
+            </button>
+          )}
         </figure>
       ))}
     </div>
@@ -1116,6 +1125,70 @@ export function SuspiciousConfirm({
         <small>{message}</small>
       </span>
     </label>
+  );
+}
+
+const PORTAL_TABS = [
+  { href: "/student", label: "My room", icon: "home" },
+  { href: "/student/billing", label: "Billing", icon: "receipt" },
+  { href: "/student/maintenance", label: "Maintenance", icon: "wrench" },
+  { href: "/student/announcements", label: "Announcements", icon: "megaphone" },
+] as const;
+
+const PORTAL_TAB_ICON_PATHS: Record<string, string> = {
+  home: "M4 11.5 12 4l8 7.5M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9",
+  receipt: "M6 3h12v18l-3-2-3 2-3-2-3 2V3zM8 8h8M8 12h8M8 16h5",
+  wrench: "M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.7 2.7-2-2z",
+  megaphone: "M3 11v2a2 2 0 0 0 2 2h1l3 5V4l-3 5H5a2 2 0 0 0-2 2zM14 8a5 5 0 0 1 0 8M17 5a9 9 0 0 1 0 14",
+};
+
+function PortalTabIcon({ name }: { name: string }) {
+  return (
+    <svg
+      viewBox="0 0 22 22"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={PORTAL_TAB_ICON_PATHS[name]} />
+    </svg>
+  );
+}
+
+export function PortalTabBar({
+  unread = {},
+}: {
+  unread?: { billing?: boolean; maintenance?: boolean };
+}) {
+  const pathname = usePathname();
+  return (
+    <nav className="portal-tabbar">
+      {PORTAL_TABS.map((tab) => {
+        const active =
+          tab.href === "/student"
+            ? pathname === "/student"
+            : pathname?.startsWith(tab.href);
+        const dot =
+          (tab.href === "/student/billing" && unread.billing) ||
+          (tab.href === "/student/maintenance" && unread.maintenance);
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className={`portal-tab${active ? " is-active" : ""}`}
+          >
+            <span className="portal-tab-icon">
+              <PortalTabIcon name={tab.icon} />
+              {dot && <span className="portal-tab-dot" aria-hidden="true" />}
+            </span>
+            <small>{tab.label}</small>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
